@@ -14,9 +14,10 @@ usage() {
   cat <<'EOF'
 Usage: setup.sh [--dir PATH] [--skills home|folder] [--agents LIST] [--refresh-skills] [--yes]
 
-  --dir PATH         install folder (default ~/edgeconnect, or $EDGECONNECT_HOME)
-  --skills home      install the skills for your user, for every project (default)
-  --skills folder    install the skills inside the install folder only
+  --skills folder    1) everything in one folder, skills used only there (default)
+  --skills home      2) skills for your user in ~/, for every project
+  --dir PATH         the install folder (default: the current folder for 1, ~/edgeconnect for 2,
+                     or $EDGECONNECT_HOME)
   --agents LIST      agents for the skills, comma-separated (e.g. claude-code,codex),
                      instead of choosing them in the skills installer
   --refresh-skills   reinstall skills that are already installed, from main
@@ -24,14 +25,14 @@ Usage: setup.sh [--dir PATH] [--skills home|folder] [--agents LIST] [--refresh-s
 EOF
 }
 
-ROOT="${EDGECONNECT_HOME:-$HOME/edgeconnect}"
+ROOT_GIVEN="${EDGECONNECT_HOME:-}"
 SCOPE=""
 REFRESH=0
 AGENTS=""
 ASSUME_YES=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --dir) ROOT="${2:?--dir needs a path}"; shift 2 ;;
+    --dir) ROOT_GIVEN="${2:?--dir needs a path}"; shift 2 ;;
     --skills) SCOPE="${2:?--skills needs home or folder}"; shift 2 ;;
     --agents) AGENTS="${2:?--agents needs a list}"; shift 2 ;;
     --refresh-skills) REFRESH=1; shift ;;
@@ -67,16 +68,31 @@ for candidate in python3 python; do
 done
 [ -n "$PYTHON" ] || die "Python 3.9 or later with the venv module is required (on Debian/Ubuntu: apt install python3-venv)"
 
-ROOT="$(ask "Install folder" "$ROOT")"
-case "$ROOT" in "~"|"~/"*) ROOT="$HOME${ROOT#\~}" ;; esac
 if [ -z "$SCOPE" ]; then
-  SCOPE="$(ask "Install the skills for your user in ~/ (home) or only inside $ROOT (folder)?" "home")"
+  if [ "$ASSUME_YES" -eq 0 ] && [ "$HAVE_TTY" -eq 1 ]; then
+    printf '\nWhere should the agent skills go?\n  1) Only in one folder: agents started in that folder use them\n  2) For your user (~/): agents use them in every project\n' >/dev/tty
+  fi
+  SCOPE="$(ask "Choose 1 or 2" "1")"
 fi
 case "$SCOPE" in
-  home|global|"~"|"~/") SCOPE=home ;;
-  folder|project|dir|same) SCOPE=folder ;;
-  *) die "--skills must be home or folder, not $SCOPE" ;;
+  1|folder|project|dir|same) SCOPE=folder ;;
+  2|home|global|"~"|"~/") SCOPE=home ;;
+  *) die "choose 1 (one folder) or 2 (home), not $SCOPE" ;;
 esac
+if [ -n "$ROOT_GIVEN" ]; then
+  ROOT="$ROOT_GIVEN"
+elif [ "$SCOPE" = folder ] && [ "$PWD" != "$HOME" ]; then
+  ROOT="$PWD"  # "this folder": where the user ran the script
+else
+  ROOT="$HOME/edgeconnect"
+fi
+if [ "$SCOPE" = folder ]; then
+  ROOT="$(ask "Which folder? The toolkit and the skills go there" "$ROOT")"
+else
+  ROOT="$(ask "Which folder for the toolkit? (the skills go in ~/)" "$ROOT")"
+fi
+case "$ROOT" in "~"|"~/"*) ROOT="$HOME${ROOT#\~}" ;; esac
+mkdir -p "$ROOT" && ROOT="$(cd "$ROOT" && pwd)" || die "cannot use the folder $ROOT"
 PRECONFIG_SCRIPTS="$ROOT/edgeconnect-preconfig/skills/building-edgeconnect-preconfig-templates/scripts"
 
 say "Repositories (main) in $ROOT"
