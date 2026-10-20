@@ -1,0 +1,33 @@
+edgeconnect-preconfig
+Copyright 2026 Crypto-Gi (https://github.com/Crypto-Gi)
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Independent project, no affiliation
+-----------------------------------
+This is an independent open-source project. It is not made, sponsored,
+endorsed or supported by Hewlett Packard Enterprise Company or any of its
+affiliates. Do not contact HPE support about it.
+
+HPE, Aruba, Aruba Networks, EdgeConnect, Silver Peak and related names and
+logos are trademarks of Hewlett Packard Enterprise Company or its affiliates.
+They are used here only to describe what this software works with.
+
+Bundled Orchestrator default templates
+--------------------------------------
+skills/building-edgeconnect-preconfig-templates/references/default-templates/
+holds the default preconfiguration templates that HPE Aruba EdgeConnect
+Orchestrator returns from GET /gms/appliance/preconfiguration/default, one
+file per Orchestrator release, exported from the authors' own lab. They are
+included unmodified so the toolkit can work offline; the example values in
+them (addresses, serial numbers, contacts) are Orchestrator's own examples.
+
+No warranty, no liability
+-------------------------
+As sections 7 and 8 of the Apache License 2.0 state, this software is
+provided "AS IS", without warranties or conditions of any kind, and no
+contributor is liable for any damages arising from its use, including
+network outages, configuration loss or data exposure. You are responsible
+for every preconfiguration you validate, upload or apply with it, whether
+by you or by an AI assistant using it. Test in a lab first, and review each
+preconfiguration before you approve the upload.

@@ -1,0 +1,10 @@
+.env
+.venv
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+preconfig-output
+preconfig-output/
+preconfig-work
+preconfig-work/

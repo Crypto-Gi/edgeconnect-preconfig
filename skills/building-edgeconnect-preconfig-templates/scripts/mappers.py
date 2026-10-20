@@ -1,0 +1,1011 @@
+"""Section mappers: captured appliance data -> preconfig section values.
+
+Each mapper takes a Ctx and returns the section value, or None when the source does not use the feature (the ledger says why).
+Rules shared by all mappers:
+  * Source objects marked gms_marked / gmsMarked are created by Orchestrator services (overlay manager, SSE, ...). They are not
+    intent, so they are skipped and ledgered as `orchestrator-managed`.
+  * Source keys a mapper does not consume are reported in the ledger (`unmapped-source-key`), so nothing disappears silently.
+  * IDs are resolved to names (label, zone, segment, role). Empty strings become null (key present, no value).
+  * Secret values arrive redacted (`<SECRET:path>`); they stay as that placeholder in reference.yaml and become empty CSV cells.
+Every mapping is checked against the validator (check.py --validate); evidence for a mapping is a validated example.
+"""
+import re
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+ADMIN = {True: "Up", False: "Down"}
+
+
+def nul(value: Any) -> Any:
+    return None if value in ("", None) else value
+
+
+def managed(item: Any) -> bool:
+    return isinstance(item, dict) and bool(item.get("gms_marked") or item.get("gmsMarked"))
+
+
+class Ctx:
+    def __init__(self, cap: Any, notes: List[Dict[str, Any]]) -> None:
+        self.cap, self.notes = cap, notes
+        self.nepk = cap.run["appliance"]["nePk"]
+        dep = cap.data("deployment") or {}
+        cfg = dep.get("sysConfig") or {}  # `or`: keys can be present but null
+        self.labels = {str(l["id"]): l["name"] for side in (cfg.get("ifLabels") or {}).values() for l in side or []}
+        self.vrfs = {str(v["id"]): v["name"] for v in cfg.get("vrfs") or []}
+        self.zones = {vrf: {str(z["id"]): z["name"] for z in m.values()} if isinstance(m, dict) else {} for vrf, m in (cfg.get("vrfZonesMap") or {}).items()}
+        self.roles = {str(r["id"]): r["name"] for r in cfg.get("roles") or []}
+
+    def data(self, ident: str, prefer: str = "live") -> Any:
+        return self.cap.data(ident, prefer)
+
+    def note(self, item: str, disposition: str, target: str = "", why: str = "") -> None:
+        entry = {"item": item, "disposition": disposition, "target": target, "note": why}
+        if entry not in self.notes:  # route_list runs once per check and once to build, so its notes repeat
+            self.notes.append(entry)
+
+    def label(self, ident: Any) -> Optional[str]:
+        return self.labels.get(str(ident)) if str(ident) not in ("", "None") else None
+
+    def segment(self, vrf: Any) -> Optional[str]:
+        return self.vrfs.get(str(vrf))
+
+    def zone(self, vrf: Any, zone: Any) -> Optional[str]:
+        return self.zones.get(str(vrf), {}).get(str(zone))
+
+    def role(self, ident: Any) -> Optional[str]:
+        name = self.roles.get(str(ident))
+        return None if name in (None, "default") else name
+
+    def unmapped(self, item: str, source: Dict[str, Any], used: set, target: str) -> None:
+        left = sorted(k for k in source if k not in used and k not in ("gms_marked", "gmsMarked", "self"))
+        if left:
+            self.note(item, "unmapped-source-key", target, "source keys not mapped: " + ", ".join(left))
+
+
+def vrf_dict(ctx: Ctx, ident: str, default_only: bool = True) -> Any:
+    return ctx.data(ident)
+
+
+def m_ospfSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    all_systems = ctx.data("ospf-system-all-vrfs") or {}
+    if any(vrf != "0" and s.get("enable") for vrf, s in all_systems.items()):
+        ctx.note("ospf-system", "default-omitted", "ospfSystemConfig", "non-default segment OSPF exists, so Default segment OSPF is included in segmentOspfConfig (Orchestrator ignores ospfSystemConfig when segmentOspfConfig is present)")
+        return None
+    system, areas, ifs = ctx.data("ospf-system"), ctx.data("ospf-areas"), ctx.data("ospf-interfaces")
+    if not system or (not system.get("enable") and not ifs):
+        ctx.note("ospf-system", "default-omitted", "ospfSystemConfig", "OSPF disabled and no interfaces")
+        return None
+    out: Dict[str, Any] = {"enable": system["enable"], "routerId": nul(system.get("routerId")), "redistMapToOspf": nul(system.get("redistMapToOSPF")), "opaqueEnable": system.get("opaque_enable")}
+    ctx.unmapped("ospf-system", system, {"enable", "routerId", "redistMapToOSPF", "opaque_enable"}, "ospfSystemConfig")
+    out["areas"] = [{"areaId": area, "areaType": a["area_type"], "redist": a["redist"], "summary": a["summary"], "translatorRole": a["translator_role"]}
+                    for area, a in sorted((areas or {}).get("0", {}).items())]
+    out["interfaces"] = []
+    for name, i in sorted((ifs or {}).items()):
+        out["interfaces"].append({"interfaceName": name, "areaId": i["area"], "cost": i["cost"], "priority": i["priority"], "adminStatus": ADMIN[bool(i["adminStatus"])],
+                                  "helloInterval": i["helloInterval"], "deadInterval": i["deadInterval"], "transmitDelay": i["transmitDelay"], "retransmitInterval": i["retransmitInterval"],
+                                  "authentication": i["authType"], "authenticationKey": nul(i["authKey"]), "md5Key": i["md5Key"], "md5Password": nul(i["md5Password"]),
+                                  "comment": nul(i["comment"]), "bfdEnabled": i["bfdDesired"]})
+        ctx.unmapped("ospf-interfaces[{}]".format(name), i, {"area", "cost", "priority", "adminStatus", "helloInterval", "deadInterval", "transmitDelay", "retransmitInterval",
+                                                            "authType", "authKey", "md5Key", "md5Password", "comment", "bfdDesired"}, "ospfSystemConfig.interfaces")
+    ctx.note("ospf-system, ospf-areas, ospf-interfaces", "mapped", "ospfSystemConfig", "default VRF only; interface adminStatus true/false written as Up/Down")
+    return out
+
+
+def m_loopbackInterface(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    source = ctx.data("loopbacks") or {}
+    items = [(k, v) for k, v in sorted(source.items()) if not managed(v)]
+    skipped = len(source) - len(items)
+    if skipped:
+        ctx.note("loopbacks", "orchestrator-managed", "loopbackInterface", "{} loopbacks created by Orchestrator services (gms_marked)".format(skipped))
+    if not items:
+        return None
+    out = [{"interfaceId": k, "adminStatus": ADMIN[bool(v["admin"])], "ipAddressMask": "{}/{}".format(v["ipaddr"], v["nmask"]), "interfaceLabel": ctx.label(v["label"]),
+            "zone": ctx.zone(v["vrf_id"], v["zone"]), "role": ctx.role(v.get("role_id", 0)), "segment": ctx.segment(v["vrf_id"])} for k, v in items]
+    ctx.note("loopbacks", "mapped", "loopbackInterface", "{} loopbacks".format(len(out)))
+    return {"loopbacks": out}
+
+
+def m_linkAggregation(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    source = ctx.data("link-aggregation") or {}
+    if not source:
+        return None
+    groups = [{"channelGroup": k, "interfaces": v["portlist"], "mtu": v["mtu"], "mode": v["mode"], "lacpRate": v["lacp_rate"], "lacpSystemPriority": v["lacp_sys_prio"],
+               "lacpComment": nul(v["comment"])} for k, v in sorted(source.items())]
+    for k, v in source.items():
+        ctx.unmapped("link-aggregation[{}]".format(k), v, {"portlist", "mtu", "mode", "lacp_rate", "lacp_sys_prio", "comment"}, "linkAggregation")
+    ctx.note("link-aggregation", "mapped", "linkAggregation", "{} bonded interfaces; isForceDelete has no source and is omitted".format(len(groups)))
+    return {"linkAggregationGroups": groups}
+
+
+def m_segmentBfdConfigs(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
+    source = ctx.data("bfd-vrfs") or {}
+    out = [{"segment": ctx.segment(k), "enable": v["enable"], "minRxInterval": v["minRxInterval"], "minTxInterval": v["minTxInterval"], "detectMultiplier": v["detectMultiplier"]}
+           for k, v in sorted(source.items()) if v.get("enable")]
+    if not out:
+        ctx.note("bfd-vrfs", "default-omitted", "segmentBfdConfigs", "BFD disabled in every segment")
+        return None
+    ctx.note("bfd-vrfs", "mapped", "segmentBfdConfigs", "{} segments with BFD enabled".format(len(out)))
+    return out
+
+
+def m_customApplianceTags(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    source = ctx.data("custom-tags") or {}
+    tags = [{"tagId": int(k), "key": v["name"], "value": v["value"]} for k, v in sorted(source.items(), key=lambda kv: int(kv[0])) if v.get("name")]
+    if not tags:
+        ctx.note("custom-tags", "default-omitted", "customApplianceTags", "no tag has a name")
+        return None
+    ctx.note("custom-tags", "mapped", "customApplianceTags", "{} named tags".format(len(tags)))
+    return {"customApplianceTagsInterfaces": tags}
+
+
+def m_inboundPortForwarding(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    raw = ctx.data("port-forwarding") or []
+    ha_rules = [r for r in raw if r.get("comment") == "HA rule"]
+    if ha_rules:
+        ctx.note("port-forwarding", "orchestrator-managed", "inboundPortForwarding", "{} rules with comment 'HA rule' generated by EdgeHA".format(len(ha_rules)))
+    source = [r for r in raw if not managed(r) and r.get("comment") != "HA rule"]
+    if not source:
+        return None
+    wan_label_by_if = {}
+    for m in (ctx.data("deployment") or {}).get("modeIfs", []):
+        for a in m.get("applianceIPs", []):
+            if a.get("wanSide") and a.get("label"):
+                vlan = int(a.get("vlan") or 0)
+                ifname = "{}.{}".format(m["ifName"], vlan) if vlan > 0 else m["ifName"]
+                wan_label_by_if[ifname] = ctx.label(a["label"])
+    rules = []
+    seen = set()
+    for r in source:
+        src_if = r["srcIf"] or "any"
+        if str(src_if).isdigit():
+            src_if = ctx.label(src_if) or "any"
+        elif src_if.startswith("lan"):
+            src_if = wan_label_by_if.get(src_if) or "any"
+        entry = {"sourceIpSubnet": r["srcSubnet"], "destinationIpSubnet": r["destSubnet"], "translate": bool(r.get("targetIp")), "destinationPortRange": nul(r["destPort"]),
+                 "destinationProtocol": nul(r["protocol"]), "translateIp": nul(r["targetIp"]), "translatePortRange": nul(r["targetPort"]),
+                 "sourceInterface": src_if, "segment": ctx.segment(r["vrf_id"]), "comment": nul(r["comment"])}
+        sig = tuple(sorted(entry.items()))
+        if sig not in seen:
+            seen.add(sig)
+            rules.append(entry)
+        ctx.unmapped("port-forwarding", r, {"srcSubnet", "destSubnet", "destPort", "protocol", "targetIp", "targetPort", "srcIf", "vrf_id", "comment"}, "inboundPortForwarding")
+    ctx.note("port-forwarding", "mapped", "inboundPortForwarding", "{} rules".format(len(rules)))
+    return {"portForwardingRules": rules}
+
+
+def m_secureWebServicesConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    source = (ctx.data("secure-web-services") or {}).get("secureWebServicesConfig") or {}
+    defaults = {"urlClassificationConfig": {"hasURLClassification": False, "incrementalUpdate": False, "queryOnMiss": False, "urlReputation": 1},
+                "ipReputationConfig": {"hasIPReputation": False, "incrementalUpdate": False}}  # default template values
+    if not source.get("hasSecureWebServicesConfig") and all(source.get(k) in (None, v) for k, v in defaults.items()):
+        ctx.note("secure-web-services", "default-omitted", "secureWebServicesConfig", "feature not configured")
+        return None
+    ctx.note("secure-web-services", "mapped", "secureWebServicesConfig", "url classification and IP reputation")
+    return {"urlClassificationConfig": source["urlClassificationConfig"], "ipReputationConfig": source["ipReputationConfig"]}
+
+
+BGP_NEIGHBOR_USED = {"remote_as", "type", "enable", "hold", "ka", "lcl_interface", "next_hop_self", "password", "rtmap_inbound", "rtmap_outbound", "evpn", "bfd_desired", "directly_connected", "store_received_routes"}
+
+
+def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str, Any], segment: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    live = [(ip, n) for ip, n in sorted((neighbors or {}).items()) if not managed(n)]
+    if not system or (not system.get("enable") and not live):
+        return None
+    rt = (system.get("route_target") or {}).get("0") or {}
+    out: Dict[str, Any] = {}
+    if segment is not None:
+        out["segment"] = segment
+    out.update({"enable": system["enable"], "asn": system["asn"], "routerId": nul(system.get("rtr_id")), "enableGracefulRestart": system.get("graceful_restart_en"),
+                "maxRestartTime": system.get("max_restart_time"), "maxStalePathTime": system.get("stale_path_time"), "propagateAsPath": system.get("remote_as_path_advertise")})
+    if rt and (rt.get("import"), rt.get("export")) != ("0:0", "0:0"):
+        out["importRouteTarget"], out["exportRouteTarget"] = rt.get("import"), rt.get("export")
+    elif rt:
+        ctx.note(label, "default-omitted", "bgpSystemConfig.import/exportRouteTarget", "0:0 means no route target (the validator rejects ASN 0)")
+    ctx.unmapped(label, system, {"enable", "asn", "rtr_id", "graceful_restart_en", "max_restart_time", "stale_path_time", "remote_as_path_advertise", "route_target", "neighbor", "enable_gms_marked", "log_nbr_msgs"}, "bgpSystemConfig")
+    out["neighbors"] = []
+    for ip, n in live:
+        out["neighbors"].append({"peerIpAddress": ip, "sourceIpInterface": nul(n.get("lcl_interface")), "peerAsn": n["remote_as"], "peerType": n["type"], "enableNeighbor": n["enable"],
+                                 "softReconfiguration": n["store_received_routes"], "nextHopSelf": n["next_hop_self"], "inboundRouteMap": nul(n.get("rtmap_inbound")),
+                                 "outboundRouteMap": nul(n.get("rtmap_outbound")), "keepAlive": n["ka"], "holdTime": n["hold"], "password": nul(n.get("password")),
+                                 "enableEVPN": n.get("evpn", False), "bfdEnabled": n.get("bfd_desired", False), "peerAdjacency": "SINGLE_HOP" if n["directly_connected"] else "MULTI_HOP"})
+        ctx.unmapped("{} neighbor {}".format(label, ip), n, BGP_NEIGHBOR_USED, "bgpSystemConfig.neighbors")
+    return out
+
+
+def m_bgpSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    systems, neighbors = ctx.data("bgp-system-all-vrfs") or {}, ctx.data("bgp-neighbors-all-vrfs") or {}
+    if any(vrf != "0" and bgp_value(ctx, "check", systems[vrf], neighbors.get(vrf, {})) for vrf in systems):
+        ctx.note("bgp-system, bgp-neighbors", "default-omitted", "bgpSystemConfig", "non-default segment BGP exists, so Default segment BGP is included in segmentBgpSystems (Orchestrator ignores bgpSystemConfig when segmentBgpSystems is present)")
+        return None
+    out = bgp_value(ctx, "bgp-system", ctx.data("bgp-system"), ctx.data("bgp-neighbors"))
+    ctx.note("bgp-system, bgp-neighbors", "mapped" if out else "default-omitted", "bgpSystemConfig", "default segment" if out else "BGP disabled and no neighbors")
+    return out
+
+
+def m_segmentBgpSystems(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
+    systems, neighbors = ctx.data("bgp-system-all-vrfs") or {}, ctx.data("bgp-neighbors-all-vrfs") or {}
+    non_default = [vrf for vrf in sorted(systems) if vrf != "0" and bgp_value(ctx, "check", systems[vrf], neighbors.get(vrf, {}))]
+    if not non_default:
+        ctx.note("bgp-system-all-vrfs", "default-omitted", "segmentBgpSystems", "0 non-default segments with BGP")
+        return None
+    out = [v for vrf in sorted(systems) for v in [bgp_value(ctx, "bgp-system-all-vrfs[{}]".format(vrf), systems[vrf], neighbors.get(vrf, {}), ctx.segment(vrf))] if v]
+    for vrf in sorted(systems):
+        if not any(v.get("segment") == ctx.segment(vrf) for v in out):
+            ctx.note("bgp-system-all-vrfs[{}]".format(vrf), "default-omitted", "segmentBgpSystems", "segment {}: BGP disabled with no neighbors (ASN and router ID stay on the source only)".format(ctx.segment(vrf)))
+    ctx.note("bgp-system-all-vrfs", "mapped", "segmentBgpSystems", "{} segments with BGP (includes Default when non-default segments use BGP)".format(len(out)))
+    return out or None
+
+
+def m_vrrp(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    source = ctx.data("vrrp") or []
+    if not source:
+        return None
+    runtime = {"master_transitions", "masterip", "mode", "uptime", "vipowner", "vmac", "priorityState"}
+    out = []
+    for v in source:
+        entry: Dict[str, Any] = {
+            "groupId": v["groupId"], "interfaceName": v["interface"], "admin": v["enable"],
+            "virtualIpAddress": v["vipaddr"], "advertisementTimer": v["adv_timer"], "priority": v["priority"],
+            "tracker": v["tracker"], "version": v["version"], "preemption": v["preempt"],
+        }
+        if v.get("auth"):
+            entry["authenticationString"] = v["auth"]
+        if v.get("desc"):
+            entry["description"] = v["desc"]
+        entry.update({"packetTrace": v["pkt_trace"], "holddownTimer": v["holddown"]})
+        out.append(entry)
+        ctx.unmapped("vrrp group {}".format(v["groupId"]), v, {"groupId", "interface", "enable", "vipaddr", "adv_timer", "priority", "tracker", "version", "preempt", "auth", "desc", "pkt_trace", "holddown"} | runtime, "vrrp")
+    ctx.note("vrrp", "mapped", "vrrp", "{} groups; empty auth/desc omitted because null desc fails at apply time on ECOS".format(len(out)))
+    return {"vrrpEntries": out}
+
+
+def m_natPools(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
+    source = ctx.data("nat-pools") or {}
+    if not source:
+        return None
+    out = [{"name": v["name"], "segment": ctx.segment(v["segment"]), "direction": v["dir"], "poolIpSubnet": v["subnet"], "translatePorts": bool(v["pat"]), "comment": nul(v["comment"])}
+           for k, v in sorted(source.items(), key=lambda kv: int(kv[0]))]
+    for k, v in source.items():
+        ctx.unmapped("nat-pools[{}]".format(k), v, {"name", "segment", "dir", "subnet", "pat", "comment"}, "natPools")
+    ctx.note("nat-pools", "mapped", "natPools", "{} pools; the numeric pool id (source key) is not part of the preconfig".format(len(out)))
+    return out
+
+
+def m_bridgeGroups(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
+    source = ctx.data("bridge-groups") or {}
+    if not source:
+        return None
+    out = [{"bridgeGroup": k, "interfaces": v["portlist"], "mtu": v["mtu"], "adminStatus": ADMIN[bool(v["admin"])], "comment": nul(v["comments"])} for k, v in sorted(source.items())]
+    for k, v in source.items():
+        ctx.unmapped("bridge-groups[{}]".format(k), v, {"portlist", "mtu", "admin", "comments"}, "bridgeGroups")
+    ctx.note("bridge-groups", "mapped", "bridgeGroups", "{} groups".format(len(out)))
+    return out
+
+
+def m_segmentOspfConfig(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
+    systems, interfaces, areas = ctx.data("ospf-system-all-vrfs") or {}, ctx.data("ospf-interfaces-all-vrfs") or {}, ctx.data("ospf-areas") or {}
+    enabled = any(vrf != "0" and systems[vrf].get("enable") for vrf in systems)
+    for vrf in sorted(systems):
+        if not systems[vrf].get("enable") and (vrf != "0" or enabled):
+            ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "default-omitted", "segmentOspfConfig", "segment {}: OSPF disabled, not written".format(ctx.segment(vrf)))
+    if not enabled:
+        ctx.note("ospf-system-all-vrfs", "default-omitted", "segmentOspfConfig", "0 non-default segments with OSPF")
+        return None
+    out = []
+    for vrf in sorted(systems):
+        if not systems[vrf].get("enable"):
+            continue
+        s = systems[vrf]
+        bfd = sorted(n for n, i in interfaces.get(vrf, {}).items() if i.get("bfdDesired"))
+        if bfd:
+            ctx.note("ospf-interfaces-all-vrfs[{}]".format(vrf), "unmapped-source-key", "segmentOspfConfig.interfaces", "BFD is enabled on {} but segmentOspfConfig has no bfdEnabled field".format(", ".join(bfd)))
+        out.append({"segment": ctx.segment(vrf), "enable": s["enable"], "routerId": nul(s.get("routerId")), "redistMapToOspf": nul(s.get("redistMapToOSPF")), "opaqueEnable": s.get("opaque_enable"),
+                    "areas": [{"areaId": a, "areaType": v["area_type"], "redist": v["redist"], "summary": v["summary"], "translatorRole": v["translator_role"]} for a, v in sorted(areas.get(vrf, {}).items())],
+                    "interfaces": [{"interfaceName": n, "areaId": i["area"], "cost": i["cost"], "priority": i["priority"], "adminStatus": ADMIN[bool(i["adminStatus"])], "helloInterval": i["helloInterval"],
+                                    "deadInterval": i["deadInterval"], "transmitDelay": i["transmitDelay"], "retransmitInterval": i["retransmitInterval"], "authentication": i["authType"],
+                                    "authenticationKey": nul(i["authKey"]), "md5Key": i["md5Key"], "md5Password": nul(i["md5Password"]), "comment": nul(i["comment"])}
+                                   for n, i in sorted(interfaces.get(vrf, {}).items())]})
+    ctx.note("ospf-system-all-vrfs", "mapped", "segmentOspfConfig", "{} segments with OSPF (includes Default when non-default segments use OSPF)".format(len(out)))
+    return out or None
+
+
+def configured_route(ctx: Ctx, prefix: Any, next_hop: Any, if_name: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """The route as configured (subnets3/configured): (prefix entry with the advert flags, interface entry with the comment).
+    /subnets has no comment and reports advert_bgp/advert_ospf as false."""
+    entry = (((ctx.data("static-routes-configured") or {}).get("prefix") or {}).get(prefix) or {})
+    return entry, ((((entry.get("nhop") or {}).get(next_hop or "") or {}).get("interface") or {}).get(if_name or "") or {})
+
+
+def route_list(ctx: Ctx, entries: List[Dict[str, Any]], vrf: str) -> List[Dict[str, Any]]:
+    out = []
+    for e in entries:
+        st = e["state"]
+        if not (st.get("configured") and st.get("local")) or st.get("automatic"):
+            continue
+        conf = e.get("config") or {}
+        if managed(conf) or managed(st):  # Orchestrator services (third-party cloud integrations, ...) create these themselves
+            ctx.note("subnets", "orchestrator-managed", "localRoutes.routes", "skipped route {} created by Orchestrator (gms_marked)".format(st.get("prefix")))
+            continue
+        if not st.get("nextHop") and not st.get("ifName") and not conf:
+            ctx.note("subnets", "unresolved", "localRoutes.routes", "route {} has neither next hop nor interface in its state and no route config, so it is not written".format(st.get("prefix")))
+            continue
+        # The state shows next hop 0.0.0.0 or :: as empty and the interface in use; the route's config keeps what was set ("default" is any interface)
+        next_hop = st.get("nextHop") or conf.get("nextHop")
+        cfg_if = conf.get("ifName") or st.get("ifName")
+        if_name = None if cfg_if == "default" else cfg_if
+        if not next_hop:  # apply rejects it: "Next Hop cannot be empty when interface is specified"
+            ctx.note("subnets", "unresolved", "localRoutes.routes", "route {} on {} has no next hop; a preconfig route needs one, so it is not written".format(st.get("prefix"), if_name))
+            continue
+        zone_id = conf.get("zone_id", st.get("zone_id"))  # the state reports the zone of the interface in use
+        zone = None if str(zone_id) in ("65534", "") else ctx.zone(vrf, zone_id)
+        # subnets3/configured holds the Default segment only and ignores segment parameters (ECOS 9.6.2.1)
+        cfg_prefix, cfg = configured_route(ctx, st["prefix"], next_hop, cfg_if) if vrf == "0" else ({}, {})
+        if vrf != "0":
+            ctx.note("subnets-all-vrfs[{}]".format(vrf), "unresolved", "segmentLocalRoutes.routes", "route {}: advertise flags taken from route state, which for Default routes disagrees with the configured table".format(st["prefix"]))
+        route = {"routeIpSubnet": st["prefix"], "nextHop": nul(next_hop), "interfaceName": nul(if_name), "metric": st["metric"], "advertise": cfg_prefix.get("advert", st["advert"]),
+                 "advertiseToBgp": cfg_prefix.get("advert_bgp", st["advert_bgp"]), "advertiseToOspf": cfg_prefix.get("advert_ospf", st["advert_ospf"]), "zone": zone,
+                 "routeLabel": ctx.label(st.get("label")) if str(st.get("label")) != "0" else None}
+        for key, value in (("comment", cfg.get("comment") or conf.get("comment")), ("tag", cfg.get("dir") or conf.get("tag"))):  # subnets3 calls the tag dir, /subnets/all calls it tag
+            if value:
+                route[key] = value
+        out.append(route)
+    return sorted(out, key=lambda r: (str(r.get("routeIpSubnet")), str(r.get("nextHop") or "")))
+
+
+def subnet_sharing(ctx: Ctx, vrf: str, target: str) -> Dict[str, Any]:
+    """Subnet-sharing settings of one segment from /systemInfo/system auto_subnet (verified by live apply on ECOS 9.7.1)."""
+    src = (((ctx.data("system-info") or {}).get("auto_subnet") or {}).get("vrf") or {}).get(vrf)
+    # ECOS 9.6.2+ keeps no trace of useSharedSubnetInfo or the OSPF-to-subnet-share redistribution fields (route maps replaced them)
+    ctx.note("system-info.auto_subnet", "unresolved", target, "useSharedSubnetInfo, redistOspfToSubnetShare, ospfRedistMetric, ospfRedistTag are legacy fields that ECOS does not store (route maps replaced them), so they have no read source")
+    if not src:
+        return {}
+    ctx.unmapped("system-info.auto_subnet.vrf[{}]".format(vrf), src, {"add_local_lan", "add_local_wan", "add_local_metric", "add_local_communities", "local_communities",
+                                                                      "local_asn_filter", "rtmap_to_subshare"}, target)
+    ctx.note("system-info.auto_subnet.vrf[{}]".format(vrf), "mapped", target, "subnet-sharing flags, metric, communities, route map")
+    out = {"advertiseLocalLanSubnets": bool(src.get("add_local_lan")), "advertiseLocalWanSubnets": bool(src.get("add_local_wan")), "localMetric": int(src.get("add_local_metric") or 0),
+           "localCommunities": (src.get("local_communities") or "") if src.get("add_local_communities") else "", "filterRoutesWithLocalASN": bool(src.get("local_asn_filter"))}
+    if src.get("rtmap_to_subshare"):
+        out["redistToSDwanFabricRouteMap"] = src["rtmap_to_subshare"]
+    return out
+
+
+# ECOS values of a non-Default segment that was never configured (lab, ECOS 9.6.2.1 and 9.7.1)
+SEGMENT_SHARING_DEFAULTS = {"advertiseLocalLanSubnets": False, "advertiseLocalWanSubnets": False, "localMetric": 50, "localCommunities": "", "filterRoutesWithLocalASN": False}
+
+
+def own_sharing(entry: Dict[str, Any]) -> bool:
+    """The entry sets a route map or a subnet-sharing value other than the ECOS default of a non-Default segment."""
+    return bool(entry.get("redistToSDwanFabricRouteMap")) or any(k in entry and entry[k] != v for k, v in SEGMENT_SHARING_DEFAULTS.items())
+
+
+def note_no_route_map(ctx: Ctx, vrf: str, entry: Dict[str, Any], target: str) -> None:
+    # Omitted, null and "" all become default_rtmap_to_subsh on apply, and "none" names a map that does not exist (ECOS 9.6.2.1 and 9.7.1)
+    if "redistToSDwanFabricRouteMap" not in entry and set(entry) - {"segment", "routes"}:
+        ctx.note("system-info.auto_subnet.vrf[{}]".format(vrf), "unresolved", target + ".redistToSDwanFabricRouteMap",
+                 "the source has no subnet-sharing route map; a preconfig cannot express that, so Orchestrator applies default_rtmap_to_subsh (denies 0.0.0.0/0 on the appliances checked): review the site")
+
+
+def sharing_segments(ctx: Ctx) -> List[str]:
+    """Segment IDs with subnet-sharing settings in /systemInfo/system auto_subnet."""
+    vrfs = ((ctx.data("system-info") or {}).get("auto_subnet") or {}).get("vrf") or {}
+    return [vrf for vrf in vrfs if ctx.segment(vrf)]
+
+
+def per_segment(ctx: Ctx) -> bool:
+    """Routes go in segmentLocalRoutes when a non-Default segment has routes or subnet-sharing settings of its own."""
+    all_vrfs = (ctx.data("subnets-all-vrfs") or {}).get("subnets") or {}
+    return any(vrf != "0" for vrf in sharing_segments(ctx)) or any(vrf != "0" and route_list(ctx, block.get("entries", []), vrf) for vrf, block in all_vrfs.items())
+
+
+def m_localRoutes(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    if per_segment(ctx):
+        ctx.note("subnets", "default-omitted", "localRoutes", "non-default segments have routes or subnet-sharing settings, so the Default segment is written in segmentLocalRoutes (Orchestrator ignores localRoutes when segmentLocalRoutes is present)")
+        return None
+    routes = route_list(ctx, ((ctx.data("subnets") or {}).get("subnets") or {}).get("entries", []), "0")
+    flags = subnet_sharing(ctx, "0", "localRoutes")
+    if not routes and not flags:
+        ctx.note("subnets", "default-omitted", "localRoutes", "no locally configured routes")
+        return None
+    ctx.note("subnets", "mapped", "localRoutes.routes", "{} configured local routes (configured and local, not automatic or learned)".format(len(routes)))
+    note_no_route_map(ctx, "0", flags, "localRoutes")
+    return dict(flags, routes=routes)
+
+
+def m_segmentLocalRoutes(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
+    data = (ctx.data("subnets-all-vrfs") or {}).get("subnets") or {}
+    if not per_segment(ctx):
+        ctx.note("subnets-all-vrfs", "default-omitted", "segmentLocalRoutes", "0 non-default segments with configured routes or subnet-sharing settings")
+        return None
+    out = []
+    # A segment without routes still carries subnet-sharing settings of its own; one at the ECOS defaults is left out, since writing it adds default_rtmap_to_subsh
+    for vrf in sorted(set(data) | set(sharing_segments(ctx))):
+        routes = route_list(ctx, (data.get(vrf) or {}).get("entries", []), vrf)
+        flags = subnet_sharing(ctx, vrf, "segmentLocalRoutes")
+        if routes or (flags and (vrf == "0" or own_sharing(flags))):
+            out.append(dict({"segment": ctx.segment(vrf)}, **flags, routes=routes))
+            note_no_route_map(ctx, vrf, flags, "segmentLocalRoutes")
+        elif flags:
+            ctx.note("system-info.auto_subnet.vrf[{}]".format(vrf), "default-omitted", "segmentLocalRoutes",
+                     "segment {} has no routes and its subnet-sharing settings are the ECOS defaults; writing it would add default_rtmap_to_subsh".format(ctx.segment(vrf)))
+    ctx.note("subnets-all-vrfs", "mapped", "segmentLocalRoutes", "{} segments with configured routes or subnet-sharing settings (Default included)".format(len(out)))
+    return out or None
+
+
+def m_pppoe(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    source = ctx.data("pppoe") or {}
+    if not source:
+        return None
+    out = []
+    for k, v in sorted(source.items()):
+        entry = {"interfaceId": k, "userName": nul(v["USERNAME"]), "password": "<SECRET:not-captured>", "interfaceName": v["ETH"], "lcpFailCount": v["LCP-FAILURE"], "lcpInterval": v["LCP-INTERVAL"],
+                 "dnsType": v["DNSTYPE"].lower()}
+        if entry["dnsType"] == "specify":
+            entry.update(dnsDomain1=v["DNS1"], dnsDomain2=v["DNS2"])
+        entry.update(connectTimeout=v["CONNECT_TIMEOUT"], connectPoll=v["CONNECT_POLL"], serviceName=nul(v["SERVICENAME"]), acName=nul(v["ACNAME"]), defaultRoute=v["DEFAULTROUTE"])
+        out.append(entry)
+        ctx.unmapped("pppoe[{}]".format(k), v, {"USERNAME", "ETH", "LCP-FAILURE", "LCP-INTERVAL", "DNSTYPE", "DNS1", "DNS2", "CONNECT_TIMEOUT", "CONNECT_POLL", "SERVICENAME", "ACNAME", "DEFAULTROUTE"}, "pppoe")
+    ctx.note("pppoe", "mapped", "pppoe", "{} sessions; the password is never read: it becomes an empty secret column".format(len(out)))
+    return {"pppoeInterfaces": out}
+
+
+def m_dhcpRemoteAddressPoolConfig(ctx: Ctx) -> Optional[Any]:
+    raw = ctx.data("dhcp-remote-subnets") or []
+    if not isinstance(raw, list) or not raw:
+        return None
+    source = [p for p in raw if isinstance(p, dict) and not p.get("interface")]
+    if len(raw) > len(source):
+        ctx.note("dhcp-remote-subnets", "default-omitted", "dhcpRemoteAddressPoolConfig", "{} local interface DHCP pool(s) omitted here (already mapped in deploymentInfo.dhcpInfo)".format(len(raw) - len(source)))
+    if not source:
+        return None
+    pools = [{"dhcpAddressMask": p["subnet"], "scopeName": nul(p.get("scopeName")), "ipRange": p["ipRange"], "gatewayIp": p["gatewayIp"], "dnsServers": p["dnsServers"], "ntpServers": p["ntpServers"],
+              "netbiosNameServers": p["netbiosNameServers"], "netbiosNodeType": p["netbiosNodeType"], "maxLeaseTime": p["maxLeaseTime"], "defaultLeaseTime": p["defaultLeaseTime"]} for p in source]
+    for p in source:
+        ctx.unmapped("dhcp-remote-subnets", p, {"interface", "subnet", "scopeName", "ipRange", "gatewayIp", "dnsServers", "ntpServers", "netbiosNameServers", "netbiosNodeType", "maxLeaseTime", "defaultLeaseTime", "failover"}, "dhcpRemoteAddressPoolConfig")
+    ctx.note("dhcp-remote-subnets", "mapped", "dhcpRemoteAddressPoolConfig", "latest of {} remote pool(s)".format(len(pools)))
+    if len(pools) > 1:
+        ctx.note("dhcp-remote-subnets", "unresolved", "dhcpRemoteAddressPoolConfig", "{} more pool(s) not written: the validator rejects a list here (YAML format incorrect), so the preconfig holds one pool".format(len(pools) - 1))
+    return pools[-1]
+
+
+def m_interfaceConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    info = (ctx.data("interface-state") or {}).get("ifInfo") or []
+    out = []
+    for i in info:
+        name = i["ifname"]
+        if not re.match(r"^(lan|wan|tlan|twan|twlan|blan|bwan)\d+$", name):
+            continue
+        if i.get("ifSpeed") == "auto" and i.get("ifDuplex") == "auto" and i.get("admin"):
+            continue
+        speed = i.get("ifSpeed")
+        if speed != "auto" and not str(speed).isdigit():
+            ctx.note("interface-state[{}]".format(name), "unresolved", "interfaceConfig.interfaces", "speed {!r} is neither auto nor a number; interface not written".format(speed))
+            continue
+        entry = {"interfaceName": name, "interfaceSpeed": speed if speed == "auto" else int(speed), "interfaceDuplex": i["ifDuplex"], "admin": "up" if i["admin"] else "down"}
+        out.append(entry)
+    if not out:
+        ctx.note("interface-state", "default-omitted", "interfaceConfig", "every physical interface is admin up with auto speed and duplex")
+        return None
+    ctx.note("interface-state", "mapped", "interfaceConfig", "{} interfaces differ from auto/auto/up; the rest are omitted (section behaviour: replace)".format(len(out)))
+    return {"interfaces": out}
+
+
+def cli_lines(ctx: Ctx) -> List[str]:
+    """Command lines of the newest stored backup's running configuration (can be older than the live configuration)."""
+    backup = ctx.data("running-config") or {}
+    return [l.strip() for l in (backup.get("runningConfig") or "").splitlines() if l.strip() and not l.strip().startswith("#")]
+
+
+def passthrough_max_bandwidth(lines: List[str]) -> Optional[int]:
+    """Outbound shaping cap for pass-through traffic in kbps, from 'interface pass-through max-bandwidth N' (no API read holds it)."""
+    return next((int(m.group(1)) for l in lines for m in [re.match(r"^interface pass-through max-bandwidth (\d+)$", l)] if m), None)
+
+
+def cli_note(ctx: Ctx, target: str, what: str) -> str:
+    backup = ctx.data("running-config") or {}
+    ctx.note("running-config", "mapped", target, "{}; source is the stored backup of {} (backupTime {}), which may differ from the live configuration".format(what, backup.get("fileName"), backup.get("backupTime")))
+    return target
+
+
+def m_managementIp(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    mgmt0 = ((ctx.data("deployment") or {}).get("mgmtIfData") or {}).get("mgmt0") or {}
+    if mgmt0.get("dhcp"):
+        ctx.note("deployment.mgmtIfData.mgmt0", "runtime", "managementIp", "mgmt0 uses DHCP; managementIp is omitted so DHCP management is preserved")
+        return None
+    for line in cli_lines(ctx):
+        m = re.match(r"^ip mgmt-ip (\S+)$", line)
+        if m:
+            cli_note(ctx, "managementIp", "ip mgmt-ip")
+            return {"ipAddress": m.group(1)}
+    return None
+
+
+def m_peerPriority(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    peers = (ctx.data("peer-priority") or {}).get("peerlist") or {}
+    if not peers:
+        return None
+    ctx.note("peer-priority", "mapped", "peerPriority", "{} peers; priority = peer_weight (the documented range is 1-1023 and peer_metric is 0); peer_metric not mapped (assumption)".format(len(peers)))
+    return {"peerPriorities": [{"peerName": k, "priority": v["peer_weight"]} for k, v in sorted(peers.items())]}
+
+
+def m_appExpressGroups(ctx: Ctx) -> Optional[List[str]]:
+    names = sorted({a["appExpressGroupName"] for a in ctx.data("appexpress-group-association") or [] if a["nePk"] == ctx.nepk})
+    if not names:
+        return None
+    ctx.note("appexpress-group-association", "mapped", "appExpressGroups", "{} groups".format(len(names)))
+    return names
+
+
+def m_thirdPartyServicesAssociation(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    flags = {}
+    for key, ident in (("zscalerAssociation", "zscaler-association"), ("netskopeAssociation", "netskope-association"), ("axisAssociation", "axis-association")):
+        flags[key] = any(e.get("nePk") == ctx.nepk for e in (ctx.data(ident) or {}).get("enabled", []))
+    if not any(flags.values()):
+        ctx.note("zscaler/netskope/axis-association", "default-omitted", "thirdPartyServicesAssociation", "no third-party service associated (an omitted flag leaves the association unchanged)")
+        return None
+    ctx.note("zscaler/netskope/axis-association", "mapped", "thirdPartyServicesAssociation", "booleans from the Orchestrator association lists; connectorService and serviceProviderAssociation have no source and are omitted")
+    return flags
+
+
+def m_multicast(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
+    source = ctx.data("multicast-config")
+    if not isinstance(source, list):
+        if source:
+            ctx.note("multicast-config", "unresolved", "multicast", "this release returns multicast as one object keyed pim0, pim1..., without interface names; the mapping to interfaces is unknown")
+        return None
+    flags = {str(e["vrf_id"]): e["enable"] for e in (ctx.data("multicast-enable") or []) if isinstance(e, dict)}
+    known = set()
+    for m in (ctx.data("deployment") or {}).get("modeIfs", []):
+        for a in m["applianceIPs"]:
+            vlan = int(a.get("vlan") or 0)
+            known |= {"{}.{}".format(m["ifName"], vlan) if vlan > 0 else m["ifName"], m["ifName"], ctx.label(a["label"])}
+    known |= set((ctx.data("loopbacks") or {}).keys())
+    out = []
+    for seg in source:
+        enabled = flags.get(str(seg["vrf_id"]))
+        for stale in sorted(k for k in (seg.get("pim") or {}) if k not in known):
+            ctx.note("multicast-config", "runtime", "multicast.pim", "pim entry '{}' matches no interface or label of this appliance (stale); the validator rejects it".format(stale))
+        pim = [{"interfaceName": k, "pimEnable": v["enable"], "igmpEnable": bool((seg.get("igmp") or {}).get(k, {}).get("enable")), "drPriority": v["dr_priority"], "helloInterval": v["hello_interval"],
+                "joinPruneInterval": v["join_prune_interval"]} for k, v in sorted((seg.get("pim") or {}).items()) if k in known]
+        out.append({"segment": ctx.segment(seg["vrf_id"]), "enable": "true" if enabled else "false" if enabled is not None else "none", "rpAddresses": nul(seg.get("rp")),
+                    "filterName": nul(seg.get("filter_name")), "pim": pim})
+        ctx.unmapped("multicast-config", seg, {"vrf_id", "rp", "pim", "igmp", "filter_name"}, "multicast")
+    ctx.note("multicast-config", "mapped", "multicast", "{} segment(s); igmpEnable true when the interface is listed under igmp (assumption); enable written as a string true/false/none".format(len(out)))
+    return out
+
+
+def vrrp_prio(act: Dict[str, Any], type_key: str) -> Dict[str, Any]:
+    """A vrrp-prio action carries its delta as dec or inc."""
+    direction = "decrease" if act.get("dec") is not None else "increase"
+    return {type_key: direction + "VRRPPriority", "interfaceName": act.get("port-label") or act.get("port-name"), "priority": int(act.get("dec") if direction == "decrease" else act.get("inc"))}
+
+
+def probe_tunnel(ctx: Ctx, ifname: str) -> Optional[str]:
+    """The one user passthrough tunnel whose local IP is on interface ifname, else None."""
+    ips = {a.get("ip") for m in (ctx.data("deployment") or {}).get("modeIfs", []) for a in m.get("applianceIPs", [])
+           if a.get("ip") and ("{}.{}".format(m["ifName"], int(a.get("vlan") or 0)) if int(a.get("vlan") or 0) > 0 else m["ifName"]) == ifname}
+    names = [t["alias"] for t in (ctx.data("passthrough-tunnels") or {}).values() if not managed(t) and t.get("sourceIpAddress") in ips]
+    return names[0] if len(names) == 1 else None
+
+
+def m_ipSlaRule(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    source = ctx.data("ipsla-managers") or {}
+    mine = {k: v for k, v in source.items() if not managed(v)}
+    if len(source) > len(mine):
+        ctx.note("ipsla-managers", "orchestrator-managed", "ipSlaRule", "{} rules generated by Orchestrator services (gms_marked)".format(len(source) - len(mine)))
+    if not mine:
+        return None
+    down_str = {"alarm": "raiseAlarm", "no-sub-share": "disableSubnetSharing"}
+    up_str = {"def-alarm": "clearAlarm", "def-subnet": "defaultSubnetAction", "def-vrrp": "defaultVRRP"}
+    rules = []
+    for k, v in sorted(mine.items()):
+        op = next(iter(v["operation"].values()))
+        op_type = op.get("type", "ip-monitor")
+        if op_type == "port-monitor":
+            monitor: Dict[str, Any] = {"monitorType": "interface", "interfaceName": op.get("port-label") or op.get("port-name")}
+        elif op_type == "vrrp-monitor":
+            monitor = {"monitorType": "vrrp", "interfaceName": op.get("port-label") or op.get("port-name")}
+        elif op_type == "http-monitor":
+            monitor = {"monitorType": "http/https", "urls": [u.strip() for u in str(op.get("http-monitor-url") or "").split(",") if u.strip()],
+                       "httpRequestTimeout": int(op.get("http-timeout", 60)), "keepAlive": int(op.get("ka", 1)), "samplingWindow": int(op.get("sample-int", 300)),
+                       "monitorUpThreshold": int(op.get("up-thresh", 3)), "monitorDownThreshold": int(op.get("dn-thresh", 30)),
+                       "monitorUpLossThreshold": int(op.get("loss-up-thresh", 0)), "monitorDownLossThreshold": int(op.get("loss-dn-thresh", 0)),
+                       "monitorUpLatencyThreshold": int(op.get("rtt-up-thresh", 0)), "monitorDownLatencyThreshold": int(op.get("rtt-dn-thresh", 0)),
+                       "metricCombination": op.get("metric-combination", "metric-or")}
+            if op.get("port-label") or op.get("port-name"):
+                monitor["interfaceName"] = op.get("port-label") or op.get("port-name")
+            if op.get("proxyAddress"):
+                monitor.update({"proxyAddress": op["proxyAddress"], "proxyPort": int(op.get("proxyPort") or 0)})
+            if op.get("user-agent"):
+                monitor["userAgent"] = op["user-agent"]
+        else:
+            monitor = {"monitorType": "ping", "ipAddress": op.get("ip-monitor-ip"), "keepAlive": int(op.get("ka", 1)), "samplingWindow": int(op.get("sample-int", 300)),
+                       "monitorUpThreshold": int(op.get("up-thresh", 3)), "monitorDownThreshold": int(op.get("dn-thresh", 30)),
+                       "monitorUpLossThreshold": int(op.get("loss-up-thresh", 0)), "monitorDownLossThreshold": int(op.get("loss-dn-thresh", 0)),
+                       "monitorUpLatencyThreshold": int(op.get("rtt-up-thresh", 0)), "monitorDownLatencyThreshold": int(op.get("rtt-dn-thresh", 0)),
+                       "metricCombination": op.get("metric-combination", "metric-or")}
+            if op.get("port-label") or op.get("port-name"):
+                monitor["interfaceName"] = op.get("port-label") or op.get("port-name")
+            if op.get("tunnel-name"):
+                monitor["tunnelName"] = op["tunnel-name"]
+            if op.get("src-port-label") or op.get("src-port-name"):
+                monitor["sourceInterfaceName"] = op.get("src-port-label") or op.get("src-port-name")
+            if str(op.get("force-dns")).lower() == "true":
+                monitor["forceDnsThroughProbePath"] = True
+            if monitor.get("sourceInterfaceName") and not monitor.get("interfaceName") and not monitor.get("tunnelName"):
+                tunnel = probe_tunnel(ctx, monitor["sourceInterfaceName"])
+                if not tunnel:
+                    ctx.note("ipsla-managers[{}]".format(k), "unresolved", "ipSlaRule", "probe sourced from {} names no interface or tunnel and no single passthrough tunnel is sourced there; rule not written (the validator requires one)".format(monitor["sourceInterfaceName"]))
+                    continue
+                monitor["tunnelName"] = tunnel
+                ctx.note("ipsla-managers[{}]".format(k), "mapped", "ipSlaRule.ipslaMonitor.tunnelName", "the appliance stores no tunnel for a tunnel-sourced probe; {} is the only passthrough tunnel sourced from {} (assumption)".format(tunnel, monitor["sourceInterfaceName"]))
+        dn_raw = v.get("downAction")
+        if isinstance(dn_raw, dict) and dn_raw:
+            act = next(iter(dn_raw.values()))
+            if act.get("type") == "subnet-metric":
+                down_act: Dict[str, Any] = {"downActionType": "modifySubnetMetric", "subnetMetricDelta": int(act["delta"])}
+            elif act.get("type") in ("tun-dn", "tun-up"):
+                down_act = {"downActionType": "disableTunnel" if act["type"] == "tun-dn" else "enableTunnel", "tunnelName": act["tun-alias"]}
+            elif act.get("type") == "subnet-adv":  # the appliance keeps no priority for this action
+                down_act = {"downActionType": "advertiseSubnet", "interfaceName": act.get("port-label") or act.get("port-name")}
+            elif act.get("type") == "vrrp-prio":
+                down_act = vrrp_prio(act, "downActionType")
+            elif act.get("type") == "subnet-share":
+                down_act = {"downActionType": "disableSubnetSharing"}
+            elif act.get("type") == "subnet-rmv":
+                down_act = {"downActionType": "removeAutoSubnet", "interfaceName": act.get("port-label") or act.get("port-name")}
+            else:
+                ctx.note("ipsla-managers[{}]".format(k), "unresolved", "ipSlaRule.downAction", "down action type {} has no mapping, written as raiseAlarm".format(act.get("type")))
+                down_act = {"downActionType": "raiseAlarm"}
+        else:
+            down_act = {"downActionType": down_str.get(str(dn_raw), "raiseAlarm")}
+        up_raw = v.get("upAction")
+        if isinstance(up_raw, dict) and up_raw:
+            act = next(iter(up_raw.values()))
+            if act.get("type") in ("tun-up", "tun-dn"):
+                up_act: Dict[str, Any] = {"upActionType": "enableTunnel" if act["type"] == "tun-up" else "disableTunnel", "tunnelName": act["tun-alias"]}
+            elif act.get("type") == "vrrp-prio":
+                up_act = vrrp_prio(act, "upActionType")
+            else:
+                ctx.note("ipsla-managers[{}]".format(k), "unresolved", "ipSlaRule.upAction", "up action type {} has no mapping, written as clearAlarm".format(act.get("type")))
+                up_act = {"upActionType": "clearAlarm"}
+        else:
+            up_act = {"upActionType": up_str.get(str(up_raw), "clearAlarm")}
+        rules.append({"enable": v["enable"], "samplingInterval": int(v["interval"]), "comment": nul(v["comment"]), "routeLabel": ctx.label(v["routeLabelId"]) if v["routeLabelId"] else None,
+                      "ipslaMonitor": monitor, "downAction": down_act, "upAction": up_act})
+    rules.sort(key=lambda r: (str(r["ipslaMonitor"].get("monitorType")), str(r["ipslaMonitor"].get("interfaceName") or ""), str(r["ipslaMonitor"].get("ipAddress") or r["ipslaMonitor"].get("urls") or "")))
+    if not rules:
+        return None
+    ctx.note("ipsla-managers", "mapped", "ipSlaRule", "{} user rules (ping, interface, vrrp, http/https monitors)".format(len(rules)))
+    return {"ruleEntries": rules}
+
+
+IDS_MODES = {"disabled": "Off", "ids": "IDS Only", "ips_lookaside": "IPS-Performant", "ips_inline": "IPS-Inline"}
+
+
+def m_idsIpsConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    profiles = ctx.data("ids-profile-state") or {}
+    mine = [name for name, nodes in profiles.items() if ctx.nepk in nodes]
+    if not mine:
+        return None
+    # GET /ids/state lists nePks per mode; an appliance in no list has an unknown mode. Guessing "Off" would switch IDS/IPS off (replace section).
+    state = ctx.data("ids-state") or {}
+    mode = next((IDS_MODES[k] for k in IDS_MODES if ctx.nepk in (state.get(k) or [])), None)
+    if mode is None:
+        ctx.note("ids-state", "unresolved", "idsIpsConfig", "not written: profile is {!r} but the appliance is in no /ids/state list, so its IDS/IPS mode is unknown. Orchestrator lists only appliances whose IDS/IPS was set from Orchestrator; "
+                 "unlisted ones checked on a reference Orchestrator had never turned IDS/IPS on, and leaving the section out keeps the new appliance's default (off)".format(mine[0]))
+        return None
+    ctx.note("ids-profile-state", "mapped", "idsIpsConfig.profile", "profile name from the assignment list: {} (suffix such as _S5 is part of the stored name; the preconfig example uses 'Default')".format(mine[0]))
+    ctx.note("ids-state", "mapped", "idsIpsConfig.mode", "{} (list-to-mode mapping from the Swagger idsStateGet descriptions; all four modes verified by live apply and re-read on ECOS 9.7.1)".format(mode))
+    return {"mode": mode, "profile": mine[0]}
+
+
+def m_flowRedirection(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    clusters = ctx.data("cluster-state") or {}
+    if isinstance(clusters, dict):
+        for site_blk in clusters.values():
+            app_if = ((site_blk or {}).get("siteApplianceInterfaceIps") or {}).get(ctx.nepk)
+            if isinstance(app_if, dict) and isinstance(app_if.get("state"), dict):
+                st = app_if["state"]
+                iface = st.get("interface") or app_if.get("interfaceName")
+                peers = [p["peerIP"] for p in (st.get("peerIPStatusList") or []) if isinstance(p, dict) and p.get("peerIP")]
+                if iface and "." in str(iface):
+                    ctx.note("cluster-state", "orchestrator-managed", "flowRedirection", "cluster subinterface '{}' is the EdgeHA sync interface (created by haConfig), not standalone flowRedirection".format(iface))
+                    return None
+                if peers and iface:
+                    ctx.note("cluster-state", "mapped", "flowRedirection", "{} cluster peer(s) on {}".format(len(peers), iface))
+                    return {"enable": bool(st.get("flow_redir", True)), "waitTime": int(st.get("wait_time", 0)), "interfaceName": iface, "peers": [{"peerIp": p} for p in peers]}
+    lines = cli_lines(ctx)
+    peers = [m.group(1) for l in lines for m in [re.match(r"^cluster peer (\S+)$", l)] if m]
+    iface = next((m.group(1) for l in lines for m in [re.match(r"^cluster interface (\S+)$", l)] if m), None)
+    # ECOS prints no wait-time line at its default; 50 is the base template default (lab: pushed 50, backup had no line)
+    wait = next((int(m.group(1)) for l in lines for m in [re.match(r"^flow-redirection wait-time (\d+)$", l)] if m), 50)
+    if not peers:
+        return None
+    if iface and "." in iface:
+        ctx.note("running-config", "orchestrator-managed", "flowRedirection", "cluster subinterface '{}' is the EdgeHA sync interface (created by haConfig), not standalone flowRedirection".format(iface))
+        return None
+    cli_note(ctx, "flowRedirection", "cluster peers, interface and wait time; enable is true because peers are configured (assumption)")
+    return {"enable": True, "waitTime": wait, "interfaceName": iface, "peers": [{"peerIp": p} for p in peers]}
+
+
+def m_vxlan(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    live = ctx.data("vxlan") or {}
+    seg_map = ctx.data("vxlan-vni-map") or {}
+    if isinstance(live, dict) and live.get("vtepIf") and isinstance(seg_map, dict):
+        maps = []
+        for seg_id, v in sorted(seg_map.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else str(kv[0])):
+            vni_val = (v or {}).get("vni")
+            if str(vni_val) in ("None", "", "0", "-1", "4294967295"):
+                continue
+            maps.append({
+                "vni": int(vni_val),
+                "segment": ctx.segment(seg_id),
+                "zone": ctx.zone(seg_id, v.get("zoneId", 0)),
+                "role": ctx.role(v.get("role", 0)) or "default",
+            })
+        maps.sort(key=lambda x: int(x["vni"]))
+        ctx.note("vxlan, vxlan-vni-map", "mapped", "vxlan", "vtep interface {} and {} VNI map(s)".format(live["vtepIf"], len(maps)))
+        return {"destinationUdpPort": int(live.get("port", 4789)), "vtepSrcInterface": live["vtepIf"], "vniVrfMaps": maps}
+    lines = cli_lines(ctx)
+    vtep = next((m.group(1) for l in lines for m in [re.match(r"^vxlan vtep-interface (\S+)$", l)] if m), None)
+    if not vtep:
+        return None
+    vni: Dict[str, Dict[str, Any]] = {}
+    for l in lines:
+        m = re.match(r"^vxlan segment (\S+) (vni|zone|role-id) (\d+)$", l)
+        if m and m.group(3) != "4294967295":
+            vni.setdefault(m.group(1), {})[m.group(2)] = int(m.group(3))
+    maps = sorted([{"vni": v["vni"], "segment": seg, "zone": ctx.zone(next((k for k, n in ctx.vrfs.items() if n == seg), "0"), v.get("zone", 0)), "role": ctx.role(v.get("role-id", 0)) or "default"} for seg, v in sorted(vni.items()) if "vni" in v], key=lambda x: int(x["vni"]))
+    cli_note(ctx, "vxlan", "vtep interface and VNI maps")
+    return {"destinationUdpPort": live.get("port", 4789), "vtepSrcInterface": vtep, "vniVrfMaps": maps}
+
+
+def m_ecLicensing(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    lines = cli_lines(ctx)
+    boost = next((int(m.group(1)) for l in lines for m in [re.match(r"^system eclicense boost bandwidth (\d+)$", l)] if m), None)
+    if boost is None or "system eclicense boost enable" not in lines:
+        return None
+    ctx.note("running-config", "unresolved", "ecLicensing.bandwidthLevel", "the tier name for bandwidthLevel is not documented; only the boost bandwidth is mapped")
+    cli_note(ctx, "ecLicensing", "boost bandwidth; useDefaultAccount true is an assumption (the validator requires either it or an account name and key)")
+    return {"useDefaultAccount": True, "boost": boost}
+
+
+def m_managementRoutes(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    routes = []
+    for l in cli_lines(ctx):
+        m = re.match(r"^ip default-gateway (\S+) (mgmt\d) (\d+)(?: (\S+))?$", l)
+        if m:
+            routes.append({"routeIpSubnet": "0.0.0.0/0", "nextHop": m.group(1), "interfaceName": m.group(2), "metric": int(m.group(3)), "sourceIp": m.group(4)})
+        m = re.match(r"^ip route (\S+) /(\d+) (\S+) (mgmt\d) (\d+)(?: (\S+))?$", l)
+        if m:
+            routes.append({"routeIpSubnet": "{}/{}".format(m.group(1), m.group(2)), "nextHop": m.group(3), "interfaceName": m.group(4), "metric": int(m.group(5)), "sourceIp": m.group(6)})
+    routes = [r for i, r in enumerate(routes) if r not in routes[:i]]  # the running config can list one route twice
+    if not routes:
+        return None
+    cli_note(ctx, "managementRoutes", "{} management route(s); positional meaning gateway, interface, metric, source IP is an assumption".format(len(routes)))
+    return {"routes": routes}
+
+
+def m_nac(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    src = ctx.data("nac")
+    if not src or not src.get("server"):
+        return None
+    def rows(block: Dict[str, Any], rename: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
+        out = []
+        for k, v in sorted(block.items(), key=lambda kv: int(kv[0])):
+            row = {"id": int(k)}
+            for key, value in v.items():
+                if key in ("self", "stats_timeout", "name_") :
+                    continue
+                row[(rename or {}).get(key, key)] = nul(value) if isinstance(value, str) else value
+            out.append(row)
+        return out
+    name_by_if = {}
+    dep = ctx.data("deployment") or {}
+    lan_labels = {str(l["id"]): l["name"] for l in ((dep.get("sysConfig") or {}).get("ifLabels") or {}).get("lan") or []}
+    for m in dep.get("modeIfs", []):
+        for a in m["applianceIPs"]:
+            vlan = int(a.get("vlan") or 0)
+            # NAC takes LAN labels only; the appliance also keeps trusted entries for WAN interfaces
+            name_by_if["{}.{}".format(m["ifName"], vlan) if vlan > 0 else m["ifName"]] = None if a.get("wanSide") else lan_labels.get(str(a.get("label")))
+    # /validate accepts only ", " between names (2026-10-18); entry order kept, it may be the server priority
+    groups = [{"id": int(k), "name": v["name"], "server": ", ".join(x["name"] for _, x in sorted(v["server"].items(), key=lambda kv: int(kv[0]))) if isinstance(v["server"], dict) else v["server"]} for k, v in sorted((src.get("serverGroup") or {}).items(), key=lambda kv: int(kv[0]))]
+    policies = []
+    skipped = 0
+    for ifname, v in sorted(((src.get("applyPolicies") or {}).get("if") or {}).items()):
+        trusted = v.get("auth_type") == 0 or v.get("profile") in ("none", "", None)  # the appliance stores profile "default" on trusted entries it applied without one
+        if not name_by_if.get(ifname):  # auth_interface must be a LAN label; the appliance can keep policies for deleted interfaces
+            if trusted:
+                skipped += 1
+            else:
+                ctx.note("nac applyPolicies[{}]".format(ifname), "unresolved", "nac.applyPolicies[].auth_interface", "{} has no LAN label or no longer exists; policy not written".format(ifname))
+            continue
+        entry = {"auth_interface": name_by_if[ifname], "profile": None if trusted else v["profile"], "auth_type": {0: "trusted", 1: "both", 2: "802.1x", 3: "mac"}.get(v.get("auth_type"), v.get("auth_type"))}
+        if trusted:
+            del entry["profile"]  # /validate rejects profile "none" and accepts the key left out (2026-10-18)
+        same = [p for p in policies if p["auth_interface"] == entry["auth_interface"]]
+        if not same:
+            policies.append(dict({"id": len(policies) + 1}, **entry))
+        elif {k: x for k, x in same[0].items() if k != "id"} != entry:  # /validate rejects a label twice ("Duplicate lan label interfaces")
+            ctx.note("nac applyPolicies[{}]".format(ifname), "unresolved", "nac.applyPolicies[].auth_interface", "{} shares label {} with an interface that has a different policy; only the first is written".format(ifname, entry["auth_interface"]))
+    if skipped:
+        ctx.note("nac applyPolicies", "default-omitted", "nac.applyPolicies", "{} WAN or unlabelled interfaces without an AAA profile".format(skipped))
+    if policies:
+        ctx.note("nac applyPolicies", "unresolved", "nac.applyPolicies[].auth_type", "numeric auth_type codes to trusted/both/802.1x/mac are an assumption (0..3 in that order); auth_interface expects a label")
+    out = _nac_fix(ctx=ctx, name_by_if=name_by_if, out={"nacEnable": src["nacEnable"], "dot1x": rows((src.get("dot1x") or {})), "macAuthProfile": rows((src.get("macAuthProfile") or {})), "server": rows(src["server"], {"address": "host"}),
+                   "serverGroup": groups, "aaaProfile": rows((src.get("aaaProfile") or {})), "applyPolicies": policies})
+    sources = {server.get("source_ip_interface") for server in out["server"]}
+    kept = [p for p in policies if not (p["auth_type"] == "trusted" and p["auth_interface"] in sources)]
+    if len(kept) < len(policies):  # /validate rejects a label used as both auth_interface and source_ip_interface
+        ctx.note("nac applyPolicies", "default-omitted", "nac.applyPolicies", "trusted entry on the RADIUS server's source label {} (trusted is the appliance default)".format(", ".join(sorted({p["auth_interface"] for p in policies if p not in kept}))))
+    out["applyPolicies"] = [dict(p, id=i + 1) for i, p in enumerate(kept)]
+    empty = [k for k in ("dot1x", "macAuthProfile", "server", "serverGroup", "aaaProfile", "applyPolicies") if not out[k]]
+    if empty:
+        ctx.note("nac", "unresolved", "nac", "not written: the validator answers HTTP 500 when any of the six NAC lists is empty or missing (empty: {})".format(", ".join(empty)))
+        return None
+    ctx.note("nac", "mapped", "nac", "dot1x, macAuthProfile, server (address becomes host), serverGroup, aaaProfile, applyPolicies; server keys are secrets")
+    return out
+
+
+def _nac_fix(out: Dict[str, Any], ctx: Optional[Ctx] = None, name_by_if: Optional[Dict[str, Optional[str]]] = None) -> Dict[str, Any]:
+    loops = (ctx.data("loopbacks") or {}) if ctx else {}
+    for profile in out["aaaProfile"]:
+        if not profile.get("da_server"):
+            profile["da_server"] = "default"  # required by the validator even when da_enable is false (assumption: the example's value)
+    for server in out["server"]:
+        server["key"] = "<SECRET:not-captured>"  # Orchestrator returns an empty key; the preconfig requires one
+        name = server.get("source_ip_interface")
+        if name_by_if and name in name_by_if and name_by_if[name]:
+            server["source_ip_interface"] = name_by_if[name]
+        elif name in loops:  # the preconfig takes an interface *label*, the appliance reports the interface name
+            server["source_ip_interface"] = ctx.label(loops[name]["label"]) or "any"
+        elif ctx and name not in (None, "", "any") and name not in ctx.labels.values():
+            # an unlabelled interface or one that no longer exists (dangling); the validator rejects anything but a label or "any"
+            server["source_ip_interface"] = "any"
+        if ctx and name not in (None, "", "any") and server["source_ip_interface"] == "any":
+            ctx.note("nac.server[{}]".format(server.get("id")), "unresolved", "nac.server[].source_ip_interface", "{!r} has no interface label (unlabelled or no longer on the appliance); written as 'any'".format(name))
+    return out
+
+
+ENCAP = {"ipsec_ip": "ipsec", "ipsec": "ipsec", "gre": "gre", "gre_ip": "gre", "no_encap": "no_encap", "udp": "ipsec"}
+
+
+def m_tunnelConfiguration(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    source = ctx.data("passthrough-tunnels") or {}
+    mine = {k: v for k, v in source.items() if not managed(v)}
+    if len(source) > len(mine):
+        ctx.note("passthrough-tunnels", "orchestrator-managed", "tunnelConfiguration", "{} passthrough tunnels generated by Orchestrator services (gmsMarked)".format(len(source) - len(mine)))
+    if not mine:
+        return None
+    tunnels = []
+    for k, v in sorted(mine.items()):
+        try:  # one tunnel with an unexpected value is ledgered and skipped, not the whole section
+            encap = ENCAP.get(v["mode"], v["mode"])
+            t: Dict[str, Any] = {"tunnelName": v["alias"], "tunnelType": "passthrough", "tunnelEncap": encap, "admin": "Up" if v["adminStatus"] == "up" else "Down", "localIp": v["sourceIpAddress"],
+                                 "remoteIp": nul(v["destIpAddress"]), "natMode": v["natMode"], "peerName": nul(v["peerName"]), "enableAutoMaxBandwidth": v["max_bw_auto"], "maxBandwidth": v["max_bw"]}
+            if encap == "ipsec":
+                id_val = None if v.get("ike_version") == 2 and v.get("id_type") == "address" and v.get("id_str") == v.get("ike_id_local") else nul(v["id_str"])
+                t["ikeConfig"] = {"presharedKey": v.get("presharedkey") or "<SECRET:not-captured>", "ikeAuthAlgorithm": v["ike_aalg"], "ikeEncryptAlgorithm": v["ike_ealg"], "diffHellManGroup": int(v["dhgroup"]),
+                                  "ikeLifetime": v["ike_lifetime"], "deadPeerDelayTime": v["dpd_delay"], "deadPeerRetryCount": v["dpd_retry"], "identifierType": v["id_type"], "identifierValue": id_val,
+                                  "exchangeMode": v["exchange_mode"], "ikeVersion": v["ike_version"], "localIkeIdentifier": nul(v["ike_id_local"]), "remoteIkeIdentifier": nul(v["ike_id_remote"]), "ikePrf": v["ike_prf"]}
+                t["ipsecConfig"] = {"ipsecAuthAlgorithm": v["ah"], "ipsecEncryptAlgorithm": "null" if "gmac" in str(v["ah"]) else {"": "auto", None: "auto", "null": "none"}.get(v.get("esp"), v.get("esp")), "enableIpSecArcWindow": 0 if v["ipsecAntiReplayWindow"] == "disable" else int(v["ipsecAntiReplayWindow"]), "ipsecLifetime": v["lifetime"],
+                                    "ipsecLifetimeBytes": v["lifebytes"], "secrecyGroup": int(v["pfsgroup"]) if v.get("pfs") else "disable", "ipsecSuiteB": v["ipsec_Suite_b"]}  # null lets the appliance default (PFS on, group 2)
+        except (KeyError, TypeError, ValueError) as err:
+            ctx.note("passthrough-tunnels[{}]".format(k), "unresolved", "tunnelConfiguration", "tunnel {} not written: {}: {}".format(v.get("alias", k), type(err).__name__, err))
+            continue
+        tunnels.append(t)
+        ctx.unmapped("passthrough-tunnels[{}]".format(k), v, {"id", "alias", "mode", "adminStatus", "sourceIpAddress", "destIpAddress", "natMode", "peerName", "max_bw_auto", "max_bw", "presharedkey", "ike_aalg", "ike_ealg", "dhgroup",
+                                                             "ike_lifetime", "dpd_delay", "dpd_retry", "id_type", "id_str", "exchange_mode", "ike_version", "ike_id_local", "ike_id_remote", "ike_prf", "ah", "esp", "ipsecAntiReplayWindow",
+                                                             "lifetime", "lifebytes", "pfs", "pfsgroup", "ipsec_Suite_b", "srcNePk", "destNePk", "destTunnelId", "destTunnelAlias", "operStatus", "remoteIdState", "fecStatus",
+                                                             "fecRatio", "parallelTunnelId", "local_vrf", "overlayId", "tag", "ipsec_enabled", "max_bw_unshaped"}, "tunnelConfiguration")
+    ctx.note("passthrough-tunnels", "mapped", "tunnelConfiguration", "{} user passthrough tunnels; operStatus and ids are runtime; the pre-shared key is a secret column; an empty esp (IPsec encryption) is the stored form of 'auto' and esp 'null' of 'none'; under gmac authentication it is written 'null', which the validator requires".format(len(tunnels)))
+    return {"tunnels": tunnels}
+
+
+def m_virtualTunnelInterface(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    source = ctx.data("vtis") or {}
+    mine = {k: v for k, v in source.items() if not managed(v)}
+    if len(source) > len(mine):
+        ctx.note("vtis", "orchestrator-managed", "virtualTunnelInterface", "{} interfaces created by Orchestrator services (gms_marked, third-party cloud tunnels)".format(len(source) - len(mine)))
+    if not mine:
+        return None
+    out = [{"interfaceId": k, "ipAddressMask": "{}/{}".format(v["ipaddr"], v["nmask"]), "ipAddressAliasMask": "{}/{}".format(v["ipaddr_alias"], v["nmask_alias"]) if v.get("ipaddr_alias") not in (None, "", "0.0.0.0") else None,
+            "adminStatus": ADMIN[bool(v["admin"])], "passthroughTunnel": nul(v["tunnel"]), "interfaceType": v["side"], "interfaceLabel": ctx.label(v["label"]), "interfaceLabelAlias": ctx.label(v.get("label_alias")),
+            "zone": ctx.zone(v["vrf_id"], v["zone"]), "role": ctx.role(v.get("role_id", 0)), "segment": ctx.segment(v["vrf_id"]), "autoDistribute": v["auto_distribute"], "behindNat": v["behindNAT"]} for k, v in sorted(mine.items())]
+    ctx.note("vtis", "mapped", "virtualTunnelInterface", "{} user interfaces (no user-defined sample was available: shape verified against the validator only on synthetic data)".format(len(out)))
+    return {"vtis": out}
+
+
+def m_branchNatMapsConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    data = ctx.data("branch-nat-maps") or {}
+    pools = ctx.data("nat-pools") or {}
+    pool_index = {str(k): i for i, k in enumerate(sorted(pools, key=int))}  # natPools is written in this order (m_natPools)
+    rules = []
+    for mp in data.values() if isinstance(data, dict) else []:
+        for prio, e in sorted(((mp or {}).get("prio") or {}).items(), key=lambda kv: int(kv[0])):
+            if managed(e):
+                continue
+            m = e.get("match") or {}
+            st = e.get("set") or {}
+            rule: Dict[str, Any] = {
+                "priorityLevel": int(prio),
+                "segment": ctx.segment(m.get("segment", "0")),
+                "direction": e.get("dir"),
+                "enable": bool(e.get("enable", True)),
+                "comment": nul(e.get("comment")),
+                "interfaceName": m.get("intf", "any"),
+                "protocol": m.get("proto", "any"),
+            }
+            any_ip = lambda v: "any" if v == "0.0.0.0/0" else v  # the validator rejects the zero address and wants "any"
+            if m.get("src_subnet"):
+                rule["sourceIpSubnet"] = any_ip(m["src_subnet"])
+            if m.get("dst_subnet"):
+                rule["destinationIpSubnet"] = any_ip(m["dst_subnet"])
+            if m.get("dst_port"):
+                rule["destinationPort"] = str(m["dst_port"])
+            if str(st.get("trans_src")) in pool_index:  # a NAT pool key, not a subnet: the preconfig refers to pools by list index
+                rule["translateNatPoolID"] = pool_index[str(st["trans_src"])]
+            elif st.get("trans_src"):
+                rule["translateSourceIpSubnet"] = st["trans_src"]
+            elif "pool_id" in st and st["pool_id"] not in (None, ""):
+                rule["translateNatPoolID"] = int(st["pool_id"])
+            if st.get("trans_dst"):
+                rule["translateDestinationIpSubnet"] = st["trans_dst"]
+            if st.get("trans_dport"):
+                rule["translateDestinationPort"] = str(st["trans_dport"])
+            rules.append(rule)
+    if not rules:
+        ctx.note("branch-nat-maps", "default-omitted", "branchNatMapsConfig", "no branch NAT rules configured in /nat/maps")
+        return None
+    ctx.note("branch-nat-maps", "mapped", "branchNatMapsConfig", "{} branch NAT rule(s) from /nat/maps".format(len(rules)))
+    return {"branchNatRules": rules}
+
+
+def m_ipAllowList(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    src = ctx.data("ip-allow-list") or {}
+    items = src.get("ip") or {}
+    if not src.get("enable") and not items:
+        ctx.note("ip-allow-list", "default-omitted", "ipAllowList", "allow list disabled and empty")
+        return None
+    if not items:
+        return None
+    ips = [{"ip": k.split("/")[0], "prefixLength": v["prefixLength"], "comment": nul(v.get("comment")), "protocol": v["protocol"]} for k, v in sorted(items.items())]
+    ctx.note("ip-allow-list", "mapped", "ipAllowList", "{} entries from the appliance's allow list (entries applied via preconfig/Orchestrator have gmsMarked=true)".format(len(ips)))
+    return {"enable": src["enable"], "ips": ips}
+
+
+MAPPERS: Dict[str, Callable[[Ctx], Any]] = {
+    "ipAllowList": m_ipAllowList,
+    "tunnelConfiguration": m_tunnelConfiguration,
+    "virtualTunnelInterface": m_virtualTunnelInterface,
+    "branchNatMapsConfig": m_branchNatMapsConfig,
+    "nac": m_nac,
+    "managementIp": m_managementIp,
+    "peerPriority": m_peerPriority,
+    "appExpressGroups": m_appExpressGroups,
+    "thirdPartyServicesAssociation": m_thirdPartyServicesAssociation,
+    "multicast": m_multicast,
+    "ipSlaRule": m_ipSlaRule,
+    "idsIpsConfig": m_idsIpsConfig,
+    "flowRedirection": m_flowRedirection,
+    "vxlan": m_vxlan,
+    "ecLicensing": m_ecLicensing,
+    "managementRoutes": m_managementRoutes,
+    "localRoutes": m_localRoutes,
+    "segmentLocalRoutes": m_segmentLocalRoutes,
+    "pppoe": m_pppoe,
+    "dhcpRemoteAddressPoolConfig": m_dhcpRemoteAddressPoolConfig,
+    "interfaceConfig": m_interfaceConfig,
+    "bgpSystemConfig": m_bgpSystemConfig,
+    "segmentBgpSystems": m_segmentBgpSystems,
+    "vrrp": m_vrrp,
+    "natPools": m_natPools,
+    "bridgeGroups": m_bridgeGroups,
+    "segmentOspfConfig": m_segmentOspfConfig,
+    "ospfSystemConfig": m_ospfSystemConfig,
+    "loopbackInterface": m_loopbackInterface,
+    "linkAggregation": m_linkAggregation,
+    "segmentBfdConfigs": m_segmentBfdConfigs,
+    "customApplianceTags": m_customApplianceTags,
+    "inboundPortForwarding": m_inboundPortForwarding,
+    "secureWebServicesConfig": m_secureWebServicesConfig,
+}
