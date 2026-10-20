@@ -33,7 +33,7 @@ Convert an HPE Aruba EdgeConnect appliance configuration into a verified site-ty
 
 Configure `.env` (`orch_1=<profile>`, `<profile>_base_url=https://...`, `<profile>_api_key=...`, `EC_VALIDATORS=<lab>`; for a self-signed Orchestrator the user adds `<profile>_tls_sha256=<SHA-256 fingerprint>`, and a profile name never turns certificate checks off). Requires Python 3.9+, `Jinja2`, `PyYAML`. Run `--help` for flags.
 
-If `edgeconnect-preconfig` is on PATH (installed by the automation repository's `setup.sh`), run each stage as `edgeconnect-preconfig <stage> ...` instead of `python3 scripts/<stage>.py ...`, for example `edgeconnect-preconfig capture --orchestrator <src> --appliance <id> --role reference`. It uses the toolkit's Python and the shared `~/edgeconnect/.env`.
+If `edgeconnect-preconfig` is on PATH (installed by `setup.sh` from any of the three EdgeConnect repositories), run each stage as `edgeconnect-preconfig <stage> ...` instead of `python3 scripts/<stage>.py ...`, for example `edgeconnect-preconfig capture --orchestrator <src> --appliance <id> --role reference`. It uses the toolkit's Python and the shared `.env` in the install folder (default `~/edgeconnect`).
 
 | Stage | Command | Purpose |
 |---|---|---|

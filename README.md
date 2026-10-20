@@ -15,9 +15,31 @@ This repository packages a **lean, self-contained AI skill (`skills/building-edg
 
 ---
 
+## The EdgeConnect toolkit
+
+Three repositories that work together:
+
+| Repository | What it does | Agent skill |
+|---|---|---|
+| [edgeconnect-orchestrator-automation](https://github.com/Crypto-Gi/edgeconnect-orchestrator-automation) | `edgeconnect-auto` CLI: deploys and removes firewall policies, zones, address, service and application groups, application definitions and template-group ACLs from reviewed CSVs, with a dry run, a typed `APPLY` and readback verification. | `managing-edgeconnect-firewall-and-objects` |
+| [edgeconnect-preconfig](https://github.com/Crypto-Gi/edgeconnect-preconfig) (this repository) | Turns an existing appliance into a Jinja2 + CSV preconfiguration template, then renders, validates and uploads one preconfig per site. | `building-edgeconnect-preconfig-templates` |
+| [edgeconnect-mcp](https://github.com/Crypto-Gi/edgeconnect-mcp) | MCP server that lets Claude or any MCP client read, and with your approval change, an Orchestrator through its REST API. | `edgeconnect-guide` |
+
+**Install the CLI, the preconfig scripts and their two skills** (macOS and Linux; needs git, Python 3.9 or later and, for the skills, Node.js 18 or later):
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/setup.sh)
+```
+
+The same `setup.sh` is in all three repositories. It asks for an install folder (default `~/edgeconnect`) and whether the skills go in your home folder, for every project, or only inside that folder; the skills installer then asks which agents get them. Everything lands in the one folder: both repositories from `main`, a Python environment and one shared `.env`, plus `edgeconnect-auto` and `edgeconnect-preconfig` commands in `~/.local/bin`. Run it again to update: anything already installed is reported and kept, and only what is missing is added. Options: `--dir PATH`, `--skills home|folder`, `--agents claude-code,codex`, `--refresh-skills`, `--yes`. The skills installer may offer its own `find-skills` skill once; answer No unless you want it.
+
+`setup.sh` does not install the MCP server or its guide skill; the [edgeconnect-mcp README](https://github.com/Crypto-Gi/edgeconnect-mcp#install) covers those.
+
+---
+
 ## Quick Start (5 Steps)
 
-> **One-step install (macOS and Linux):** the [automation repository's `setup.sh`](https://github.com/Crypto-Gi/edgeconnect-orchestrator-automation#quick-start) installs this toolkit, the `edgeconnect-auto` CLI and both agent skills from `main`, with one shared `.env`, and adds an `edgeconnect-preconfig <stage>` command that replaces `python3 scripts/<stage>.py` below. Run it again to update.
+> **Everything at once:** see [The EdgeConnect toolkit](#the-edgeconnect-toolkit) above for the one-line `setup.sh` install.
 
 ### 1. Clone & Install Python Dependencies
 Requires **Python 3.9+** and two packages (`Jinja2` and `PyYAML`; the EdgeConnect Orchestrator REST client is bundled in `scripts/common.py` using Python's standard library):
@@ -182,6 +204,7 @@ edgeconnect-preconfig/
 ├── LICENSE                                   # Apache License 2.0
 ├── NOTICE                                    # Copyright, trademarks, bundled templates
 ├── requirements.txt                          # Jinja2>=3.1.0, PyYAML>=6.0
+├── setup.sh                                  # One-step install of the toolkit and skills (see above)
 ├── .env.example                              # Sanitized Orchestrator profile template
 ├── docs/
 │   ├── TESTING_AND_VERIFICATION.md           # Verification report: unit tests, captures, live applies
