@@ -43,6 +43,8 @@ prod_api_key=YOUR_READ_ONLY_API_KEY
 orch_2=lab
 lab_base_url=https://lab-orchestrator.example.com
 lab_api_key=YOUR_LAB_API_KEY
+# Self-signed lab certificate: pin it instead of turning checks off.
+# lab_tls_sha256=<SHA-256 fingerprint, e.g. from: openssl x509 -noout -fingerprint -sha256>
 EC_VALIDATORS=lab
 ```
 

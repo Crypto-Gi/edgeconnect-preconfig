@@ -1,6 +1,9 @@
 """Self-contained shared helpers: Orchestrator HTTP client, .env profile loader, serial/filename helpers, secret redaction, YAML 1.2 parser."""
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
+import hmac
+from http.client import HTTPSConnection
 import json
 import os
 from pathlib import Path
@@ -71,11 +74,37 @@ class Config:
     timeout: float = 30.0
     verify_tls: bool = True
     name: str = ""
+    tls_sha256: Optional[str] = None
 
 
 class _RefuseRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise HTTPError(req.full_url, code, "redirect refused", headers, fp)
+
+
+class _PinnedHTTPSHandler(HTTPSHandler):
+    """Trust exactly one certificate, by the SHA-256 of its DER form, checked on every connection."""
+
+    def __init__(self, pin: str) -> None:
+        context = ssl.create_default_context()
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        super().__init__(context=context)
+        self._pinned_context = context
+        self._pin = pin
+
+    def https_open(self, req: Any) -> Any:
+        pin = self._pin
+
+        class PinnedConnection(HTTPSConnection):
+            def connect(self) -> None:
+                super().connect()
+                actual = hashlib.sha256(self.sock.getpeercert(binary_form=True) or b"").hexdigest()
+                if not hmac.compare_digest(actual, pin):
+                    self.close()
+                    raise ssl.SSLError("server certificate does not match the configured SHA-256 pin")
+
+        return self.do_open(PinnedConnection, req, context=self._pinned_context)
 
 
 class ApiClient:
@@ -86,6 +115,8 @@ class ApiClient:
         self.write_requests = 0
         if opener is not None:
             self._opener = opener
+        elif config.tls_sha256:
+            self._opener = build_opener(_PinnedHTTPSHandler(config.tls_sha256), _RefuseRedirect)
         else:
             if not config.verify_tls:
                 ctx = ssl._create_unverified_context()
@@ -249,15 +280,18 @@ def client_for(nickname: str, dotenv_path: Optional[str] = None) -> ApiClient:
     normalized_url = urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
     ca_bundle = env.get("{}_ca_bundle".format(norm))
     verify_raw = env.get("{}_verify_tls".format(norm), "").strip().lower()
-    # Local IP / vlab Orchestrators often use a self-signed appliance cert without IP SAN
-    is_local_vlab = "vlab" in norm or verify_raw in ("false", "0", "no")
+    # A self-signed lab Orchestrator is trusted by pinning its certificate, never because of its profile name.
+    pin = re.sub(r"[\s:]", "", env.get("{}_tls_sha256".format(norm), "")).lower() or None
+    if pin is not None and not re.fullmatch(r"[0-9a-f]{64}", pin):
+        raise ConfigurationError("{}_tls_sha256 must be the certificate's SHA-256 fingerprint: 64 hex digits, colons allowed".format(norm))
     cfg = Config(
         base_url=normalized_url,
         api_key=api_key,
         ca_bundle=ca_bundle,
         api_key_header=env.get("{}_api_key_header".format(norm)) or "X-Auth-Token",
-        verify_tls=not is_local_vlab,
+        verify_tls=verify_raw not in ("false", "0", "no"),
         name=norm,
+        tls_sha256=pin,
     )
     return ApiClient(cfg)
 
