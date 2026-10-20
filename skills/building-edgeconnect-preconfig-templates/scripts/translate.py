@@ -511,6 +511,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
     if args.compare and args.variables:
         parser.error("--compare writes a fresh variables.csv: do not combine it with --variables")
+    if not (DEFAULT_TEMPLATE.parent / "orchestrator-{}.yml".format(args.target_release)).is_file():
+        have = sorted(f.name[len("orchestrator-"):-len(".yml")] for f in DEFAULT_TEMPLATE.parent.glob("orchestrator-*.yml"))
+        print("no default preconfig template for Orchestrator release {} (have: {}). Run capture.py once against an Orchestrator on "
+              "that release to cache it, or pass --target-release with one of these.".format(args.target_release, ", ".join(have)), file=sys.stderr)
+        return 2
     out = args.out or (Path.cwd() / "preconfig-output" / args.site_type)
     global IGNORE_OWNERSHIP
     IGNORE_OWNERSHIP = args.ignore_template_ownership

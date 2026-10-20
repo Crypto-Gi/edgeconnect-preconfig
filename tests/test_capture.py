@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import sys
 import tempfile
@@ -6,6 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
 import capture  # noqa: E402
+import translate  # noqa: E402  guard-ok: scripts are imported after the sys.path insert, like capture above
 from common import redact_secrets  # noqa: E402
 
 
@@ -128,3 +131,54 @@ class RedactTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DefaultTemplateTest(unittest.TestCase):
+    """capture.py caches the default template of an Orchestrator release the toolkit does not bundle."""
+
+    def run_with(self, default_body):
+        client = FakeClient()
+        real = client.request
+
+        def request(method, path, query=None, expected_status=(200,), expect_json=True):
+            if path == "/gms/versions":
+                client.calls.append((method, path, {}))
+                return json.dumps({"current": "10.0.0.99999"}).encode()
+            if path == "/gms/appliance/preconfiguration/default":
+                client.calls.append((method, path, {}))
+                return default_body.encode() if isinstance(default_body, str) else json.dumps(default_body).encode()
+            return real(method, path, query, expected_status, expect_json)
+
+        client.request = request
+        folder = Path(tempfile.mkdtemp())
+        real_dir, capture.DEFAULT_TEMPLATES_DIR = capture.DEFAULT_TEMPLATES_DIR, folder
+        self.addCleanup(setattr, capture, "DEFAULT_TEMPLATES_DIR", real_dir)
+        capture.client_for = lambda nickname: client
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            capture.capture("lab", "lab-a", "reference", 0, Path(tempfile.mkdtemp()))
+        return folder / "orchestrator-10.0.0.99999.yml", err.getvalue()
+
+    def test_template_in_a_json_configdata_field_is_cached(self):
+        saved, _ = self.run_with({"configData": "applianceInfo:\n  hostname: example\n", "autoApply": False, "nepk": None})
+        self.assertEqual(saved.read_text(encoding="utf-8"), "applianceInfo:\n  hostname: example\n")
+
+    def test_plain_text_template_is_still_cached(self):
+        saved, _ = self.run_with("applianceInfo:\n  hostname: example\n")
+        self.assertEqual(saved.read_text(encoding="utf-8"), "applianceInfo:\n  hostname: example\n")
+
+    def test_unusable_answer_is_reported_not_silently_skipped(self):
+        saved, err = self.run_with({"configData": None})
+        self.assertFalse(saved.exists())
+        self.assertIn("10.0.0.99999", err)
+
+
+class TranslateMissingTemplateTest(unittest.TestCase):
+    def test_unknown_release_stops_with_a_clear_message(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = translate.main(["--capture", tempfile.mkdtemp(), "--site-type", "t", "--target-release", "10.0.0.99999"])
+        self.assertEqual(code, 2)
+        self.assertIn("10.0.0.99999", err.getvalue())
+        self.assertIn("capture", err.getvalue())
+

@@ -73,9 +73,15 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
     release = versions["data"].get("current") if versions["ok"] and isinstance(versions["data"], dict) else None
     if release and not only and not (DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)).is_file():
         def_tmpl = reader.get("/gms/appliance/preconfiguration/default")
-        if def_tmpl["ok"] and isinstance(def_tmpl["data"], str) and def_tmpl["data"].strip():
+        text = def_tmpl["data"] if def_tmpl["ok"] else None
+        if isinstance(text, dict):  # some releases (seen on 10.0.0.40625) wrap the YAML in a JSON object's configData
+            text = text.get("configData")
+        if isinstance(text, str) and text.strip():
             DEFAULT_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
-            (DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)).write_text(def_tmpl["data"], encoding="utf-8")
+            (DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)).write_text(text, encoding="utf-8")
+        else:
+            print("warning: could not cache the default preconfig template of Orchestrator release {}; translate.py --target-release {} "
+                  "needs {}".format(release, release, DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)), file=sys.stderr)
     listing = reader.get("/appliance")
     if not listing["ok"]:
         raise Stop("cannot list appliances: {}".format(listing))
