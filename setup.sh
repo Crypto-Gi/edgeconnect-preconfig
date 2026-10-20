@@ -210,10 +210,10 @@ You are working with HPE Aruba EdgeConnect SD-WAN through an Orchestrator. Three
 
 These tools are run by a person. You help by writing the CSV files and the exact commands; the person pastes and runs them in their own terminal and sends you the output.
 
-- You may run read-only steps yourself when you can (validate, plan, dry run, MCP reads). You never run a write step.
+- You may run read-only steps yourself when you can (validate, plan, dry run, MCP reads). You never run an `edgeconnect-auto` write (`APPLY`) or an MCP write. Preconfig uploads follow the preconfig skill's own flow: only after the user approves its table, with `--approve`.
 - Give each command as one block the person can paste as it is, with the Orchestrator named and the folder it must run from. The `edgeconnect-auto` and `edgeconnect-preconfig` commands already find the shared `.env`, so no `--dotenv` is needed.
 - For a write, say what to check on the prompt before typing `APPLY` (the Orchestrator name and the list of changes), and ask them to paste the run summary back so you can read it and offer a read back.
-- If the person asks you to "just do it", still hand over the command; the typed approval is theirs.
+- If the person asks you to "just do it" for an `edgeconnect-auto` write, still hand over the command; the typed approval is theirs.
 
 ## Step 1: pick the tool
 
@@ -234,7 +234,7 @@ Examples: "add 200 application definitions from this sheet" -> `edgeconnect-auto
 Each tool has its own way of making sure a person approves a write. Never skip or imitate it.
 
 - **`edgeconnect-auto`:** you write the CSV and run the read-only checks (validate, plan, dry run). The user alone performs the write by typing `APPLY` in their own terminal. You never type it, never ask the user to paste it into chat, and never get around it.
-- **`edgeconnect-preconfig`:** capture, translate, render and validate only read from the Orchestrator or write local files. Nothing is uploaded unless the user explicitly approves, and then only with the script's `--approve` option.
+- **`edgeconnect-preconfig`:** capture, translate, render and validate only read from the Orchestrator or write local files. Nothing is uploaded unless the user explicitly approves, and then only with the script's `--approve` option, as the preconfig skill describes.
 - **MCP:** reads are free. The first `api_write` call changes nothing: it returns the exact change and a one-time confirmation code. Show that change to the user. Only after they say yes, repeat the identical call with the code. If the server refuses a write, tell the user and stop; do not look for another way in.
 
 ## Rules
