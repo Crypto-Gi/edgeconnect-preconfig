@@ -206,6 +206,15 @@ AGENTS_TEXT="$(cat <<'EOF'
 
 You are working with HPE Aruba EdgeConnect SD-WAN through an Orchestrator. Three tools are available here. Choose the tool first, using the table below, then follow that tool's skill. This file only routes and sets the answer style; it never replaces a skill's safety rules, so do not restate or relax them.
 
+## How these tools are used
+
+These tools are run by a person. You help by writing the CSV files and the exact commands; the person pastes and runs them in their own terminal and sends you the output.
+
+- You may run read-only steps yourself when you can (validate, plan, dry run, MCP reads). You never run a write step.
+- Give each command as one block the person can paste as it is, with the Orchestrator named and the folder it must run from. The `edgeconnect-auto` and `edgeconnect-preconfig` commands already find the shared `.env`, so no `--dotenv` is needed.
+- For a write, say what to check on the prompt before typing `APPLY` (the Orchestrator name and the list of changes), and ask them to paste the run summary back so you can read it and offer a read back.
+- If the person asks you to "just do it", still hand over the command; the typed approval is theirs.
+
 ## Step 1: pick the tool
 
 Find the first row that matches what the user wants.
