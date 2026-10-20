@@ -198,8 +198,83 @@ except ValueError: pass' || true)"
   done
 fi
 
+say "Agent instructions in $ROOT"
+# AGENTS.md routes an agent started in this folder to the right tool; CLAUDE.md points Claude Code at it.
+# A file you have edited is never overwritten: a newer version is written beside it as AGENTS.md.new.
+AGENTS_TEXT="$(cat <<'EOF'
+# EdgeConnect tools: which one to use, and how
+
+You are working with HPE Aruba EdgeConnect SD-WAN through an Orchestrator. Three tools are available here. Choose the tool first, using the table below, then follow that tool's skill. This file only routes and sets the answer style; it never replaces a skill's safety rules, so do not restate or relax them.
+
+## Step 1: pick the tool
+
+Find the first row that matches what the user wants.
+
+| If the user wants to... | Use | Skill to read first |
+|---|---|---|
+| create, change or delete **firewall policies** (global or inter-segment), **zones**, **address groups**, **service groups**, **application definitions**, **application groups**, **AppExpress Monitor** entries, or **template-group ACLs**, especially in bulk from a list or spreadsheet | **`edgeconnect-auto`** (command line) | `managing-edgeconnect-firewall-and-objects` |
+| **capture** an appliance's configuration, build a **preconfig template**, or **render, check, validate or upload preconfigs** | **`edgeconnect-preconfig <stage>`** (command line) | `building-edgeconnect-preconfig-templates` |
+| look something up, list or explain things, troubleshoot, check status or alarms, **read back** what a change did, or do any other Orchestrator task that is not in the two rows above | **MCP server** (tools `list_orchestrators`, `find_operations`, `describe_operation`, `api_get`, `api_write`) | `edgeconnect-guide` |
+
+If a request fits two rows, use the upper one: it has the stronger approval step. If it fits none, or you are unsure which tool owns an object, say so in one line and ask; do not guess.
+
+Examples: "add 200 application definitions from this sheet" -> `edgeconnect-auto`. "allow segment A to reach segment B on TCP 443" -> `edgeconnect-auto`. "build a preconfig for this branch appliance" -> `edgeconnect-preconfig`. "which appliances are unreachable?" -> MCP. "did that firewall change take effect?" -> MCP read back.
+
+## Step 2: follow the tool's approval flow
+
+Each tool has its own way of making sure a person approves a write. Never skip or imitate it.
+
+- **`edgeconnect-auto`:** you write the CSV and run the read-only checks (validate, plan, dry run). The user alone performs the write by typing `APPLY` in their own terminal. You never type it, never ask the user to paste it into chat, and never get around it.
+- **`edgeconnect-preconfig`:** capture, translate, render and validate only read from the Orchestrator or write local files. Nothing is uploaded unless the user explicitly approves, and then only with the script's `--approve` option.
+- **MCP:** reads are free. The first `api_write` call changes nothing: it returns the exact change and a one-time confirmation code. Show that change to the user. Only after they say yes, repeat the identical call with the code. If the server refuses a write, tell the user and stop; do not look for another way in.
+
+## Rules
+
+1. Objects owned by `edgeconnect-auto` or `edgeconnect-preconfig` (see Step 1) are never written with the MCP `api_write` tool, even if it would work.
+2. Name the Orchestrator in every command: `--orchestrator <nickname>` for `edgeconnect-auto` and the preconfig scripts, the `orchestrator` argument for MCP. Never rely on a default. If the user has not said which one, ask. `list_orchestrators` (MCP) shows the configured nicknames.
+3. After any write by `edgeconnect-auto` or `edgeconnect-preconfig`, offer an MCP read back and report what it actually returned, not only "verified".
+4. Do not start an MCP write while an `edgeconnect-auto` run on the same objects is in progress.
+5. Never edit `.env` files, API keys, TLS pins or certificate settings. Tell the user the exact line to add and let them add it. Never print or repeat a secret.
+6. A more specific instruction from the user in chat wins over this file, but never over a skill's safety rule or a tool's approval step.
+
+## This folder
+
+- `.env`: the one settings file shared by `edgeconnect-auto` and `edgeconnect-preconfig` (Orchestrator nicknames, URLs, API keys, TLS pins). Both commands find it by themselves, so run them from any folder.
+- `edgeconnect-orchestrator-automation/` and `edgeconnect-preconfig/`: the tools' source, kept current by `setup.sh`. Read them, do not edit them.
+- Keep your own CSVs, reports and captures in a separate work folder, not in the tool folders. Never commit them or `.env`.
+- The MCP server is installed and run separately (for example in Docker) and is not part of this folder. If its tools are not available, say so and continue with the other two; do not try to install or start it.
+
+## How to answer
+
+- Lead with the answer or the result, then the evidence.
+- Say which tool you will use, in one line, before you use it.
+- Before anything that writes, show the exact command or change and what it affects, then wait for the user.
+- Say "verified" only after a read back shows it. If you could not check something, say so.
+- End with what you did not check or are unsure about.
+- Keep replies short. Ask one question at a time, and only when a wrong guess would change what traffic or configuration is affected.
+- If a command fails, show the message as printed and the fix it suggests. Do not retry with different flags to get past a check.
+EOF
+)"
+if [ ! -e "$ROOT/AGENTS.md" ]; then
+  printf '%s\n' "$AGENTS_TEXT" > "$ROOT/AGENTS.md"
+  echo "AGENTS.md: created"
+elif [ "$(cat "$ROOT/AGENTS.md")" = "$AGENTS_TEXT" ]; then
+  echo "AGENTS.md: already present, up to date"
+else
+  printf '%s\n' "$AGENTS_TEXT" > "$ROOT/AGENTS.md.new"
+  echo "AGENTS.md: already exists and differs, kept unchanged; the current version is in AGENTS.md.new"
+fi
+if [ ! -e "$ROOT/CLAUDE.md" ]; then
+  printf '@AGENTS.md\n' > "$ROOT/CLAUDE.md"
+  echo "CLAUDE.md: created (points to AGENTS.md)"
+elif grep -qF '@AGENTS.md' "$ROOT/CLAUDE.md"; then
+  echo "CLAUDE.md: already present"
+else
+  echo "CLAUDE.md: already exists, kept unchanged; add the line @AGENTS.md to it so Claude Code reads AGENTS.md"
+fi
+
 say "Done"
 echo "1. Fill in $ROOT/.env"
 echo "2. Check: edgeconnect-auto --orchestrator <nickname> discovery"
-echo "3. Restart your agent so it loads the skills"
+echo "3. Start your agent in $ROOT (it reads AGENTS.md there) and restart it so it loads the skills"
 echo "The MCP server and its guide skill are separate: https://github.com/Crypto-Gi/edgeconnect-mcp"
