@@ -201,7 +201,9 @@ fi
 say "Agent instructions in $ROOT"
 # AGENTS.md routes an agent started in this folder to the right tool; CLAUDE.md points Claude Code at it.
 # A file you have edited is never overwritten: a newer version is written beside it as AGENTS.md.new.
-AGENTS_TEXT="$(cat <<'EOF'
+# Written straight to a file, not through "$(cat <<EOF)": bash 3.2 (macOS) misparses an apostrophe in a heredoc inside $( ).
+AGENTS_NEW="$ROOT/.AGENTS.md.setup"
+cat > "$AGENTS_NEW" <<'EOF'
 # EdgeConnect tools: which one to use, and how
 
 You are working with HPE Aruba EdgeConnect SD-WAN through an Orchestrator. Three tools are available here. Choose the tool first, using the table below, then follow that tool's skill. This file only routes and sets the answer style; it never replaces a skill's safety rules, so do not restate or relax them.
@@ -263,14 +265,14 @@ Each tool has its own way of making sure a person approves a write. Never skip o
 - Keep replies short. Ask one question at a time, and only when a wrong guess would change what traffic or configuration is affected.
 - If a command fails, show the message as printed and the fix it suggests. Do not retry with different flags to get past a check.
 EOF
-)"
 if [ ! -e "$ROOT/AGENTS.md" ]; then
-  printf '%s\n' "$AGENTS_TEXT" > "$ROOT/AGENTS.md"
+  mv "$AGENTS_NEW" "$ROOT/AGENTS.md"
   echo "AGENTS.md: created"
-elif [ "$(cat "$ROOT/AGENTS.md")" = "$AGENTS_TEXT" ]; then
+elif cmp -s "$AGENTS_NEW" "$ROOT/AGENTS.md"; then
+  rm -f "$AGENTS_NEW"
   echo "AGENTS.md: already present, up to date"
 else
-  printf '%s\n' "$AGENTS_TEXT" > "$ROOT/AGENTS.md.new"
+  mv "$AGENTS_NEW" "$ROOT/AGENTS.md.new"
   echo "AGENTS.md: already exists and differs, kept unchanged; the current version is in AGENTS.md.new"
 fi
 if [ ! -e "$ROOT/CLAUDE.md" ]; then
