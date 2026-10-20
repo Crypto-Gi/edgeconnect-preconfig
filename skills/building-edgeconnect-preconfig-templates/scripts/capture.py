@@ -6,6 +6,8 @@ Output: <work>/<reference|samples>/<orchestrator>/<nePk>/<UTC timestamp>/
   run.json  capture-index.json  requests.jsonl  capture/<id>.<live|cached|orchestrator|backup>.json
 """
 import argparse
+import base64
+import binascii
 import json
 import os
 import sys
@@ -14,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, WORK_DIR, client_for, load_yaml, redact_secrets, utc_stamp, write_json  # noqa: E402
+from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, WORK_DIR, client_for, load_yaml, parse_yaml, redact_secrets, utc_stamp, write_json  # noqa: E402
 
 STOP_ERRORS = ("AuthenticationError", "PermissionDeniedError", "TransportError")  # 401, 403, redirect, TLS, network
 LABELS = {"cached": ("cached", "live"), "fromGms": ("cached", "live")}
@@ -74,9 +76,16 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
     if release and not only and not (DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)).is_file():
         def_tmpl = reader.get("/gms/appliance/preconfiguration/default")
         text = def_tmpl["data"] if def_tmpl["ok"] else None
-        if isinstance(text, dict):  # some releases (seen on 10.0.0.40625) wrap the YAML in a JSON object's configData
-            text = text.get("configData")
-        if isinstance(text, str) and text.strip():
+        if isinstance(text, dict):  # 10.0.0.40625 answers {"configData": "<base64 of the YAML>", ...}
+            try:
+                text = base64.b64decode(text.get("configData") or "", validate=True).decode("utf-8")
+            except (TypeError, binascii.Error, UnicodeDecodeError):
+                text = None
+        try:
+            usable = isinstance(text, str) and isinstance(parse_yaml(text), dict)
+        except Exception:  # not YAML at all
+            usable = False
+        if usable:
             DEFAULT_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
             (DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)).write_text(text, encoding="utf-8")
         else:

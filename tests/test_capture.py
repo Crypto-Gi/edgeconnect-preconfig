@@ -1,3 +1,4 @@
+import base64
 import contextlib
 import io
 import json
@@ -159,9 +160,16 @@ class DefaultTemplateTest(unittest.TestCase):
             capture.capture("lab", "lab-a", "reference", 0, Path(tempfile.mkdtemp()))
         return folder / "orchestrator-10.0.0.99999.yml", err.getvalue()
 
-    def test_template_in_a_json_configdata_field_is_cached(self):
-        saved, _ = self.run_with({"configData": "applianceInfo:\n  hostname: example\n", "autoApply": False, "nepk": None})
-        self.assertEqual(saved.read_text(encoding="utf-8"), "applianceInfo:\n  hostname: example\n")
+    def test_template_in_a_base64_json_configdata_field_is_cached(self):
+        # The shape seteam's Orchestrator 10.0.0.40625 returns: base64 YAML inside a JSON object.
+        yaml_text = "# Preconfiguration Template\napplianceInfo:\n  hostname: example\n"
+        saved, _ = self.run_with({"configData": base64.b64encode(yaml_text.encode()).decode(), "autoApply": False, "nepk": None})
+        self.assertEqual(saved.read_text(encoding="utf-8"), yaml_text)
+
+    def test_configdata_that_is_not_a_yaml_mapping_is_not_cached(self):
+        saved, err = self.run_with({"configData": base64.b64encode(b"just a sentence").decode()})
+        self.assertFalse(saved.exists())
+        self.assertIn("10.0.0.99999", err)
 
     def test_plain_text_template_is_still_cached(self):
         saved, _ = self.run_with("applianceInfo:\n  hostname: example\n")
