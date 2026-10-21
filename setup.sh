@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Install or update the EdgeConnect toolkit from main, in one folder (macOS and Linux): you pick
 # the repositories (the edgeconnect-auto CLI, the preconfig scripts, the MCP guide skill) and each
-# one's agent skill. The same file ships in edgeconnect-orchestrator-automation,
-# edgeconnect-preconfig and edgeconnect-mcp. The MCP server itself is never installed here: it runs
-# separately (see the edgeconnect-mcp README).
+# one's agent skill, plus, if you want it, the MCP server run locally (stdio) for the agents you
+# choose. The same file ships in edgeconnect-orchestrator-automation, edgeconnect-preconfig and
+# edgeconnect-mcp. A Docker (HTTPS) MCP server is installed by hand from the edgeconnect-mcp guide.
 #
 #   bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-orchestrator-automation/main/setup.sh)
 #
@@ -13,15 +13,21 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: setup.sh [--repos LIST] [--dir PATH] [--skills home|folder] [--agents LIST] [--refresh-skills] [--yes]
+Usage: setup.sh [--repos LIST] [--mcp stdio|docker|no] [--mcp-agents LIST] [--dir PATH]
+                [--skills home|folder] [--agents LIST] [--refresh-skills] [--yes]
 
   --repos LIST       repositories to install, by number: 1,2,3 or "all" (default: all)
                      1) edgeconnect-orchestrator-automation  2) edgeconnect-preconfig
-                     3) edgeconnect-mcp (guide skill only)
+                     3) edgeconnect-mcp (guide skill, and the server if --mcp stdio)
+  --mcp stdio        with 3: also run the MCP server locally for your agents (default)
+  --mcp docker       with 3: you run it in Docker over HTTPS; print the install guide link
+  --mcp no           with 3: guide skill only
+  --mcp-agents LIST  agents that get the MCP server: claude-code, codex, other (prints the
+                     config to paste), comma-separated, or "all" (default: claude-code)
   --dir PATH         install folder (default: the current folder, or ~/edgeconnect when run
                      from your home folder, or $EDGECONNECT_HOME)
-  --skills folder    1) skills only in the install folder (default)
-  --skills home      2) skills for your user account (~), for every project
+  --skills folder    1) skills and MCP server only in the install folder (default)
+  --skills home      2) skills and MCP server for your user account (~), in every project
   --agents LIST      agents for the skills, comma-separated (e.g. claude-code,codex),
                      instead of choosing them in the skills installer
   --refresh-skills   reinstall skills that are already installed, from main
@@ -31,6 +37,8 @@ EOF
 
 ROOT_GIVEN="${EDGECONNECT_HOME:-}"
 PICK=""
+MCP=""
+MCP_AGENTS=""
 SCOPE=""
 REFRESH=0
 AGENTS=""
@@ -38,6 +46,8 @@ ASSUME_YES=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --repos) PICK="${2:?--repos needs a list such as 1,3 or all}"; shift 2 ;;
+    --mcp) MCP="${2:?--mcp needs stdio, docker or no}"; shift 2 ;;
+    --mcp-agents) MCP_AGENTS="${2:?--mcp-agents needs a list such as claude-code,codex}"; shift 2 ;;
     --dir) ROOT_GIVEN="${2:?--dir needs a path}"; shift 2 ;;
     --skills) SCOPE="${2:?--skills needs home or folder}"; shift 2 ;;
     --agents) AGENTS="${2:?--agents needs a list}"; shift 2 ;;
@@ -110,6 +120,47 @@ NEED_PYTHON=0
 if picked edgeconnect-orchestrator-automation || picked edgeconnect-preconfig; then NEED_PYTHON=1; fi
 echo "Installing: $REPOS"
 
+MCP_GUIDE="https://github.com/Crypto-Gi/edgeconnect-mcp/blob/main/docs/install.md"
+MCP_MODE=no
+MCP_AGENT_LIST=""
+if picked edgeconnect-mcp; then
+  if [ -z "$MCP" ]; then
+    if [ "$ASSUME_YES" -eq 0 ] && [ "$HAVE_TTY" -eq 1 ]; then
+      printf '\nInstall the MCP server too?\n  1) Yes, local (stdio) for your agents   (default)\n  2) No, I run it in Docker over HTTPS\n  3) No\n' >/dev/tty
+    fi
+    MCP="$(ask "Choose 1, 2 or 3" "1")"
+  fi
+  case "$MCP" in
+    1|stdio|local|yes) MCP_MODE=stdio ;;
+    2|docker|https|http) MCP_MODE=docker ;;
+    3|no|none) MCP_MODE=no ;;
+    *) die "choose 1 (local stdio), 2 (Docker over HTTPS) or 3 (no), not $MCP" ;;
+  esac
+  if [ "$MCP_MODE" = stdio ]; then
+    if [ -z "$MCP_AGENTS" ]; then
+      if [ "$ASSUME_YES" -eq 0 ] && [ "$HAVE_TTY" -eq 1 ]; then
+        printf '\nAdd the MCP server to which agents?\n  1) Claude Code   (default)\n  2) Codex\n  3) Other (Claude Desktop, VS Code, Cursor, Windsurf, OpenCode): show the config to paste\n' >/dev/tty
+      fi
+      MCP_AGENTS="$(ask 'Type numbers separated by commas (e.g. 1,2), or "all"' "1")"
+    fi
+    for n in $(printf '%s' "$MCP_AGENTS" | tr 'A-Z,' 'a-z '); do
+      case "$n" in
+        all) names="claude-code codex other" ;;
+        1|claude-code|claude) names="claude-code" ;;
+        2|codex) names="codex" ;;
+        3|other) names="other" ;;
+        *) die "choose MCP agents 1 (Claude Code), 2 (Codex), 3 (other) or all; not $n" ;;
+      esac
+      for name in $names; do
+        case " $MCP_AGENT_LIST " in *" $name "*) ;; *) MCP_AGENT_LIST="${MCP_AGENT_LIST:+$MCP_AGENT_LIST }$name" ;; esac
+      done
+    done
+    [ -n "$MCP_AGENT_LIST" ] || die "choose at least one agent for the MCP server"
+  fi
+elif [ -n "$MCP$MCP_AGENTS" ]; then
+  die "--mcp and --mcp-agents need repository 3 (edgeconnect-mcp) in the pick"
+fi
+
 command -v git >/dev/null || die "git is required"
 PYTHON=""
 for candidate in python3 python; do
@@ -131,7 +182,8 @@ case "$ROOT" in "~"|"~/"*) ROOT="$HOME${ROOT#\~}" ;; esac
 mkdir -p "$ROOT" && ROOT="$(cd "$ROOT" && pwd)" || die "cannot use the folder $ROOT"
 if [ -z "$SCOPE" ]; then
   if [ "$ASSUME_YES" -eq 0 ] && [ "$HAVE_TTY" -eq 1 ]; then
-    printf '\nWhere should the skills go?\n  1) Only in this folder: %s   (default)\n  2) Your user account (~)\n' "$ROOT" >/dev/tty
+    what="the skills"; [ "$MCP_MODE" = stdio ] && what="the skills and the MCP server"
+    printf '\nWhere should %s go?\n  1) Only in this folder: %s   (default)\n  2) Your user account (~), in every project\n' "$what" "$ROOT" >/dev/tty
   fi
   SCOPE="$(ask "Choose 1 or 2" "1")"
 fi
@@ -172,13 +224,16 @@ if picked edgeconnect-preconfig; then
   "$ROOT/.venv/bin/python" -m pip install -q --disable-pip-version-check -r "$ROOT/edgeconnect-preconfig/requirements.txt"
   echo "preconfig scripts $(cat "$ROOT/edgeconnect-preconfig/skills/building-edgeconnect-preconfig-templates/VERSION" 2>/dev/null || echo "(no VERSION file)"): Jinja2 and PyYAML installed"
 fi
+fi  # NEED_PYTHON
+
+if [ "$NEED_PYTHON" -eq 1 ] || [ "$MCP_MODE" = stdio ]; then
 
 say "Shared settings in $ROOT/.env"
 if [ -e "$ROOT/.env" ]; then
   echo "already exists, kept unchanged"
 else
   (umask 077; cat > "$ROOT/.env" <<'EOF'
-# Shared by edgeconnect-auto and the preconfig scripts. Never commit or share this file.
+# Shared by edgeconnect-auto, the preconfig scripts and the local MCP server. Never commit or share this file.
 # One slot per Orchestrator; the nickname is what you pass to --orchestrator.
 orch_1=lab
 lab_base_url=https://<ORCHESTRATOR_FQDN_OR_IP>
@@ -194,16 +249,18 @@ lab_api_key=<API_KEY>
 #   <nickname>_tls_sha256=<fingerprint> (self-signed certificate)
 # Preconfig: Orchestrators allowed for /validate, comma-separated nicknames.
 # EC_VALIDATORS=lab
+# MCP server: writes stay off unless you turn them on; options in
+#   https://github.com/Crypto-Gi/edgeconnect-mcp#configuration
 EOF
   )
   echo "created: replace the placeholders before the first run"
 fi
 chmod 600 "$ROOT/.env"
 
-say "Commands in $BIN"
-mkdir -p "$BIN"
-install_command() {  # name; wrapper body on stdin. Never replaces a command this script did not write.
-  local target="$BIN/$1" body
+say "Commands"
+install_command() {  # name [folder, default $BIN]; wrapper body on stdin. Never replaces a command this script did not write.
+  local target="${2:-$BIN}/$1" body
+  mkdir -p "${2:-$BIN}"
   body="$(cat)"
   if [ -e "$target" ] && ! grep -qF "$MARK" "$target"; then
     echo "$1: $target exists and was not written by this script; left unchanged"
@@ -234,11 +291,22 @@ script="$PRECONFIG_SCRIPTS/\$1.py"; shift
 EC_DOTENV="\${EC_DOTENV:-$ROOT/.env}" exec "$ROOT/.venv/bin/python" "\$script" "\$@"
 EOF
 fi
-case ":$PATH:" in
-  *":$BIN:"*) ;;
-  *) echo "$BIN is not on your PATH; add this line to your shell profile: export PATH=\"$BIN:\$PATH\"" ;;
-esac
-fi  # NEED_PYTHON
+if [ "$MCP_MODE" = stdio ]; then
+  # The server needs only the standard library: the toolkit's Python when there is one, else the system one.
+  if [ -x "$ROOT/.venv/bin/python" ]; then MCP_PY="$ROOT/.venv/bin/python"; else MCP_PY="$(command -v "$PYTHON")"; fi
+# In the install folder, not ~/.local/bin: each folder's agents start that folder's server and .env.
+install_command edgeconnect-mcp "$ROOT/bin" <<EOF
+# Runs the EdgeConnect MCP server (stdio) from $ROOT/edgeconnect-mcp with the shared .env.
+PYTHONPATH="$ROOT/edgeconnect-mcp/src\${PYTHONPATH:+:\$PYTHONPATH}" exec "$MCP_PY" -m edgeconnect_mcp --dotenv "\${EDGECONNECT_DOTENV:-$ROOT/.env}" "\$@"
+EOF
+fi
+if [ "$NEED_PYTHON" -eq 1 ]; then
+  case ":$PATH:" in
+    *":$BIN:"*) ;;
+    *) echo "$BIN is not on your PATH; add this line to your shell profile: export PATH=\"$BIN:\$PATH\"" ;;
+  esac
+fi
+fi  # .env and commands
 
 if [ "$SCOPE" = home ]; then
   say "Agent skills for your user (~/)"
@@ -271,6 +339,49 @@ except ValueError: pass' || true)"
       fi
     done
   done
+fi
+
+if [ "$MCP_MODE" = docker ]; then
+  say "MCP server"
+  echo "You run it in Docker over HTTPS: install it manually with the repo guide: $MCP_GUIDE"
+elif [ "$MCP_MODE" = stdio ]; then
+  MCP_CMD="$ROOT/bin/edgeconnect-mcp"
+  if [ "$SCOPE" = home ]; then say "MCP server for your agents, in every project"; else say "MCP server for your agents, in $ROOT"; fi
+  for agent in $MCP_AGENT_LIST; do
+    case "$agent" in
+      claude-code)
+        CLAUDE_SCOPE=project; [ "$SCOPE" = home ] && CLAUDE_SCOPE=user
+        if ! command -v claude >/dev/null; then
+          echo "Claude Code: the claude command is not installed; after installing it, run in $ROOT: claude mcp add -s $CLAUDE_SCOPE edgeconnect -- $MCP_CMD"
+        elif [ "$CLAUDE_SCOPE" = project ] && [ -e "$ROOT/.mcp.json" ] && grep -qF "\"$MCP_CMD\"" "$ROOT/.mcp.json"; then
+          echo "Claude Code: already added for this folder ($ROOT/.mcp.json)"
+        elif existing="$(cd "$ROOT" && claude mcp get edgeconnect 2>/dev/null)"; then
+          where="$(printf '%s\n' "$existing" | sed -n 's/^ *Scope: //p; s/^ *Command: //p' | tr '\n' ' ')"
+          echo "Claude Code: already has an MCP server named edgeconnect ($where), left unchanged"
+          case "$where" in *"$MCP_CMD"*) ;; *) echo "  it is not this folder's server; to switch, run claude mcp remove edgeconnect (add -s user or -s project) and run setup.sh again" ;; esac
+        else
+          (cd "$ROOT" && claude mcp add -s "$CLAUDE_SCOPE" edgeconnect -- "$MCP_CMD" >/dev/null) || die "Claude Code: claude mcp add failed"
+          if [ "$CLAUDE_SCOPE" = project ]; then
+            echo "Claude Code: added for this folder ($ROOT/.mcp.json); Claude Code asks you once to approve it"
+          else
+            echo "Claude Code: added for your user, in every project"
+          fi
+        fi ;;
+      codex)
+        if ! command -v codex >/dev/null; then
+          echo "Codex: the codex command is not installed; after installing it, run: codex mcp add edgeconnect -- $MCP_CMD"
+        elif codex mcp list 2>/dev/null | grep -qw edgeconnect; then
+          echo "Codex: already has an MCP server named edgeconnect, left unchanged"
+        else
+          codex mcp add edgeconnect -- "$MCP_CMD" >/dev/null || die "Codex: codex mcp add failed"
+          echo "Codex: added (Codex keeps MCP servers for your user only, in ~/.codex/config.toml)"
+        fi ;;
+      other)
+        echo "Other apps: add this to the app's MCP settings (where each app keeps them: https://github.com/Crypto-Gi/edgeconnect-mcp/blob/main/docs/clients.md):"
+        printf '  {"mcpServers": {"edgeconnect": {"command": "%s"}}}\n' "$MCP_CMD" ;;
+    esac
+  done
+  if [ "$SCOPE" = home ]; then echo "The user-wide entries run the server from $ROOT: moving or deleting that folder breaks them (run setup.sh again from the new place)."; fi
 fi
 
 say "Agent instructions in $ROOT"
@@ -328,7 +439,7 @@ Each tool has its own way of making sure a person approves a write. Never skip o
 - `.env`: the one settings file shared by `edgeconnect-auto` and `edgeconnect-preconfig` (Orchestrator nicknames, URLs, API keys, TLS pins). Both commands find it by themselves, so run them from any folder.
 - `edgeconnect-orchestrator-automation/` and `edgeconnect-preconfig/`, when installed: the tools' source, kept current by `setup.sh`. Read them, do not edit them.
 - Keep your own CSVs, reports and captures in a separate work folder, not in the tool folders. Never commit them or `.env`.
-- `edgeconnect-mcp/`, if it was picked, is there only for its guide skill. The MCP server is installed and run separately (for example in Docker) and is not part of this folder. If its tools are not available, say so and continue with the other two; do not try to install or start it.
+- `edgeconnect-mcp/`, if it was picked: its guide skill and, when "Installed here" lists it, the MCP server that your agent starts through `bin/edgeconnect-mcp` with the shared `.env`. Otherwise the MCP server runs separately (for example in Docker). If its tools are not available, say so and continue with the other two; do not try to install or start it.
 
 ## How to answer
 
@@ -344,18 +455,21 @@ EOF
 LIST_AUTO='- `edgeconnect-auto` and the skill `managing-edgeconnect-firewall-and-objects` (edgeconnect-orchestrator-automation)'
 LIST_PRECONFIG='- `edgeconnect-preconfig` and the skill `building-edgeconnect-preconfig-templates` (edgeconnect-preconfig)'
 LIST_MCP='- the skill `edgeconnect-guide` for the MCP server (edgeconnect-mcp); the server itself runs separately'
+LIST_MCP_LOCAL='- the skill `edgeconnect-guide` and the MCP server, run locally by `bin/edgeconnect-mcp` with the shared `.env` (edgeconnect-mcp)'
 LIST_END='A tool not listed here is not installed in this folder: do not run its commands. If the user needs it, tell them to run setup.sh again and pick it.'
 {
   printf '\n## Installed here\n\n'
   if [ -d "$ROOT/edgeconnect-orchestrator-automation/.git" ]; then printf '%s\n' "$LIST_AUTO"; fi
   if [ -d "$ROOT/edgeconnect-preconfig/.git" ]; then printf '%s\n' "$LIST_PRECONFIG"; fi
-  if [ -d "$ROOT/edgeconnect-mcp/.git" ]; then printf '%s\n' "$LIST_MCP"; fi
+  if [ -d "$ROOT/edgeconnect-mcp/.git" ]; then
+    if [ -x "$ROOT/bin/edgeconnect-mcp" ]; then printf '%s\n' "$LIST_MCP_LOCAL"; else printf '%s\n' "$LIST_MCP"; fi
+  fi
   printf '\n%s\n' "$LIST_END"
 } >> "$AGENTS_NEW"
 section() { sed -n '/^## Installed here$/,/^A tool not listed here is not installed/p' "$1"; }
 rest() { sed '/^## Installed here$/,/^A tool not listed here is not installed/d' "$1"; }
 LIST_LINES="$ROOT/.AGENTS.md.lines"
-printf '%s\n' '## Installed here' '' "$LIST_AUTO" "$LIST_PRECONFIG" "$LIST_MCP" "$LIST_END" > "$LIST_LINES"
+printf '%s\n' '## Installed here' '' "$LIST_AUTO" "$LIST_PRECONFIG" "$LIST_MCP" "$LIST_MCP_LOCAL" "$LIST_END" > "$LIST_LINES"
 if [ ! -e "$ROOT/AGENTS.md" ]; then
   mv "$AGENTS_NEW" "$ROOT/AGENTS.md"
   echo "AGENTS.md: created"
@@ -381,12 +495,16 @@ fi
 
 say "Done: $REPOS"
 step=1
-if [ "$NEED_PYTHON" -eq 1 ]; then echo "$step. Fill in $ROOT/.env"; step=$((step + 1)); fi
+if [ "$NEED_PYTHON" -eq 1 ] || [ "$MCP_MODE" = stdio ]; then echo "$step. Fill in $ROOT/.env"; step=$((step + 1)); fi
 if picked edgeconnect-orchestrator-automation; then echo "$step. Check: edgeconnect-auto --orchestrator <nickname> discovery"; step=$((step + 1)); fi
 if picked edgeconnect-preconfig; then echo "$step. Check: edgeconnect-preconfig capture --help"; step=$((step + 1)); fi
-echo "$step. Start your agent in $ROOT (it reads AGENTS.md there) and restart it so it loads the skills"
-if picked edgeconnect-mcp; then
-  echo "The MCP server itself is not installed here; run it as its README describes: https://github.com/Crypto-Gi/edgeconnect-mcp#install"
+echo "$step. Start your agent in $ROOT (it reads AGENTS.md there) and restart it so it loads the skills and MCP servers"; step=$((step + 1))
+if [ "$MCP_MODE" = stdio ]; then
+  echo "$step. Check the MCP server: ask your agent \"list my EdgeConnect orchestrators\""
+elif [ "$MCP_MODE" = docker ]; then
+  echo "The MCP server runs in your Docker: install it manually with the repo guide: $MCP_GUIDE"
+elif picked edgeconnect-mcp; then
+  echo "The MCP server is not installed (run setup.sh again and pick 3, then 1, to run it locally; or see $MCP_GUIDE)"
 else
-  echo "The MCP server and its guide skill are separate (run setup.sh again and pick 3 for the skill): https://github.com/Crypto-Gi/edgeconnect-mcp"
+  echo "The MCP server and its guide skill are separate (run setup.sh again and pick 3): https://github.com/Crypto-Gi/edgeconnect-mcp"
 fi
