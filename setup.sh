@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Install or update the EdgeConnect toolkit: the edgeconnect-auto CLI, the preconfig scripts and
-# their two agent skills, all from main, in one folder (macOS and Linux). The same file ships in
-# edgeconnect-orchestrator-automation, edgeconnect-preconfig and edgeconnect-mcp. The MCP server
-# and its guide skill are installed separately (see the edgeconnect-mcp README).
+# Install or update the EdgeConnect toolkit from main, in one folder (macOS and Linux): you pick
+# the repositories (the edgeconnect-auto CLI, the preconfig scripts, the MCP guide skill) and each
+# one's agent skill. The same file ships in edgeconnect-orchestrator-automation,
+# edgeconnect-preconfig and edgeconnect-mcp. The MCP server itself is never installed here: it runs
+# separately (see the edgeconnect-mcp README).
 #
 #   bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-orchestrator-automation/main/setup.sh)
 #
@@ -12,8 +13,11 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: setup.sh [--dir PATH] [--skills home|folder] [--agents LIST] [--refresh-skills] [--yes]
+Usage: setup.sh [--repos LIST] [--dir PATH] [--skills home|folder] [--agents LIST] [--refresh-skills] [--yes]
 
+  --repos LIST       repositories to install, by number: 1,2,3 or "all" (default: all)
+                     1) edgeconnect-orchestrator-automation  2) edgeconnect-preconfig
+                     3) edgeconnect-mcp (guide skill only)
   --dir PATH         install folder (default: the current folder, or ~/edgeconnect when run
                      from your home folder, or $EDGECONNECT_HOME)
   --skills folder    1) skills only in the install folder (default)
@@ -26,12 +30,14 @@ EOF
 }
 
 ROOT_GIVEN="${EDGECONNECT_HOME:-}"
+PICK=""
 SCOPE=""
 REFRESH=0
 AGENTS=""
 ASSUME_YES=0
 while [ $# -gt 0 ]; do
   case "$1" in
+    --repos) PICK="${2:?--repos needs a list such as 1,3 or all}"; shift 2 ;;
     --dir) ROOT_GIVEN="${2:?--dir needs a path}"; shift 2 ;;
     --skills) SCOPE="${2:?--skills needs home or folder}"; shift 2 ;;
     --agents) AGENTS="${2:?--agents needs a list}"; shift 2 ;;
@@ -44,7 +50,6 @@ done
 
 BIN="$HOME/.local/bin"
 MARK="# edgeconnect setup.sh"
-REPOS="edgeconnect-orchestrator-automation edgeconnect-preconfig"
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -58,6 +63,52 @@ ask() {  # question, default -> answer (the default when --yes or no terminal)
   fi
   printf '%s' "${answer:-$2}"
 }
+
+if [ -z "$PICK" ] && [ "$ASSUME_YES" -eq 0 ] && [ "$HAVE_TTY" -eq 1 ]; then
+  cat >/dev/tty <<'EOF'
+
+Which repositories do you want to install?
+
++---+--------------------------------------------+-----------------------------+
+| # | Repository                                 | What it does                |
++---+--------------------------------------------+-----------------------------+
+| 1 | edgeconnect-orchestrator-automation        | edgeconnect-auto command:   |
+|   |                                            | bulk firewall policies,     |
+|   | Skill:                                     | address/service groups,     |
+|   | managing-edgeconnect-firewall-and-objects  | application definitions     |
++---+--------------------------------------------+-----------------------------+
+| 2 | edgeconnect-preconfig                      | edgeconnect-preconfig       |
+|   |                                            | command: capture appliance, |
+|   | Skill:                                     | build YAML template + CSV,  |
+|   | building-edgeconnect-preconfig-templates   | validate and upload         |
++---+--------------------------------------------+-----------------------------+
+| 3 | edgeconnect-mcp                            | Guide skill for the MCP     |
+|   |                                            | server only (the server     |
+|   | Skill:                                     | runs in your Docker,        |
+|   | edgeconnect-guide                          | not installed here)         |
++---+--------------------------------------------+-----------------------------+
+
+EOF
+  PICK="$(ask 'Type numbers separated by commas (e.g. 1,3), or "all"' "all")"
+fi
+REPOS=""
+for n in $(printf '%s' "${PICK:-all}" | tr 'A-Z,' 'a-z '); do
+  case "$n" in
+    all) names="edgeconnect-orchestrator-automation edgeconnect-preconfig edgeconnect-mcp" ;;
+    1) names="edgeconnect-orchestrator-automation" ;;
+    2) names="edgeconnect-preconfig" ;;
+    3) names="edgeconnect-mcp" ;;
+    *) die "choose numbers from 1 to 3 separated by commas, or all; not $n" ;;
+  esac
+  for name in $names; do
+    case " $REPOS " in *" $name "*) ;; *) REPOS="${REPOS:+$REPOS }$name" ;; esac
+  done
+done
+[ -n "$REPOS" ] || die "choose at least one repository"
+picked() { case " $REPOS " in *" $1 "*) return 0 ;; esac; return 1; }
+NEED_PYTHON=0
+if picked edgeconnect-orchestrator-automation || picked edgeconnect-preconfig; then NEED_PYTHON=1; fi
+echo "Installing: $REPOS"
 
 command -v git >/dev/null || die "git is required"
 PYTHON=""
@@ -108,12 +159,19 @@ for repo in $REPOS; do
   fi
 done
 
+if [ "$NEED_PYTHON" -eq 1 ]; then
 say "Python environment in $ROOT/.venv"
 if [ -x "$ROOT/.venv/bin/python" ]; then echo "already present"; else "$PYTHON" -m venv "$ROOT/.venv"; fi
 # The pip that ships with an older Python (21.x on macOS 3.9) cannot install the CLI in editable mode.
 "$ROOT/.venv/bin/python" -m pip install -q --disable-pip-version-check --upgrade pip
-"$ROOT/.venv/bin/python" -m pip install -q --disable-pip-version-check -e "$ROOT/edgeconnect-orchestrator-automation" -r "$ROOT/edgeconnect-preconfig/requirements.txt"
-echo "edgeconnect-auto $("$ROOT/.venv/bin/python" -c 'import edgeconnect_automation as e; print(e.__version__)'), Jinja2 and PyYAML installed"
+if picked edgeconnect-orchestrator-automation; then
+  "$ROOT/.venv/bin/python" -m pip install -q --disable-pip-version-check -e "$ROOT/edgeconnect-orchestrator-automation"
+  echo "edgeconnect-auto $("$ROOT/.venv/bin/python" -c 'import edgeconnect_automation as e; print(e.__version__)') installed"
+fi
+if picked edgeconnect-preconfig; then
+  "$ROOT/.venv/bin/python" -m pip install -q --disable-pip-version-check -r "$ROOT/edgeconnect-preconfig/requirements.txt"
+  echo "preconfig scripts $(cat "$ROOT/edgeconnect-preconfig/skills/building-edgeconnect-preconfig-templates/VERSION" 2>/dev/null || echo "(no VERSION file)"): Jinja2 and PyYAML installed"
+fi
 
 say "Shared settings in $ROOT/.env"
 if [ -e "$ROOT/.env" ]; then
@@ -157,9 +215,12 @@ install_command() {  # name; wrapper body on stdin. Never replaces a command thi
   chmod 755 "$target"
   echo "$1: $state ($target)"
 }
+if picked edgeconnect-orchestrator-automation; then
 install_command edgeconnect-auto <<EOF
 exec "$ROOT/.venv/bin/edgeconnect-auto" --dotenv "$ROOT/.env" "\$@"
 EOF
+fi
+if picked edgeconnect-preconfig; then
 install_command edgeconnect-preconfig <<EOF
 # Usage: edgeconnect-preconfig STAGE [options], where STAGE is capture, compare, translate, render, check, upload, ...
 case "\${1:-}" in
@@ -172,10 +233,12 @@ script="$PRECONFIG_SCRIPTS/\$1.py"; shift
 [ -f "\$script" ] || { echo "unknown stage; run: edgeconnect-preconfig --help" >&2; exit 2; }
 EC_DOTENV="\${EC_DOTENV:-$ROOT/.env}" exec "$ROOT/.venv/bin/python" "\$script" "\$@"
 EOF
+fi
 case ":$PATH:" in
   *":$BIN:"*) ;;
   *) echo "$BIN is not on your PATH; add this line to your shell profile: export PATH=\"$BIN:\$PATH\"" ;;
 esac
+fi  # NEED_PYTHON
 
 if [ "$SCOPE" = home ]; then
   say "Agent skills for your user (~/)"
@@ -265,7 +328,7 @@ Each tool has its own way of making sure a person approves a write. Never skip o
 - `.env`: the one settings file shared by `edgeconnect-auto` and `edgeconnect-preconfig` (Orchestrator nicknames, URLs, API keys, TLS pins). Both commands find it by themselves, so run them from any folder.
 - `edgeconnect-orchestrator-automation/` and `edgeconnect-preconfig/`: the tools' source, kept current by `setup.sh`. Read them, do not edit them.
 - Keep your own CSVs, reports and captures in a separate work folder, not in the tool folders. Never commit them or `.env`.
-- The MCP server is installed and run separately (for example in Docker) and is not part of this folder. If its tools are not available, say so and continue with the other two; do not try to install or start it.
+- `edgeconnect-mcp/`, if it was picked, is there only for its guide skill. The MCP server is installed and run separately (for example in Docker) and is not part of this folder. If its tools are not available, say so and continue with the other two; do not try to install or start it.
 
 ## How to answer
 
@@ -296,8 +359,14 @@ else
   echo "CLAUDE.md: already exists, kept unchanged; add the line @AGENTS.md to it so Claude Code reads AGENTS.md"
 fi
 
-say "Done"
-echo "1. Fill in $ROOT/.env"
-echo "2. Check: edgeconnect-auto --orchestrator <nickname> discovery"
-echo "3. Start your agent in $ROOT (it reads AGENTS.md there) and restart it so it loads the skills"
-echo "The MCP server and its guide skill are separate: https://github.com/Crypto-Gi/edgeconnect-mcp"
+say "Done: $REPOS"
+step=1
+if [ "$NEED_PYTHON" -eq 1 ]; then echo "$step. Fill in $ROOT/.env"; step=$((step + 1)); fi
+if picked edgeconnect-orchestrator-automation; then echo "$step. Check: edgeconnect-auto --orchestrator <nickname> discovery"; step=$((step + 1)); fi
+if picked edgeconnect-preconfig; then echo "$step. Check: edgeconnect-preconfig capture --help"; step=$((step + 1)); fi
+echo "$step. Start your agent in $ROOT (it reads AGENTS.md there) and restart it so it loads the skills"
+if picked edgeconnect-mcp; then
+  echo "The MCP server itself is not installed here; run it as its README describes: https://github.com/Crypto-Gi/edgeconnect-mcp#install"
+else
+  echo "The MCP server and its guide skill are separate (run setup.sh again and pick 3 for the skill): https://github.com/Crypto-Gi/edgeconnect-mcp"
+fi
