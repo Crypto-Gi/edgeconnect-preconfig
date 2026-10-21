@@ -341,26 +341,35 @@ Each tool has its own way of making sure a person approves a write. Never skip o
 - If a command fails, show the message as printed and the fix it suggests. Do not retry with different flags to get past a check.
 EOF
 # Listed from what the folder holds, so a later run that picks fewer repositories keeps the earlier ones.
+LIST_AUTO='- `edgeconnect-auto` and the skill `managing-edgeconnect-firewall-and-objects` (edgeconnect-orchestrator-automation)'
+LIST_PRECONFIG='- `edgeconnect-preconfig` and the skill `building-edgeconnect-preconfig-templates` (edgeconnect-preconfig)'
+LIST_MCP='- the skill `edgeconnect-guide` for the MCP server (edgeconnect-mcp); the server itself runs separately'
+LIST_END='A tool not listed here is not installed in this folder: do not run its commands. If the user needs it, tell them to run setup.sh again and pick it.'
 {
   printf '\n## Installed here\n\n'
-  if [ -d "$ROOT/edgeconnect-orchestrator-automation/.git" ]; then echo '- `edgeconnect-auto` and the skill `managing-edgeconnect-firewall-and-objects` (edgeconnect-orchestrator-automation)'; fi
-  if [ -d "$ROOT/edgeconnect-preconfig/.git" ]; then echo '- `edgeconnect-preconfig` and the skill `building-edgeconnect-preconfig-templates` (edgeconnect-preconfig)'; fi
-  if [ -d "$ROOT/edgeconnect-mcp/.git" ]; then echo '- the skill `edgeconnect-guide` for the MCP server (edgeconnect-mcp); the server itself runs separately'; fi
-  printf '\nA tool not listed here is not installed in this folder: do not run its commands. If the user needs it, tell them to run setup.sh again and pick it.\n'
+  if [ -d "$ROOT/edgeconnect-orchestrator-automation/.git" ]; then printf '%s\n' "$LIST_AUTO"; fi
+  if [ -d "$ROOT/edgeconnect-preconfig/.git" ]; then printf '%s\n' "$LIST_PRECONFIG"; fi
+  if [ -d "$ROOT/edgeconnect-mcp/.git" ]; then printf '%s\n' "$LIST_MCP"; fi
+  printf '\n%s\n' "$LIST_END"
 } >> "$AGENTS_NEW"
+section() { sed -n '/^## Installed here$/,/^A tool not listed here is not installed/p' "$1"; }
+rest() { sed '/^## Installed here$/,/^A tool not listed here is not installed/d' "$1"; }
+LIST_LINES="$ROOT/.AGENTS.md.lines"
+printf '%s\n' '## Installed here' '' "$LIST_AUTO" "$LIST_PRECONFIG" "$LIST_MCP" "$LIST_END" > "$LIST_LINES"
 if [ ! -e "$ROOT/AGENTS.md" ]; then
   mv "$AGENTS_NEW" "$ROOT/AGENTS.md"
   echo "AGENTS.md: created"
 elif cmp -s "$AGENTS_NEW" "$ROOT/AGENTS.md"; then
   rm -f "$AGENTS_NEW"
   echo "AGENTS.md: already present, up to date"
-elif cmp -s <(sed '/^## Installed here$/,/^A tool not listed here is not installed/d' "$AGENTS_NEW") <(sed '/^## Installed here$/,/^A tool not listed here is not installed/d' "$ROOT/AGENTS.md"); then
-  mv "$AGENTS_NEW" "$ROOT/AGENTS.md"  # only the generated list changed: keep it true
+elif cmp -s <(rest "$AGENTS_NEW") <(rest "$ROOT/AGENTS.md") && ! section "$ROOT/AGENTS.md" | grep -qvxF -f "$LIST_LINES"; then
+  mv "$AGENTS_NEW" "$ROOT/AGENTS.md"  # only the generated list changed, and nobody edited it: keep it true
   echo "AGENTS.md: already present, its Installed here list updated"
 else
   mv "$AGENTS_NEW" "$ROOT/AGENTS.md.new"
   echo "AGENTS.md: already exists and differs, kept unchanged; the current version is in AGENTS.md.new"
 fi
+rm -f "$LIST_LINES"
 if [ ! -e "$ROOT/CLAUDE.md" ]; then
   printf '@AGENTS.md\n' > "$ROOT/CLAUDE.md"
   echo "CLAUDE.md: created (points to AGENTS.md)"
