@@ -622,10 +622,12 @@ class AuditRegressions(unittest.TestCase):
         rule = m_branchNatMapsConfig(ctx({"deployment": DEP, "branch-nat-maps": maps, "nat-pools": pools})[0])["branchNatRules"][0]
         self.assertEqual((rule["sourceIpSubnet"], rule["translateNatPoolID"]), ("any", 1))  # pool 41 is the second natPools entry
         self.assertNotIn("translateSourceIpSubnet", rule)
-        # names only ({"map1": "map1"}): no crash, nothing written, and the ledger leaves it to the owner
+        # names only ({"map1": "map1"}): no rules, nothing written, the ledger names the map
         c, notes = ctx({"deployment": DEP, "branch-nat-maps": {"map1": "map1"}})
         self.assertIsNone(m_branchNatMapsConfig(c))
-        self.assertEqual([n["disposition"] for n in notes if n["item"] == "branch-nat-maps"], ["unresolved"])
+        nat_notes = [n for n in notes if n["item"] == "branch-nat-maps"]
+        self.assertEqual([n["disposition"] for n in nat_notes], ["default-omitted"])
+        self.assertIn("map1", nat_notes[0]["note"])
         c, notes = ctx({"deployment": DEP, "branch-nat-maps": {}})
         self.assertIsNone(m_branchNatMapsConfig(c))
         self.assertEqual([n["disposition"] for n in notes if n["item"] == "branch-nat-maps"], ["default-omitted"])

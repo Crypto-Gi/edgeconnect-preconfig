@@ -923,7 +923,7 @@ def m_branchNatMapsConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     pool_index = {str(k): i for i, k in enumerate(sorted(pools, key=int))}  # natPools is written in this order (m_natPools)
     rules = []
     for mp in data.values() if isinstance(data, dict) else []:
-        if not isinstance(mp, dict):  # names only ({"map1": "map1"}): seen after rules are deleted, on 9.6 and 9.7 (references/lessons.md)
+        if not isinstance(mp, dict):  # names only ({"map1": "map1"}): the map is left with no rules (references/lessons.md)
             continue
         for prio, e in sorted((mp.get("prio") or {}).items(), key=lambda kv: int(kv[0])):
             if managed(e):
@@ -958,9 +958,8 @@ def m_branchNatMapsConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
                 rule["translateDestinationPort"] = str(st["trans_dport"])
             rules.append(rule)
     names_only = sorted(k for k, v in data.items() if not isinstance(v, dict)) if isinstance(data, dict) else []
-    if not rules and names_only:
-        ctx.note("branch-nat-maps", "unresolved", "branchNatMapsConfig", "/nat/maps lists map {} by name only, with no rules; section not written. Confirm in Orchestrator that the "
-                 "appliance has no branch NAT rules (ECOS 9.6 and 9.7 differ, references/lessons.md)".format(", ".join(names_only)))
+    if not rules and names_only:  # owner ruling 2026-10-21: names-only means no rules
+        ctx.note("branch-nat-maps", "default-omitted", "branchNatMapsConfig", "no branch NAT rules configured (/nat/maps lists map {} by name only, with no rules)".format(", ".join(names_only)))
         return None
     if not rules:
         ctx.note("branch-nat-maps", "default-omitted", "branchNatMapsConfig", "no branch NAT rules configured in /nat/maps")
