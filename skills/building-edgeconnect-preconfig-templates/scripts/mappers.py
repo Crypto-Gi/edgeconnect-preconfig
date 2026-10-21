@@ -359,7 +359,9 @@ def subnet_sharing(ctx: Ctx, vrf: str, target: str) -> Dict[str, Any]:
     if not src:
         return {}
     ctx.unmapped("system-info.auto_subnet.vrf[{}]".format(vrf), src, {"add_local_lan", "add_local_wan", "add_local_metric", "add_local_communities", "local_communities",
-                                                                      "local_asn_filter", "rtmap_to_subshare"}, target)
+                                                                      "local_asn_filter", "rtmap_to_subshare", "add_local_asn"}, target)
+    if src.get("add_local_asn"):
+        ctx.note("system-info.auto_subnet.vrf[{}].add_local_asn".format(vrf), "unresolved", target, "add_local_asn is on, and the preconfig format has no field for it: the target keeps its own setting")
     ctx.note("system-info.auto_subnet.vrf[{}]".format(vrf), "mapped", target, "subnet-sharing flags, metric, communities, route map")
     out = {"advertiseLocalLanSubnets": bool(src.get("add_local_lan")), "advertiseLocalWanSubnets": bool(src.get("add_local_wan")), "localMetric": int(src.get("add_local_metric") or 0),
            "localCommunities": (src.get("local_communities") or "") if src.get("add_local_communities") else "", "filterRoutesWithLocalASN": bool(src.get("local_asn_filter"))}
@@ -921,7 +923,9 @@ def m_branchNatMapsConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     pool_index = {str(k): i for i, k in enumerate(sorted(pools, key=int))}  # natPools is written in this order (m_natPools)
     rules = []
     for mp in data.values() if isinstance(data, dict) else []:
-        for prio, e in sorted(((mp or {}).get("prio") or {}).items(), key=lambda kv: int(kv[0])):
+        if not isinstance(mp, dict):  # some appliances list map names only ({"map1": "map1"}): no rules to carry
+            continue
+        for prio, e in sorted((mp.get("prio") or {}).items(), key=lambda kv: int(kv[0])):
             if managed(e):
                 continue
             m = e.get("match") or {}

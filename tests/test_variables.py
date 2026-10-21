@@ -151,5 +151,21 @@ class RoundTrip(unittest.TestCase):
         self.assertIn("not in this reference", str(caught.exception))
 
 
+class MutationCheck(unittest.TestCase):
+    def test_value_repeated_at_linked_paths_is_one_column(self):
+        import json
+        from check import run
+        with tempfile.TemporaryDirectory() as tmp:
+            site = Path(tmp)
+            (site / "t.jinja2").write_text("applianceInfo:\n  hostname: {{ data['hostname'] | tojson }}\nrules:\n- ip: {{ data['ip'] | tojson }}\n- ip: {{ data['ip'] | tojson }}\n")
+            col = {"type": "string", "secret": False, "had_value": True}
+            (site / "columns.json").write_text(json.dumps({"site_type": "t", "runner_columns": [], "columns": {
+                "hostname": dict(col, path="applianceInfo.hostname"), "ip": dict(col, path="rules[0].ip", also_at=["rules[1].ip"])}}))
+            for name in ("t.csv", "example.csv"):
+                (site / name).write_text("hostname,ip\nbr-1,192.0.2.9\n")
+            checks = run(site, "t", None, None)["checks"]
+            self.assertTrue(checks["5 mutation: one column changes only its field"]["ok"], checks["5 mutation: one column changes only its field"])
+
+
 if __name__ == "__main__":
     unittest.main()

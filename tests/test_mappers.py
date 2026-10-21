@@ -419,7 +419,8 @@ class AuditRegressions(unittest.TestCase):
         c, notes = ctx({"deployment": DEP, "system-info": {"auto_subnet": {"vrf": {"0": vrf0}}}, "subnets": {"subnets": {"entries": []}}})
         self.assertEqual(m_localRoutes(c), {"advertiseLocalLanSubnets": True, "advertiseLocalWanSubnets": False, "localMetric": 55, "localCommunities": "100:101",
                                             "filterRoutesWithLocalASN": True, "redistToSDwanFabricRouteMap": "default_rtmap_to_subsh", "routes": []})
-        self.assertIn("add_local_asn", " ".join(n["note"] for n in notes if n["disposition"] == "unmapped-source-key"))
+        self.assertIn("add_local_asn", " ".join(n["note"] for n in notes if n["disposition"] == "unresolved"))  # no preconfig field exists for it
+        self.assertNotIn("add_local_asn", " ".join(n["note"] for n in notes if n["disposition"] == "unmapped-source-key"))
         c, _ = ctx({"deployment": DEP, "system-info": {"auto_subnet": {"vrf": {"0": dict(vrf0, add_local_communities=False)}}}, "subnets": {"subnets": {"entries": []}}})
         self.assertEqual(m_localRoutes(c)["localCommunities"], "")  # communities are kept but not added
         c, _ = ctx({"deployment": DEP, "subnets": {"subnets": {"entries": []}}})
@@ -621,6 +622,8 @@ class AuditRegressions(unittest.TestCase):
         rule = m_branchNatMapsConfig(ctx({"deployment": DEP, "branch-nat-maps": maps, "nat-pools": pools})[0])["branchNatRules"][0]
         self.assertEqual((rule["sourceIpSubnet"], rule["translateNatPoolID"]), ("any", 1))  # pool 41 is the second natPools entry
         self.assertNotIn("translateSourceIpSubnet", rule)
+        # some 9.6/9.7 appliances answer /nat/maps with map names only: no rules, no crash
+        self.assertIsNone(m_branchNatMapsConfig(ctx({"deployment": DEP, "branch-nat-maps": {"map1": "map1"}})[0]))
 
     def test_ids_profile_is_substituted_by_signature_family(self):
         inv = {"segments": ["Default"], "zones": ["Default"], "lan": ["L"], "wan": ["W"], "groups": ["g"], "templateGroups": ["t"], "overlays": ["o"],

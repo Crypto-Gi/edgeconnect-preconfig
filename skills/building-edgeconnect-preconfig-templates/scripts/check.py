@@ -115,7 +115,8 @@ def run(site_dir: Path, site: str, extra_rows: Optional[Path], validate: Optiona
             except Exception as error:
                 bad.append("{}: {}".format(name, str(error)[:80]))
                 continue
-            extra = [p for p in changed_paths(doc0, doc) if p != col["path"] and not p.startswith(col["path"] + "[")]
+            own = [col["path"]] + col.get("also_at", [])  # one value the source repeats at several paths is one column
+            extra = [p for p in changed_paths(doc0, doc) if not any(p == o or p.startswith(o + "[") for o in own)]
             if extra:
                 bad.append("{} also changed {}".format(name, extra[:2]))
         record("5 mutation: one column changes only its field", not bad, bad[:5])
