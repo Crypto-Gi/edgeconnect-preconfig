@@ -565,20 +565,37 @@ section() { sed -n '/^## Installed here$/,/^A tool not listed here is not instal
 rest() { sed '/^## Installed here$/,/^A tool not listed here is not installed/d' "$1"; }
 LIST_LINES="$ROOT/.AGENTS.md.lines"
 printf '%s\n' '## Installed here' '' "$LIST_AUTO" "$LIST_PRECONFIG" "$LIST_MCP" "$LIST_MCP_LOCAL" "$LIST_END" > "$LIST_LINES"
+sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1; }
+# Fingerprint of the text outside the Installed here list, trailing blank lines dropped.
+fingerprint() { rest "$1" | awk '{ line[NR] = $0 } END { n = NR; while (n > 0 && line[n] == "") n--; for (i = 1; i <= n; i++) print line[i] }' | sha256; }
+# AGENTS.md texts that earlier releases of setup.sh wrote (before AGENTS_FP below existed).
+KNOWN_AGENTS_TEXTS="0ab42174b4cf385ceda3b355d0f47a17277fee38842a08aef9010ef79d603159 1d736025f4b2f176247013d1a21efc60d01851596657f2bee3f5fbcd3cb6a686 4aa567c1933f907c0d62e360a54f3a5505dc50c6297da8698c7cd6af679361e0 508ded02efd387681fec558c354597faefe2a66bddff9d8ded0e930940c3c08d 91e8635704a868498ede09fcca9de24a1b43f1ba5b0b5d98252b85c596ff6d75 f65809fa0aa63b086709daefbea7dcb555b6909cce5880c3f2d83e3c7b0f275d"
+AGENTS_FP="$ROOT/.AGENTS.md.setup-sha256"  # fingerprint of the AGENTS.md this script last wrote
+untouched() {  # AGENTS.md is a text setup.sh wrote, and its Installed here list holds only generated lines
+  local fp; fp="$(fingerprint "$ROOT/AGENTS.md")"
+  case " $KNOWN_AGENTS_TEXTS $(cat "$AGENTS_FP" 2>/dev/null) $(fingerprint "$AGENTS_NEW") " in *" $fp "*) ;; *) return 1 ;; esac
+  ! section "$ROOT/AGENTS.md" | grep -qvxF -f "$LIST_LINES"
+}
+OURS=1
 if [ ! -e "$ROOT/AGENTS.md" ]; then
   mv "$AGENTS_NEW" "$ROOT/AGENTS.md"
   echo "AGENTS.md: created"
 elif cmp -s "$AGENTS_NEW" "$ROOT/AGENTS.md"; then
   rm -f "$AGENTS_NEW"
   echo "AGENTS.md: already present, up to date"
-elif cmp -s <(rest "$AGENTS_NEW") <(rest "$ROOT/AGENTS.md") && ! section "$ROOT/AGENTS.md" | grep -qvxF -f "$LIST_LINES"; then
-  mv "$AGENTS_NEW" "$ROOT/AGENTS.md"  # only the generated list changed, and nobody edited it: keep it true
-  echo "AGENTS.md: already present, its Installed here list updated"
+elif untouched; then
+  mv "$AGENTS_NEW" "$ROOT/AGENTS.md"  # setup.sh wrote it and nobody edited it since: keep it current
+  echo "AGENTS.md: updated (you had not edited it)"
 else
+  OURS=0
   mv "$AGENTS_NEW" "$ROOT/AGENTS.md.new"
-  echo "AGENTS.md: already exists and differs, kept unchanged; the current version is in AGENTS.md.new"
+  echo "AGENTS.md: you have edited it, so it is kept unchanged; the current version is in AGENTS.md.new (compare them, then merge or replace)"
 fi
 rm -f "$LIST_LINES"
+if [ "$OURS" -eq 1 ]; then
+  fingerprint "$ROOT/AGENTS.md" > "$AGENTS_FP"  # what this script's AGENTS.md looks like, for the next run
+  if [ -e "$ROOT/AGENTS.md.new" ] && cmp -s "$ROOT/AGENTS.md.new" "$ROOT/AGENTS.md"; then rm -f "$ROOT/AGENTS.md.new"; fi  # left over, now applied
+fi
 if [ ! -e "$ROOT/CLAUDE.md" ]; then
   printf '@AGENTS.md\n' > "$ROOT/CLAUDE.md"
   echo "CLAUDE.md: created (points to AGENTS.md)"
@@ -637,10 +654,12 @@ if [ -n "${MCP_LATER:-}" ]; then
 fi
 echo
 echo "Start your agent in $ROOT (it reads AGENTS.md there), and restart it so it loads the skills and MCP servers."
-if [ "$MCP_MODE" = docker ]; then
-  echo "The MCP server runs in your Docker: install it manually with the repo guide: $MCP_GUIDE"
-elif picked edgeconnect-mcp && [ "$MCP_MODE" = no ]; then
-  echo "The MCP server is not installed (run setup.sh again, pick 3 and then 1 to run it locally, or see $MCP_GUIDE)"
-elif ! picked edgeconnect-mcp; then
-  echo "The MCP server and its guide skill are separate (run setup.sh again and pick 3): https://github.com/Crypto-Gi/edgeconnect-mcp"
+if [ "$MCP_MODE" = stdio ]; then
+  echo "MCP server: runs locally from $ROOT/bin/edgeconnect-mcp, started by your agents."
+elif [ "$MCP_MODE" = docker ]; then
+  echo "MCP server: you run it in Docker over HTTPS. Set it up by hand with the repo guide: $MCP_GUIDE"
+elif picked edgeconnect-mcp; then
+  echo "MCP server: not installed (you chose No). To run it here later, run setup.sh again and answer 1 at \"Install the MCP server too?\"; if it runs in Docker, answer 2."
+else
+  echo "MCP server: not part of this install. Run setup.sh again and pick 3 for its guide skill and, if you want, the server."
 fi
