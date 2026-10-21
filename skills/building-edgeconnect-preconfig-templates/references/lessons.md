@@ -128,7 +128,8 @@ Verified across HPE Aruba EdgeConnect Orchestrator releases `9.6.4`, `9.7.1`, an
     - `availabilityTimeSettings` (business hours): Orchestrator returns them only through a POST, and capture is GET-only, so they are ledgered `unresolved`.
     - Route admin distances (`GET /appliance/adminDistance`): no preconfig field; ledgered `template-group` when an `adminDistance` template is selected, else `unresolved`.
     - SSE service interfaces (`GET /thirdPartyServices/sse/interfaces`, `veth*`): made by Orchestrator's SSE integration, ledgered `orchestrator-managed`.
-20. **ECOS readback quirks that are not converter gaps:** the IKEv2 `exchangeMode` of a cloned tunnel can read back differently from the source although the preconfig carries the source value unchanged (30-site round trip, 2026-10-19).
+20. **Link aggregation (`linkAggregation`):** the converter writes it where the release's default template puts it, near the end, and that is fine: Orchestrator applies link aggregation before deployment whatever the order in the YAML, and stores the YAML unchanged (A/B live apply and stored read-back on ECOS 9.7.1, 2026-10-21). `isForceDelete` has no source on the appliance and is omitted. An empty `linkAggregationGroups` list, with or without `isForceDelete: true`, does not delete an existing bond: the bond is removed on the appliance (UI, or `no system bonding interface <blanN>` once no interface uses it).
+21. **ECOS readback quirks that are not converter gaps:** the IKEv2 `exchangeMode` of a cloned tunnel can read back differently from the source although the preconfig carries the source value unchanged (30-site round trip, 2026-10-19).
 
 ---
 

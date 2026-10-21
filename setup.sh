@@ -494,6 +494,7 @@ You are working with HPE Aruba EdgeConnect SD-WAN through an Orchestrator. Three
 These tools are run by a person. You help by writing the CSV files and the exact commands; the person pastes and runs them in their own terminal and sends you the output.
 
 - You may run read-only steps yourself when you can (validate, plan, dry run, MCP reads). You never run an `edgeconnect-auto` write (`APPLY`) or an MCP write. Preconfig uploads follow the preconfig skill's own flow: only after the user approves its table, with `--approve`.
+- For every operation you run or propose, show the exact command in its own code block, ready to paste, even when you run it yourself (for an MCP call, the tool and request). Show only the command lines, not the files you prepared; for an edit to a CSV, name the file and the cells you changed, then show the command that uses it.
 - Give each command as one block the person can paste as it is, with the Orchestrator named and the folder it must run from. The `edgeconnect-auto` and `edgeconnect-preconfig` commands already find the shared `.env`, so no `--dotenv` is needed.
 - For a write, say what to check on the prompt before typing `APPLY` (the Orchestrator name and the list of changes), and ask them to paste the run summary back so you can read it and offer a read back.
 - If the person asks you to "just do it" for an `edgeconnect-auto` write, still hand over the command; the typed approval is theirs.

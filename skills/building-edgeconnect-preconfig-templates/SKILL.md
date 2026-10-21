@@ -14,6 +14,16 @@ Convert an HPE Aruba EdgeConnect appliance configuration into a verified site-ty
 2. **Turn the owner's words into `variables.csv` edits** ("make the DNS server per site" = `decision` to `variable` on that row; "these two use the same address" = the same `column` on both rows). Nothing else needs your judgement: the classifier proposes and gives a reason for every row, so you present the variable rows and the `(check)` rows and apply the owner's answers.
 3. **Judge and report the result** from `summary.md`, as "How to judge and report the result" below describes: what the YAML carries, what it should carry but does not, and what belongs outside preconfig.
 
+**Show the command for every operation.** For every stage you run or propose (capture, compare, translate and re-translate with `--variables`, render, check, validate, upload), show the exact command in its own fenced code block, ready to paste into a terminal, even when you run it yourself. The user should be able to do everything from their own terminal with what you show. Show only the command lines, not the CSV, sheet or notes you prepared around them, and show each command once, as you run it.
+- Use the installed command, which runs in the toolkit's virtual environment and finds the shared `.env`:
+  ```bash
+  edgeconnect-preconfig capture --orchestrator lab --appliance 0.NE --role reference
+  ```
+  If `edgeconnect-preconfig` is not on the PATH, give the full form with the install folder's real path: `"<install folder>/.venv/bin/python" "<install folder>/edgeconnect-preconfig/skills/building-edgeconnect-preconfig-templates/scripts/capture.py" --orchestrator lab ...`.
+- Real values only: the Orchestrator nickname (`--orchestrator`, `--validate`), real paths (quoted when they hold spaces), the real site folder and CSV. No placeholders the user has to fill in.
+- When you change `variables.csv` or the site CSV, that is an edit, not a command: name the file and each changed cell (row, column, old value to new value), then show the command that re-runs with it.
+- An upload command with `--approve` is shown only after the user approved the validation table.
+
 **You never edit the toolkit.** Using this skill, you change only inputs (`variables.csv`, the site CSV, a `--decisions` file) and re-run the scripts. Never edit `scripts/`, `references/` (including `default-templates/`), `SKILL.md`, `VERSION` or the toolkit folder that `setup.sh` installed, even for a one-line fix and even when you can see the fix. When the toolkit falls short, name the gap in your report with its evidence (see the playbook in `references/lessons.md`) and leave the fix to the toolkit's maintainer. If `summary.md` says the toolkit has local edits, say so first: results from an edited toolkit are not trustworthy.
 
 **Violating the letter of the rules is violating the spirit of the rules.** Consult the reference files before mapping, adapting topologies, or troubleshooting errors:
@@ -105,6 +115,7 @@ If an EdgeConnect MCP server is connected, use it next to these scripts, not ins
 | "I'll upload before user approval." | Never pass `--approve` until the user approves the validation table. |
 | "One row failed/conflicted, so I'll abort all rows." | Skip only invalid or conflicting rows; emit and upload all other valid rows. |
 | "I'll write `.yml` files before validating." | Pass `--validate`: without it, render writes rows that were never validated. |
+| "I ran it; the user does not need the command." | Show every command you run or propose in its own code block, exactly as run, so the user can repeat it in their terminal. |
 | "The mapper is clearly wrong; I'll patch it quickly." | Never edit the toolkit. Report the gap or error with its evidence; the maintainer fixes it with a test. |
 | "The appliance has firewall rules and hub roles, so the YAML is not a faithful clone." | Those are outside preconfig. Judge the YAML against the preconfig format; list such items as "set outside preconfig". |
 | "I'll report the gaps from this run." | State the toolkit version first, and refresh it if it is behind. |
