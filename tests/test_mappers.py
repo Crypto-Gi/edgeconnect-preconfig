@@ -622,8 +622,13 @@ class AuditRegressions(unittest.TestCase):
         rule = m_branchNatMapsConfig(ctx({"deployment": DEP, "branch-nat-maps": maps, "nat-pools": pools})[0])["branchNatRules"][0]
         self.assertEqual((rule["sourceIpSubnet"], rule["translateNatPoolID"]), ("any", 1))  # pool 41 is the second natPools entry
         self.assertNotIn("translateSourceIpSubnet", rule)
-        # some 9.6/9.7 appliances answer /nat/maps with map names only: no rules, no crash
-        self.assertIsNone(m_branchNatMapsConfig(ctx({"deployment": DEP, "branch-nat-maps": {"map1": "map1"}})[0]))
+        # names only ({"map1": "map1"}): no crash, nothing written, and the ledger leaves it to the owner
+        c, notes = ctx({"deployment": DEP, "branch-nat-maps": {"map1": "map1"}})
+        self.assertIsNone(m_branchNatMapsConfig(c))
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "branch-nat-maps"], ["unresolved"])
+        c, notes = ctx({"deployment": DEP, "branch-nat-maps": {}})
+        self.assertIsNone(m_branchNatMapsConfig(c))
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "branch-nat-maps"], ["default-omitted"])
 
     def test_ids_profile_is_substituted_by_signature_family(self):
         inv = {"segments": ["Default"], "zones": ["Default"], "lan": ["L"], "wan": ["W"], "groups": ["g"], "templateGroups": ["t"], "overlays": ["o"],
