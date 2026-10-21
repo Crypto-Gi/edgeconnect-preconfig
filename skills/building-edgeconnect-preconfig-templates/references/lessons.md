@@ -1,4 +1,4 @@
-# Empirical Preconfig Mapping, Validation & Self-Healing Guide
+# Empirical Preconfig Mapping, Validation & Diagnosis Guide
 
 Verified across HPE Aruba EdgeConnect Orchestrator releases `9.6.4`, `9.7.1`, and `10.0.0`, REST Swagger specifications, CLI running-config backups, option and mutation tests, real appliance captures, and closed-loop live apply-and-diff runs on `EC-V` (`9.6.x` and `9.7.x`) appliances. Lab names below (`lab`) are placeholders for the test Orchestrator.
 
@@ -132,19 +132,23 @@ Verified across HPE Aruba EdgeConnect Orchestrator releases `9.6.4`, `9.7.1`, an
 
 ---
 
-## 4. Agent Self-Healing & Troubleshooting Playbook
+## 4. Diagnosis Playbook: investigate, then report
 
-When a script reports an unmapped key, a `/validate` rejection, or an `/apply` mismatch, follow this playbook:
+Using the skill, you diagnose and report; you never edit the toolkit (`SKILL.md`, "You never edit the toolkit"). Changes to `scripts/` and `references/` are made by the toolkit's maintainers in its own repository, each with a test.
 
-### A. Resolving `unmapped-source-key` or `unresolved` in `ledger.json`
-1. Inspect the raw capture file named in `ledger.json` (`<capture_dir>/capture/<id>.live.json` or `.cached.json`).
-2. Locate the target section in `references/default-templates/orchestrator-<release>.yml` and read the actual YAML keys (not the comments).
-3. If the source field is runtime state (e.g., `uptime`, `operStatus`, `vmac`), add its key name to the `used`/ignored set in `scripts/mappers.py` and document why.
-4. If the source field is configuration intent, map it in `scripts/mappers.py`, re-run `translate.py`, and run `check.py --validate <lab>` to prove Orchestrator accepts the mapped key and type.
+### A. A gap, an `unmapped-source-key` or a `toolkit-error` in `summary.md`
+1. Open the capture file the item names (`<capture_dir>/capture/<id>.live.json`, else `.cached.json`; `capture-index.json` lists them). Prefer the live copy: Orchestrator's cache can lag behind the appliance.
+2. Find the target in `references/default-templates/orchestrator-<release>.yml`, reading the YAML keys, not the comments (section 1 lists where they differ).
+3. Decide which case it is, and report it that way:
+   - **Runtime state** (uptime, leases, counters, generated IDs): "the toolkit should ignore `<key>`".
+   - **A value the format can hold:** a gap. Give the captured value, the target field and the mapping you would expect, so the maintainer can add it with a test.
+   - **No place in the format:** "outside preconfig; the toolkit should classify `<item>` as `outside-preconfig`".
+   - **`toolkit-error`:** quote the error and the captured data shape that triggered it (for example, a string where an object was expected).
+4. Tell the user what they can do now without a toolkit change: set the value per site after apply, start the section from the default template with `include_from_default` and fill it through `variables.csv`, or provide it with a template group.
 
 ### B. Resolving `/validate` Rejections (`check.py` or `upload.py`)
 - **`Business Intent Overlays / Template groups / Interface Label / Segment / Zone / Role is invalid`:**
-  - The YAML references an object name from the source Orchestrator that does not exist on the target Orchestrator. Query the target Orchestrator's inventory (or run `check.py --substitute` for lab testing) and update the CSV or `reference.yaml` with valid target names.
+  - The YAML references an object name from the source Orchestrator that does not exist on the target Orchestrator. Query the target Orchestrator's inventory (or run `check.py --substitute` for lab testing) and put valid target names in the site CSV (if the field is fixed, make it a column in `variables.csv` first), then re-run; never edit `reference.yaml`.
 - **`Unrecognized field: "<name>"`:**
   - Either a comment-vs-YAML typo (check `references/default-templates/orchestrator-<release>.yml`) or a release-gated field (`--target-release` does not match the validating Orchestrator's release).
 - **Cross-field error (e.g., IKE/IPsec GCM, OSPF auth, Branch NAT prefix length, VXLAN VTEP interface):**

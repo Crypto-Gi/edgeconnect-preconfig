@@ -340,7 +340,7 @@ def route_list(ctx: Ctx, entries: List[Dict[str, Any]], vrf: str) -> List[Dict[s
         # subnets3/configured holds the Default segment only and ignores segment parameters (ECOS 9.6.2.1)
         cfg_prefix, cfg = configured_route(ctx, st["prefix"], next_hop, cfg_if) if vrf == "0" else ({}, {})
         if vrf != "0":
-            ctx.note("subnets-all-vrfs[{}]".format(vrf), "unresolved", "segmentLocalRoutes.routes", "route {}: advertise flags taken from route state, which for Default routes disagrees with the configured table".format(st["prefix"]))
+            ctx.note("subnets-all-vrfs[{}]".format(vrf), "mapped", "segmentLocalRoutes.routes", "route {}: advertise flags taken from route state, which for Default routes disagrees with the configured table (assumption: confirm the flags)".format(st["prefix"]))
         route = {"routeIpSubnet": st["prefix"], "nextHop": nul(next_hop), "interfaceName": nul(if_name), "metric": st["metric"], "advertise": cfg_prefix.get("advert", st["advert"]),
                  "advertiseToBgp": cfg_prefix.get("advert_bgp", st["advert_bgp"]), "advertiseToOspf": cfg_prefix.get("advert_ospf", st["advert_ospf"]), "zone": zone,
                  "routeLabel": ctx.label(st.get("label")) if str(st.get("label")) != "0" else None}
@@ -355,13 +355,13 @@ def subnet_sharing(ctx: Ctx, vrf: str, target: str) -> Dict[str, Any]:
     """Subnet-sharing settings of one segment from /systemInfo/system auto_subnet (verified by live apply on ECOS 9.7.1)."""
     src = (((ctx.data("system-info") or {}).get("auto_subnet") or {}).get("vrf") or {}).get(vrf)
     # ECOS 9.6.2+ keeps no trace of useSharedSubnetInfo or the OSPF-to-subnet-share redistribution fields (route maps replaced them)
-    ctx.note("system-info.auto_subnet", "unresolved", target, "useSharedSubnetInfo, redistOspfToSubnetShare, ospfRedistMetric, ospfRedistTag are legacy fields that ECOS does not store (route maps replaced them), so they have no read source")
+    ctx.note("system-info.auto_subnet", "default-omitted", target, "useSharedSubnetInfo, redistOspfToSubnetShare, ospfRedistMetric, ospfRedistTag are legacy fields that ECOS does not store (route maps replaced them): nothing to carry, the target keeps its defaults")
     if not src:
         return {}
     ctx.unmapped("system-info.auto_subnet.vrf[{}]".format(vrf), src, {"add_local_lan", "add_local_wan", "add_local_metric", "add_local_communities", "local_communities",
                                                                       "local_asn_filter", "rtmap_to_subshare", "add_local_asn"}, target)
     if src.get("add_local_asn"):
-        ctx.note("system-info.auto_subnet.vrf[{}].add_local_asn".format(vrf), "unresolved", target, "add_local_asn is on, and the preconfig format has no field for it: the target keeps its own setting")
+        ctx.note("system-info.auto_subnet.vrf[{}].add_local_asn".format(vrf), "outside-preconfig", target, "add_local_asn is on, and the preconfig format has no field for it: the target keeps its own setting")
     ctx.note("system-info.auto_subnet.vrf[{}]".format(vrf), "mapped", target, "subnet-sharing flags, metric, communities, route map")
     out = {"advertiseLocalLanSubnets": bool(src.get("add_local_lan")), "advertiseLocalWanSubnets": bool(src.get("add_local_wan")), "localMetric": int(src.get("add_local_metric") or 0),
            "localCommunities": (src.get("local_communities") or "") if src.get("add_local_communities") else "", "filterRoutesWithLocalASN": bool(src.get("local_asn_filter"))}
@@ -382,7 +382,7 @@ def own_sharing(entry: Dict[str, Any]) -> bool:
 def note_no_route_map(ctx: Ctx, vrf: str, entry: Dict[str, Any], target: str) -> None:
     # Omitted, null and "" all become default_rtmap_to_subsh on apply, and "none" names a map that does not exist (ECOS 9.6.2.1 and 9.7.1)
     if "redistToSDwanFabricRouteMap" not in entry and set(entry) - {"segment", "routes"}:
-        ctx.note("system-info.auto_subnet.vrf[{}]".format(vrf), "unresolved", target + ".redistToSDwanFabricRouteMap",
+        ctx.note("system-info.auto_subnet.vrf[{}]".format(vrf), "outside-preconfig", target + ".redistToSDwanFabricRouteMap",
                  "the source has no subnet-sharing route map; a preconfig cannot express that, so Orchestrator applies default_rtmap_to_subsh (denies 0.0.0.0/0 on the appliances checked): review the site")
 
 
@@ -832,7 +832,7 @@ def m_nac(ctx: Ctx) -> Optional[Dict[str, Any]]:
     if skipped:
         ctx.note("nac applyPolicies", "default-omitted", "nac.applyPolicies", "{} WAN or unlabelled interfaces without an AAA profile".format(skipped))
     if policies:
-        ctx.note("nac applyPolicies", "unresolved", "nac.applyPolicies[].auth_type", "numeric auth_type codes to trusted/both/802.1x/mac are an assumption (0..3 in that order); auth_interface expects a label")
+        ctx.note("nac applyPolicies", "mapped", "nac.applyPolicies[].auth_type", "numeric auth_type codes to trusted/both/802.1x/mac are an assumption (0..3 in that order); auth_interface expects a label")
     out = _nac_fix(ctx=ctx, name_by_if=name_by_if, out={"nacEnable": src["nacEnable"], "dot1x": rows((src.get("dot1x") or {})), "macAuthProfile": rows((src.get("macAuthProfile") or {})), "server": rows(src["server"], {"address": "host"}),
                    "serverGroup": groups, "aaaProfile": rows((src.get("aaaProfile") or {})), "applyPolicies": policies})
     sources = {server.get("source_ip_interface") for server in out["server"]}

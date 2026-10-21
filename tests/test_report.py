@@ -1,0 +1,86 @@
+import sys
+import unittest
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+import translate  # noqa: E402
+from common import SKILL_DIR, toolkit_version  # noqa: E402
+
+DEP = {"sysConfig": {"ifLabels": {"lan": [], "wan": []}, "vrfs": [{"id": "0", "name": "Default"}], "vrfZonesMap": {}, "roles": []}, "modeIfs": [], "mgmtIfData": {}}
+APP = {"hostName": "br-1", "nePk": "9.NE", "networkRole": "0", "site": "s", "groupId": "1.Network"}
+
+
+class FakeCap:
+    folder = "fake"
+    run = {"appliance": {"nePk": "9.NE", "hostName": "br-1"}, "orchestrator": "lab", "release": "9.7.1.42046"}
+    index = []
+
+    def data(self, ident, prefer="live"):
+        return {"appliance": APP, "deployment": DEP}.get(ident)
+
+
+def entry(disposition, target="", item="x", note="n"):
+    return {"item": item, "disposition": disposition, "target": target, "note": note}
+
+
+class Report(unittest.TestCase):
+    def test_unresolved_without_a_preconfig_section_is_outside_preconfig(self):
+        ledger = [entry("unresolved", ""), entry("unresolved", "poE,usblte"), entry("unresolved", "ecLicensing.bandwidthLevel"), entry("unresolved", "securityPolicies"),
+                  entry("unresolved", "deploymentInfo.deploymentInterfaces[0].raInfo")]
+        translate.scope_by_template(ledger, {"poE", "usblte", "ecLicensing", "deploymentInfo"})
+        self.assertEqual([e["disposition"] for e in ledger], ["outside-preconfig", "unresolved", "unresolved", "outside-preconfig", "unresolved"])
+        self.assertIn("has no securityPolicies section", ledger[3]["note"])
+
+    def test_default_only_nat_data_is_not_content(self):
+        catch_all = {"data": {"map1": {"prio": {"65535": {"match": {"0": {"acl": ""}}, "set": {"0": {"nat_type": "no-nat"}}}}}}}
+        self.assertTrue(translate.DEFAULT_ONLY["nat-maps"](catch_all))
+        self.assertFalse(translate.DEFAULT_ONLY["nat-maps"]({"data": {"map1": {"prio": {"100": {"set": {"0": {"nat_type": "source-nat"}}}}}}}))
+        self.assertFalse(translate.DEFAULT_ONLY["nat-maps"]({"data": {"map1": {"prio": {"65535": {"set": {"0": {"nat_type": "source-nat"}}}}}}}))
+        self.assertTrue(translate.DEFAULT_ONLY["nat-all"]({"inbound": {"enable": False}, "outbound": {"enable": False}}))
+        self.assertFalse(translate.DEFAULT_ONLY["nat-all"]({"inbound": {"enable": False}, "outbound": {"enable": True}}))
+
+    def test_a_mapper_crash_is_a_toolkit_error_not_a_gap(self):
+        def boom(ctx):
+            raise KeyError("prio")
+        ledger = []
+        with mock.patch.dict(translate.MAPPERS, {"vxlan": boom}):
+            out = translate.build(FakeCap(), ledger)
+        self.assertNotIn("vxlan", out)
+        self.assertEqual([e["target"] for e in ledger if e["disposition"] == "toolkit-error"], ["vxlan"])
+
+    def test_summary_states_the_version_and_groups_every_entry(self):
+        ledger = [entry("toolkit-error", "vxlan"), entry("unresolved", "multicast"), entry("outside-preconfig"), entry("template-group", "nac"), entry("brand-new", "z"),
+                  entry("mapped", "ecLicensing", note="useDefaultAccount true is an assumption"), entry("runtime")]
+        text = translate.summary_md(ledger, {"applianceInfo": {}}, {"orchestrator": "lab", "release": "9.7.1.42046", "appliance": {"nePk": "9.NE", "hostName": "br-1"}}, "9.7.1.42046")
+        self.assertIn("Toolkit: " + toolkit_version(), text)
+        self.assertIn("refresh", text)
+        for heading in ("Toolkit errors", "Gaps", "Outside preconfig", "Owned elsewhere", "Unknown disposition", "Mapped on an assumption"):
+            self.assertIn("## " + heading, text)
+        self.assertIn("`x` -> `z`", text)  # an unknown disposition is shown, never hidden
+        self.assertIn("1 entries that are mapped, default, runtime state or context", text)
+
+    def test_running_config_is_a_gap_only_for_sections_it_holds(self):
+        class Cap(FakeCap):
+            def __init__(self, text):
+                self.index = [{"id": "running-config", "label": "backup", "status": "ok", "file": "x"}]
+                self.text = text
+
+            def data(self, ident, prefer="live"):
+                return {"running-config": {"runningConfig": self.text}}.get(ident)
+        for text, expected in (("hostname br-1\nno interface blan0 poe\n", []), ("interface lan0 poe detection 802.af_Legacy\n", ["poE"])):
+            ledger = []
+            translate.tag_unmapped(Cap(text), ledger)
+            self.assertEqual([e["target"] for e in ledger if e["item"] == "running-config"], [",".join(expected)] if expected else [])
+
+    def test_business_hours_are_checked_by_hand_not_a_gap(self):
+        text = translate.summary_md([entry("not-readable", "availabilityTimeSettings")], {}, {"appliance": {}}, "9.7.1.42046")
+        self.assertIn("## Not readable", text)
+        self.assertIn("## Gaps: the preconfig format has a place for it, but the value was not carried (0)", text)
+
+    def test_toolkit_version_starts_with_the_version_file(self):
+        self.assertTrue(toolkit_version().startswith((SKILL_DIR / "VERSION").read_text().strip()))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -84,7 +84,7 @@ python3 "$SKILL_SCRIPTS/translate.py" \
   --capture ./preconfig-work/reference/prod/2.NE/<UTC_STAMP> \
   --site-type retail-branch
 ```
-> Writes `./preconfig-output/retail-branch/` containing `retail-branch.jinja2`, `retail-branch.csv` (blank headers), `example.csv` (pre-filled reference row with `preconfig_name` and `serial_number`), `columns.json`, `columns.md` (what to enter in each column), `reference.yaml`, `variables.csv`, and `ledger.json`.
+> Writes `./preconfig-output/retail-branch/` containing `retail-branch.jinja2`, `retail-branch.csv` (blank headers), `example.csv` (pre-filled reference row with `preconfig_name` and `serial_number`), `columns.json`, `columns.md` (what to enter in each column), `reference.yaml`, `variables.csv`, `ledger.json`, and `summary.md` (the toolkit version, then every item the YAML does not carry, grouped: toolkit errors, gaps, outside preconfig, owned by templates or Orchestrator).
 
 ### 5. Validate Rows, Emit `.yml` Files Immediately & Upload on Approval
 ```bash
@@ -184,7 +184,8 @@ All generated artifacts are written to `./preconfig-output/<site-type>/` in your
 ├── variables.csv           # One row per field: decision (variable / fixed), column name, linked column, value, path, reason; edit it and re-run with --variables
 ├── variables.previous.csv  # The sheet a re-run replaced (your earlier edits)
 ├── proposal.md / .json, decisions.yaml   # Only with --decisions that sets per-section modes (the older way)
-├── ledger.json             # Complete audit trail (mapped, template-group, runtime, unresolved)
+├── ledger.json             # Complete audit trail (mapped, unresolved = gap, outside-preconfig, template-group, runtime, ...)
+├── summary.md              # Toolkit version and the grouped items to report
 ├── columns.json            # Column metadata (YAML path, scalar type, address format, optional/secret flags)
 ├── columns.md              # What to enter in each column: format, allowed values, the reference value, the fields it fills
 ├── checks.json             # check.py results

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, WORK_DIR, load_yaml, write_json  # noqa: E402
+from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, WORK_DIR, load_yaml, toolkit_version, write_json  # noqa: E402
 from generate import generate  # noqa: E402
 from decisions import list_mode, make_decide, propose  # noqa: E402
 from variables import classify, read_sheet, sheet_items, write_sheet  # noqa: E402
@@ -151,8 +151,8 @@ def drop_template_fields(out: Dict[str, Any], owned: Dict[str, Dict[Optional[str
                 note("template " + name, "template-group", section, "fields set by the '{}' template are left out: {}".format(name, ", ".join(sorted(gone))))
         unowned = spec.get("unowned")
         if unowned and any(out.get(section) for section in spec["sections"]):
-            note("template " + name, "unresolved", ", ".join(spec["sections"]),
-                 "neighbour settings in the '{}' template ({}) are still written per neighbour: not verified whether the template pushes them to every neighbour".format(name, ", ".join(sorted(unowned))))
+            note("template " + name, "mapped", ", ".join(spec["sections"]),
+                 "neighbour settings in the '{}' template ({}) are still written per neighbour: not verified whether the template pushes them to every neighbour (assumption: confirm they belong per neighbour)".format(name, ", ".join(sorted(unowned))))
 
 
 def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -202,7 +202,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     note("overlay-association, overlay-config", "mapped", "businessIntentOverlays.overlays", "overlay ids resolved to names")
     hub_of = [o["name"] for o in overlays_cfg if nepk in ((o.get("topology") or {}).get("hubs") or [])]
     if hub_of:
-        note("overlay-config.topology.hubs", "unresolved", "businessIntentOverlays", "hub in overlays {}: hub lists are Orchestrator overlay settings, so a new site from this template joins them as a spoke until its nePk is added to topology.hubs (PUT /gms/overlays/config/regions keeps regional settings)".format(", ".join(hub_of)))
+        note("overlay-config.topology.hubs", "outside-preconfig", "businessIntentOverlays", "hub in overlays {}: hub lists are Orchestrator overlay settings, so a new site from this template joins them as a spoke until its nePk is added to topology.hubs (PUT /gms/overlays/config/regions keeps regional settings)".format(", ".join(hub_of)))
 
     sys_cfg = dep["sysConfig"]
     labels = {str(l["id"]): l["name"] for side in (sys_cfg.get("ifLabels") or {}).values() for l in side or []}
@@ -221,7 +221,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     firewall = local_firewall_rules(cap)
     if firewall:
         note("security-maps", "unresolved", "", firewall)
-    note("availabilityTimeSettings", "unresolved", "availabilityTimeSettings", "Orchestrator returns business hours only through POST /stats/config/applianceBusinessHours/get and capture is GET-only, so custom hours and timezone are not copied; set them per site")
+    note("availabilityTimeSettings", "not-readable", "availabilityTimeSettings", "Orchestrator returns business hours only through POST /stats/config/applianceBusinessHours/get and capture is GET-only, so custom hours and timezone are not copied; set them per site")
     distance = cap.data("admin-distance")
     if distance and "adminDistance" in selected_templates(cap):
         note("admin-distance", "template-group", "", "route admin distances come from the 'adminDistance' template of an associated template group")
@@ -418,7 +418,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
         try:
             value = mapper(ctx)
         except Exception as err:
-            note("mapper " + section, "unresolved", section, "mapper error ({}): {}".format(type(err).__name__, err))
+            note("mapper " + section, "toolkit-error", section, "the {} mapper failed ({}: {}), so the section was not written: a toolkit bug to report, not a limit of preconfig".format(section, type(err).__name__, err))
             continue
         if value is not None:
             out[section] = value
@@ -467,8 +467,66 @@ def prune(value: Any, gated: set, ledger: List[Dict[str, Any]], prefix: str = ""
     return value
 
 
+def _default_nat_maps(data: Any) -> bool:
+    maps = (data.get("data") or {}) if isinstance(data, dict) else {}
+    return all(set((m or {}).get("prio") or {}) <= {"65535"} and all(set_.get("nat_type") == "no-nat" for e in ((m or {}).get("prio") or {}).values() for set_ in (e.get("set") or {}).values())
+               for m in maps.values())
+
+
+DEFAULT_ONLY = {  # endpoints without a preconfig section whose usual content is only the ECOS default
+    "nat-all": lambda d: isinstance(d, dict) and not any((d.get(k) or {}).get("enable") for k in ("inbound", "outbound")),
+    "nat-maps": _default_nat_maps,  # the 65535 no-nat catch-all every appliance has
+}
+
+# Sections a source feeds only when it holds matching lines; None: another ledger entry covers the section
+# shortcut: the usblte pattern is unverified (no USB-LTE appliance captured yet); confirm it on the first one
+NO_GAP_WITHOUT_EVIDENCE = {"running-config": {"poE": r"(?m)^interface \S+ poe ", "usblte": r"(?m)^(interface cell|lte )", "availabilityTimeSettings": None}}
+
+# Ledger dispositions grouped the way a report reads them (SKILL.md "Judge and report the result").
+REPORT_GROUPS = [
+    ("Toolkit errors: a toolkit bug, report it", {"toolkit-error"}),
+    ("Gaps: the preconfig format has a place for it, but the value was not carried", {"unresolved", "unmapped-source-key"}),
+    ("Not readable: the format has a place for it, but a GET cannot read it; check it by hand", {"not-readable"}),
+    ("Outside preconfig: the format has no place for it; set it another way", {"outside-preconfig", "release-gated"}),
+    ("Owned elsewhere: comes from template groups or Orchestrator, as intended", {"template-group", "orchestrator-managed"}),
+]
+QUIET = {"mapped", "default-omitted", "runtime", "empty-or-absent", "context", "from-default-template"}
+
+
+def scope_by_template(ledger: List[Dict[str, Any]], template_sections: set) -> None:
+    """An unresolved item whose target names no section of the target release's preconfig format is outside preconfig, not a gap."""
+    for e in ledger:
+        if e["disposition"] == "unresolved":
+            sections = {re.split(r"[.\[]", t.strip())[0] for t in e["target"].split(",") if t.strip()}
+            if not sections & template_sections:
+                e["disposition"] = "outside-preconfig"
+                if sections:  # the section exists in other releases' formats, not in the target's
+                    e["note"] += " (the target release's preconfig format has no {} section)".format(", ".join(sorted(sections)))
+
+
+def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: Dict[str, Any], release: str) -> str:
+    lines = ["# Translation summary", "",
+             "- Toolkit: {}. If a newer version exists, refresh it (re-run setup.sh; `--refresh-skills` for the skill) and translate again before reporting gaps.".format(toolkit_version()),
+             "- Source: {} {} ({}), Orchestrator release {}; written for Orchestrator release {}.".format(
+                 source.get("orchestrator"), (source.get("appliance") or {}).get("nePk"), (source.get("appliance") or {}).get("hostName"), source.get("release"), release),
+             "- Sections written ({}): {}.".format(len(reference), ", ".join(reference) or "none"), ""]
+    known = set().union(*(d for _, d in REPORT_GROUPS)) | QUIET
+    groups = REPORT_GROUPS + [("Unknown disposition: treat as a gap", {e["disposition"] for e in ledger} - known)]
+    for title, dispositions in groups:
+        rows = [e for e in ledger if e["disposition"] in dispositions]
+        lines.append("## {} ({})".format(title, len(rows)))
+        lines += ["- `{}` -> `{}`: {}".format(e["item"], e["target"] or "-", e["note"]) for e in rows] or ["- none"]
+        lines.append("")
+    confirm = [e for e in ledger if e["disposition"] == "mapped" and "assumption" in e["note"]]
+    lines.append("## Mapped on an assumption: confirm with the owner ({})".format(len(confirm)))
+    lines += ["- `{}` -> `{}`: {}".format(e["item"], e["target"], e["note"]) for e in confirm] or ["- none"]
+    lines += ["", "Not listed: {} entries that are mapped, default, runtime state or context (see ledger.json).".format(sum(1 for e in ledger if e["disposition"] in QUIET) - len(confirm))]
+    return "\n".join(lines) + "\n"
+
+
 def tag_unmapped(cap: Capture, ledger: List[Dict[str, Any]]) -> None:
-    covered = {s for s in MAPPERS}
+    # build() writes these sections itself; /dhcpConfig/* are other views of the DHCP data deploymentInfo takes from /deployment
+    covered = set(MAPPERS) | {"applianceInfo", "templateGroups", "businessIntentOverlays", "deploymentInfo"}
     mapped = {"appliance", "appliances-all", "network-role-and-site", "extra-info", "groups", "region-associations", "template-association", "security-maps", "admin-distance", "sse-interfaces", "overlay-config", "overlay-association", "deployment", "ha-groups", "cluster-profiles", "cluster-profile-mapping"}
     context = {"regions", "interface-labels", "segments", "zones", "template-groups", "system-info"}
     groups = cap.data("template-groups") or []
@@ -485,15 +543,24 @@ def tag_unmapped(cap: Capture, ledger: List[Dict[str, Any]]) -> None:
         if sections and all(s in covered for s in sections):
             continue
         if sections and any(s in covered for s in sections):
-            uncovered = [s for s in sections if s not in covered]
+            uncovered = [s for s in sections if s not in covered and s not in NO_GAP_WITHOUT_EVIDENCE.get(ident, {})]
+            uncovered += [s for s, line in NO_GAP_WITHOUT_EVIDENCE.get(ident, {}).items() if line and re.search(line, str((cap.data(ident) or {}).get("runningConfig", "")))]
+            if not uncovered:
+                continue
             ledger.append({"item": ident, "disposition": "unresolved", "target": ",".join(uncovered), "note": "mapped for {}; no mapper for {}".format(", ".join(s for s in sections if s in covered), ", ".join(uncovered))})
             continue
         owner = [s for s in sections if s in selected]
         if owner:
             ledger.append({"item": ident, "disposition": "template-group", "target": ",".join(owner), "note": "template '{}' is selected in an associated template group".format(owner[0])})
+        elif item["status"] != "ok" or item.get("empty"):
+            ledger.append({"item": ident, "disposition": "empty-or-absent", "target": ",".join(sections), "note": "captured empty, absent on this appliance, or error {}".format(item.get("http", ""))})
+        elif ident in DEFAULT_ONLY and DEFAULT_ONLY[ident](cap.data(ident)):
+            ledger.append({"item": ident, "disposition": "default-omitted", "target": ",".join(sections), "note": "holds only the ECOS default ({}), so there is nothing to carry".format(catalogue[ident]["path"])})
+        elif not sections:
+            ledger.append({"item": ident, "disposition": "outside-preconfig", "target": "", "note": "the preconfig format has no section for {} ({}); set it with a template group, in Orchestrator or with another workflow".format(
+                catalogue.get(ident, {}).get("path", ident), catalogue.get(ident, {}).get("notes", "no catalogue note"))})
         else:
-            ledger.append({"item": ident, "disposition": "unresolved" if item["status"] == "ok" and not item.get("empty") else "empty-or-absent", "target": ",".join(sections),
-                           "note": "no mapper yet" if item["status"] == "ok" and not item.get("empty") else "captured empty, absent on this appliance, or error {}".format(item.get("http", ""))})
+            ledger.append({"item": ident, "disposition": "unresolved", "target": ",".join(sections), "note": "the preconfig format has {} but the toolkit has no mapper for it yet".format(", ".join(sections))})
     ledger.append({"item": "template ownership", "disposition": "context", "target": "", "note": "selected templates of associated groups: " + ", ".join(selected)})
 
 
@@ -526,6 +593,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if unseen:
         ledger.append({"item": "release fit", "disposition": "context", "target": "", "note": "{} key paths are not shown in the {} default template (valid optional keys or unverified for that release): {}".format(len(unseen), args.target_release, ", ".join(unseen[:12]) + (" ..." if len(unseen) > 12 else ""))})
     tag_unmapped(cap, ledger)
+    scope_by_template(ledger, set(load_yaml(DEFAULT_TEMPLATE.parent / "orchestrator-{}.yml".format(args.target_release))))
     out.mkdir(parents=True, exist_ok=True)
     decisions_in = load_yaml(args.decisions) if args.decisions else {}
     section_modes = bool(set(decisions_in) - {"include_from_default", "approved_by"}) and not args.variables  # the older per-section choice
@@ -551,7 +619,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     from generate import Builder
     probe = Builder()
     probe.find_secrets(reference)
-    write_json(out / "ledger.json", {"source": {"orchestrator": cap.run["orchestrator"], "release": cap.run["release"], "appliance": cap.run["appliance"], "capture": str(args.capture)}, "entries": ledger})
+    source = {"orchestrator": cap.run["orchestrator"], "release": cap.run["release"], "appliance": cap.run["appliance"], "capture": str(args.capture)}
+    write_json(out / "ledger.json", {"toolkit": toolkit_version(), "target_release": args.target_release, "source": source, "entries": ledger})
+    (out / "summary.md").write_text(summary_md(ledger, reference, source, args.target_release), encoding="utf-8")
     if section_modes:
         proposal = propose(reference, probe.secret_paths)
         write_json(out / "proposal.json", proposal)
@@ -577,6 +647,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     from collections import Counter
     print("reference sections:", ", ".join(reference))
     print("columns:", len(meta["columns"]), "| ledger:", dict(Counter(e["disposition"] for e in ledger)))
+    print("toolkit:", toolkit_version())
+    for title, dispositions in REPORT_GROUPS:
+        n = sum(1 for e in ledger if e["disposition"] in dispositions)
+        if n:
+            print("{}: {}".format(title.split(":")[0], n))
+    print("report from", out / "summary.md")
     print(out)
     return 0
 

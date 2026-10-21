@@ -289,7 +289,7 @@ class AuditRegressions(unittest.TestCase):
         self.assertNotIn("localRoutes", out)
         self.assertNotIn("maxRestartTime", out["segmentBgpSystems"][0])
         self.assertEqual(out["segmentBgpSystems"][1]["maxRestartTime"], 90)
-        self.assertIn(("template bgp", "unresolved"), [n[:2] for n in notes])
+        self.assertIn("assumption", next(n[3] for n in notes if n[:2] == ("template bgp", "mapped")))  # written, but the owner confirms it
 
     def test_vrrp_template_no_longer_drops_vrrp_groups(self):
         vrrp_src = [{"groupId": 1, "interface": "lan0", "enable": True, "vipaddr": "192.0.2.1", "adv_timer": 1, "priority": 110, "tracker": "", "version": 2,
@@ -419,7 +419,7 @@ class AuditRegressions(unittest.TestCase):
         c, notes = ctx({"deployment": DEP, "system-info": {"auto_subnet": {"vrf": {"0": vrf0}}}, "subnets": {"subnets": {"entries": []}}})
         self.assertEqual(m_localRoutes(c), {"advertiseLocalLanSubnets": True, "advertiseLocalWanSubnets": False, "localMetric": 55, "localCommunities": "100:101",
                                             "filterRoutesWithLocalASN": True, "redistToSDwanFabricRouteMap": "default_rtmap_to_subsh", "routes": []})
-        self.assertIn("add_local_asn", " ".join(n["note"] for n in notes if n["disposition"] == "unresolved"))  # no preconfig field exists for it
+        self.assertIn("add_local_asn", " ".join(n["note"] for n in notes if n["disposition"] == "outside-preconfig"))  # no preconfig field exists for it
         self.assertNotIn("add_local_asn", " ".join(n["note"] for n in notes if n["disposition"] == "unmapped-source-key"))
         c, _ = ctx({"deployment": DEP, "system-info": {"auto_subnet": {"vrf": {"0": dict(vrf0, add_local_communities=False)}}}, "subnets": {"subnets": {"entries": []}}})
         self.assertEqual(m_localRoutes(c)["localCommunities"], "")  # communities are kept but not added
