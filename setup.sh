@@ -121,7 +121,6 @@ echo "Installing: $REPOS"
 
 MCP_GUIDE="https://github.com/Crypto-Gi/edgeconnect-mcp/blob/main/docs/install.md"
 MCP_MODE=no
-MCP_AGENT_LIST=""
 if picked edgeconnect-mcp; then
   if [ -z "$MCP" ]; then
     if [ "$ASSUME_YES" -eq 0 ] && [ "$HAVE_TTY" -eq 1 ]; then
@@ -184,7 +183,8 @@ for token in $(printf '%s' "${AGENTS:-1}" | tr 'A-Z,' 'a-z '); do
     case "$t" in -*) die "unknown agent $t: use numbers from the table (1-20) or agent names such as claude-code,codex" ;; esac
     row="$(printf '%s\n' "$AGENT_TABLE" | awk -F'|' -v t="$t" '$1 == t || $3 == t || $5 == t { print; exit }')"
     if [ -z "$row" ]; then
-      case "$t" in *[!a-z0-9-]*|""|-*|[0-9]|[0-9][0-9]|[0-9][0-9][0-9]) die "unknown agent $t: use numbers from the table (1-20) or agent names such as claude-code,codex" ;; esac
+      case "$t" in *[!0-9]*) ;; *) die "unknown agent $t: use numbers from the table (1-20) or agent names such as claude-code,codex" ;; esac
+      case "$t" in *[!a-z0-9-]*|""|-*) die "unknown agent $t: use numbers from the table (1-20) or agent names such as claude-code,codex" ;; esac
       row="0|$t|$t|paste|-"  # another agent the skills installer knows; its MCP config is printed
     fi
     IFS='|' read -r _ name skill route mcp <<EOF
@@ -450,10 +450,12 @@ for m in re.finditer(r"\u2713 ([^\u2502\n]+)", re.sub(r"\x1b\[[0-9;?]*[A-Za-z]",
     if ! command -v devin >/dev/null; then
       echo "Devin: the devin command is not installed; after installing it, run in $ROOT: devin mcp add -s $DEVIN_SCOPE edgeconnect -- $MCP_CMD"
     else
+      DEVIN_OWN_OTHER=0
       DEVIN_OWN="$ROOT/.devin/mcp_config.local.json"; [ "$SCOPE" = home ] && DEVIN_OWN="$HOME/.config/devin/mcp_config.json"
       if [ -f "$DEVIN_OWN" ] && grep -q '"edgeconnect"' "$DEVIN_OWN" && grep -qF "\"$MCP_CMD\"" "$DEVIN_OWN"; then
         echo "Devin: already has edgeconnect in $DEVIN_OWN"
       elif [ -f "$DEVIN_OWN" ] && grep -q '"edgeconnect"' "$DEVIN_OWN"; then
+        DEVIN_OWN_OTHER=1
         echo "Devin: $DEVIN_OWN has an edgeconnect entry that runs another server, left unchanged; to switch it to this folder's:"
         echo "  devin mcp remove -s $DEVIN_SCOPE edgeconnect && devin mcp add -s $DEVIN_SCOPE edgeconnect -- \"$MCP_CMD\"   (in $ROOT)"
       elif (cd "$ROOT" && devin mcp add -s "$DEVIN_SCOPE" edgeconnect -- "$MCP_CMD" >/dev/null 2>&1); then
@@ -463,7 +465,7 @@ for m in re.finditer(r"\u2713 ([^\u2502\n]+)", re.sub(r"\x1b\[[0-9;?]*[A-Za-z]",
       fi
       # Devin also reads other agents' MCP files (.mcp.json, Windsurf's...): show the entry it resolves.
       seen="$(cd "$ROOT" && devin mcp get edgeconnect 2>/dev/null | sed -n 's/^ *Command: //p' | head -1)"
-      if [ -n "$seen" ] && [ "$seen" != "$MCP_CMD" ] && ! { [ -f "$DEVIN_OWN" ] && grep -q '"edgeconnect"' "$DEVIN_OWN"; }; then
+      if [ -n "$seen" ] && [ "$seen" != "$MCP_CMD" ] && [ "$DEVIN_OWN_OTHER" -eq 0 ]; then
         echo "  note: Devin resolves edgeconnect to $seen, from another agent's settings; remove that entry if Devin should use this folder's server"
       fi
     fi
