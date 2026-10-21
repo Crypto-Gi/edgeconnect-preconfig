@@ -177,9 +177,10 @@ class DefaultTemplateTest(unittest.TestCase):
         self.assertEqual(saved.read_text(encoding="utf-8"), "applianceInfo:\n  hostname: example\n")
 
     def test_unusable_answer_is_reported_not_silently_skipped(self):
-        saved, err = self.run_with({"configData": None})
-        self.assertFalse(saved.exists())
-        self.assertIn("10.0.0.99999", err)
+        for body in ({"configData": None}, {"configData": 123}):
+            saved, err = self.run_with(body)
+            self.assertFalse(saved.exists())
+            self.assertIn("10.0.0.99999", err)
 
 
 class TranslateMissingTemplateTest(unittest.TestCase):

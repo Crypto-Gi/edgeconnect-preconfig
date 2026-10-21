@@ -326,7 +326,7 @@ Each tool has its own way of making sure a person approves a write. Never skip o
 ## This folder
 
 - `.env`: the one settings file shared by `edgeconnect-auto` and `edgeconnect-preconfig` (Orchestrator nicknames, URLs, API keys, TLS pins). Both commands find it by themselves, so run them from any folder.
-- `edgeconnect-orchestrator-automation/` and `edgeconnect-preconfig/`: the tools' source, kept current by `setup.sh`. Read them, do not edit them.
+- `edgeconnect-orchestrator-automation/` and `edgeconnect-preconfig/`, when installed: the tools' source, kept current by `setup.sh`. Read them, do not edit them.
 - Keep your own CSVs, reports and captures in a separate work folder, not in the tool folders. Never commit them or `.env`.
 - `edgeconnect-mcp/`, if it was picked, is there only for its guide skill. The MCP server is installed and run separately (for example in Docker) and is not part of this folder. If its tools are not available, say so and continue with the other two; do not try to install or start it.
 
@@ -354,6 +354,9 @@ if [ ! -e "$ROOT/AGENTS.md" ]; then
 elif cmp -s "$AGENTS_NEW" "$ROOT/AGENTS.md"; then
   rm -f "$AGENTS_NEW"
   echo "AGENTS.md: already present, up to date"
+elif cmp -s <(sed '/^## Installed here$/,/^A tool not listed here is not installed/d' "$AGENTS_NEW") <(sed '/^## Installed here$/,/^A tool not listed here is not installed/d' "$ROOT/AGENTS.md"); then
+  mv "$AGENTS_NEW" "$ROOT/AGENTS.md"  # only the generated list changed: keep it true
+  echo "AGENTS.md: already present, its Installed here list updated"
 else
   mv "$AGENTS_NEW" "$ROOT/AGENTS.md.new"
   echo "AGENTS.md: already exists and differs, kept unchanged; the current version is in AGENTS.md.new"

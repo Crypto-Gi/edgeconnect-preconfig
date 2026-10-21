@@ -532,7 +532,8 @@ def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: 
     confirm = [e for e in ledger if e["disposition"] == "mapped" and "assumption" in e["note"]]
     lines.append("## Mapped on an assumption: confirm with the owner ({})".format(len(confirm)))
     lines += ["- `{}` -> `{}`: {}".format(e["item"], e["target"], e["note"]) for e in confirm] or ["- none"]
-    lines += ["", "Verdict: " + verdict(ledger), "", "Not listed: {} entries that are mapped, default, runtime state or context (see ledger.json).".format(sum(1 for e in ledger if e["disposition"] in QUIET) - len(confirm))]
+    lines += ["", "Not listed: {} entries that are mapped, default, runtime state or context (see ledger.json).".format(sum(1 for e in ledger if e["disposition"] in QUIET) - len(confirm)),
+              "", "Verdict: " + verdict(ledger)]
     return "\n".join(lines) + "\n"
 
 
@@ -660,7 +661,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("reference sections:", ", ".join(reference))
     print("columns:", len(meta["columns"]), "| ledger:", dict(Counter(e["disposition"] for e in ledger)))
     print("toolkit:", toolkit_version())
-    for title, dispositions in REPORT_GROUPS:
+    known = set().union(*(d for _, d in REPORT_GROUPS)) | QUIET
+    for title, dispositions in REPORT_GROUPS + [("Unknown disposition (a gap)", {e["disposition"] for e in ledger} - known)]:
         n = sum(1 for e in ledger if e["disposition"] in dispositions)
         if n:
             print("{}: {}".format(title.split(":")[0], n))

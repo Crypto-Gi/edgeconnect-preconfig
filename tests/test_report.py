@@ -87,6 +87,7 @@ class Report(unittest.TestCase):
             (skill / "references" / "default-templates").mkdir(parents=True)
             (skill / "scripts").mkdir()
             (skill / "VERSION").write_text("9.9.9\n")
+            (skill / "references" / "default-templates" / "orchestrator-9.7.1.yml").write_text("applianceInfo: {}\n")  # bundled
             git = ["git", "-C", tmp, "-c", "user.name=t", "-c", "user.email=t@example.com"]
             subprocess.run(git + ["init", "-q"], check=True)
             subprocess.run(git + ["add", "-A"], check=True)
@@ -94,6 +95,9 @@ class Report(unittest.TestCase):
             with mock.patch.object(common, "SKILL_DIR", skill):
                 (skill / "references" / "default-templates" / "orchestrator-10.0.0.1.yml").write_text("applianceInfo: {}\n")  # what capture.py caches
                 self.assertNotIn("LOCAL EDITS", common.toolkit_version())
+                (skill / "references" / "default-templates" / "orchestrator-9.7.1.yml").write_text("applianceInfo: {edited: true}\n")
+                self.assertIn("LOCAL EDITS", common.toolkit_version())  # an edited bundled template is an edit
+                subprocess.run(git + ["checkout", "-q", "--", "."], check=True)
                 (skill / "scripts" / "mine.py").write_text("x = 1\n")
                 self.assertIn("LOCAL EDITS", common.toolkit_version())
 
@@ -103,6 +107,7 @@ class Report(unittest.TestCase):
         self.assertIn("Verdict: Complete for preconfig; 1 item(s) to check by hand.", translate.summary_md([entry("not-readable")], {}, src, "r"))
         text = translate.summary_md([entry("unresolved"), entry("unmapped-source-key"), entry("brand-new"), entry("toolkit-error")], {}, src, "r")
         self.assertIn("Verdict: Incomplete for preconfig: 3 gap(s), 1 toolkit error(s).", text)
+        self.assertTrue(text.rstrip().endswith("Verdict: Incomplete for preconfig: 3 gap(s), 1 toolkit error(s)."))  # SKILL.md: summary.md ends with it
 
     def test_unmapped_keys_of_a_section_the_release_lacks_are_outside_preconfig(self):
         ledger = [entry("unmapped-source-key", "multicast"), entry("unmapped-source-key", "vrrp")]

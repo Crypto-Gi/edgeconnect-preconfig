@@ -368,8 +368,9 @@ def toolkit_version() -> str:
     git = ["git", "-C", str(SKILL_DIR)]
     try:
         commit = subprocess.run(git + ["log", "-1", "--format=%h, %cd", "--date=short"], capture_output=True, text=True, timeout=10).stdout.strip()
-        # capture.py caches new releases' default templates here: that is the toolkit working, not an edit
-        edited = subprocess.run(git + ["status", "--porcelain", "--", ".", ":(exclude)references/default-templates"], capture_output=True, text=True, timeout=10).stdout.strip()
+        status = subprocess.run(git + ["status", "--porcelain", "--", "."], capture_output=True, text=True, timeout=10).stdout.splitlines()
+        # capture.py caches new releases' default templates as new files: the toolkit working, not an edit (an edited bundled one still counts)
+        edited = [line for line in status if not (line.startswith("?? ") and "references/default-templates/" in line)]
     except (OSError, subprocess.SubprocessError):  # no git, or not a checkout: VERSION alone
         commit, edited = "", ""
     return version + (" (commit {})".format(commit) if commit else "") + (", WITH LOCAL EDITS to the toolkit" if edited else "")
