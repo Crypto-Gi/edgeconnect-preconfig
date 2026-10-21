@@ -78,7 +78,7 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
         text = def_tmpl["data"] if def_tmpl["ok"] else None
         if isinstance(text, dict):  # 10.0.0.40625 answers {"configData": "<base64 of the YAML>", ...}
             try:
-                text = base64.b64decode(text.get("configData") or "", validate=True).decode("utf-8")
+                text = base64.b64decode("".join((text.get("configData") or "").split()), validate=True).decode("utf-8")
             except (TypeError, binascii.Error, UnicodeDecodeError):
                 text = None
         try:

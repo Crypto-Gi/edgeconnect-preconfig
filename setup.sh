@@ -281,7 +281,7 @@ AGENTS_NEW="$ROOT/.AGENTS.md.setup"
 cat > "$AGENTS_NEW" <<'EOF'
 # EdgeConnect tools: which one to use, and how
 
-You are working with HPE Aruba EdgeConnect SD-WAN through an Orchestrator. Three tools are available here. Choose the tool first, using the table below, then follow that tool's skill. This file only routes and sets the answer style; it never replaces a skill's safety rules, so do not restate or relax them.
+You are working with HPE Aruba EdgeConnect SD-WAN through an Orchestrator. Three tools exist; "Installed here" at the end of this file says which ones this folder has. Choose the tool first, using the table below, then follow that tool's skill. This file only routes and sets the answer style; it never replaces a skill's safety rules, so do not restate or relax them.
 
 ## How these tools are used
 
@@ -340,6 +340,14 @@ Each tool has its own way of making sure a person approves a write. Never skip o
 - Keep replies short. Ask one question at a time, and only when a wrong guess would change what traffic or configuration is affected.
 - If a command fails, show the message as printed and the fix it suggests. Do not retry with different flags to get past a check.
 EOF
+# Listed from what the folder holds, so a later run that picks fewer repositories keeps the earlier ones.
+{
+  printf '\n## Installed here\n\n'
+  if [ -d "$ROOT/edgeconnect-orchestrator-automation/.git" ]; then echo '- `edgeconnect-auto` and the skill `managing-edgeconnect-firewall-and-objects` (edgeconnect-orchestrator-automation)'; fi
+  if [ -d "$ROOT/edgeconnect-preconfig/.git" ]; then echo '- `edgeconnect-preconfig` and the skill `building-edgeconnect-preconfig-templates` (edgeconnect-preconfig)'; fi
+  if [ -d "$ROOT/edgeconnect-mcp/.git" ]; then echo '- the skill `edgeconnect-guide` for the MCP server (edgeconnect-mcp); the server itself runs separately'; fi
+  printf '\nA tool not listed here is not installed in this folder: do not run its commands. If the user needs it, tell them to run setup.sh again and pick it.\n'
+} >> "$AGENTS_NEW"
 if [ ! -e "$ROOT/AGENTS.md" ]; then
   mv "$AGENTS_NEW" "$ROOT/AGENTS.md"
   echo "AGENTS.md: created"

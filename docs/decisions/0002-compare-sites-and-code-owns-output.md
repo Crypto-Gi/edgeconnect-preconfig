@@ -1,6 +1,6 @@
 # Other sites decide the variables; the agent never writes output
 
-Status: accepted (owner, 2026-10-19)
+Status: accepted (owner, 2026-10-19); the self-healing playbook sentence is superseded by 0003
 
 `translate.py --compare <capture> ...` classifies a field by what the other captured sites of the same type show: it differs, so it is a variable; it is equal everywhere, so it is fixed; the others lack it, so it is fixed and flagged as a different site type. This replaces the name-based guesses (bandwidth, peers, "address outside the subnet") whenever other sites are given, because evidence beats a guess. The site's own interface addresses, secrets and the hostname stay columns, and the comparison always writes a fresh sheet.
 

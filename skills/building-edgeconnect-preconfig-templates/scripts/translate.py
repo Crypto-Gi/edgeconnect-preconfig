@@ -469,6 +469,7 @@ def prune(value: Any, gated: set, ledger: List[Dict[str, Any]], prefix: str = ""
 
 def _default_nat_maps(data: Any) -> bool:
     maps = (data.get("data") or {}) if isinstance(data, dict) else {}
+    maps = {k: m for k, m in maps.items() if isinstance(m, dict)}  # a map listed by name only holds no rules
     return all(set((m or {}).get("prio") or {}) <= {"65535"} and all(set_.get("nat_type") == "no-nat" for e in ((m or {}).get("prio") or {}).values() for set_ in (e.get("set") or {}).values())
                for m in maps.values())
 
@@ -482,7 +483,7 @@ DEFAULT_ONLY = {  # endpoints without a preconfig section whose usual content is
 # shortcut: the usblte pattern is unverified (no USB-LTE appliance captured yet); confirm it on the first one
 NO_GAP_WITHOUT_EVIDENCE = {"running-config": {"poE": r"(?m)^interface \S+ poe ", "usblte": r"(?m)^(interface cell|lte )", "availabilityTimeSettings": None}}
 
-# Ledger dispositions grouped the way a report reads them (SKILL.md "Judge and report the result").
+# Ledger dispositions grouped the way a report reads them (SKILL.md "How to judge and report the result").
 REPORT_GROUPS = [
     ("Toolkit errors: a toolkit bug, report it", {"toolkit-error"}),
     ("Gaps: the preconfig format has a place for it, but the value was not carried", {"unresolved", "unmapped-source-key"}),
@@ -496,12 +497,23 @@ QUIET = {"mapped", "default-omitted", "runtime", "empty-or-absent", "context", "
 def scope_by_template(ledger: List[Dict[str, Any]], template_sections: set) -> None:
     """An unresolved item whose target names no section of the target release's preconfig format is outside preconfig, not a gap."""
     for e in ledger:
-        if e["disposition"] == "unresolved":
+        if e["disposition"] in ("unresolved", "unmapped-source-key"):
             sections = {re.split(r"[.\[]", t.strip())[0] for t in e["target"].split(",") if t.strip()}
             if not sections & template_sections:
                 e["disposition"] = "outside-preconfig"
                 if sections:  # the section exists in other releases' formats, not in the target's
                     e["note"] += " (the target release's preconfig format has no {} section)".format(", ".join(sorted(sections)))
+
+
+def verdict(ledger: List[Dict[str, Any]]) -> str:
+    """The one-line verdict of SKILL.md "How to judge and report the result"; an unknown disposition counts as a gap."""
+    known = set().union(*(d for _, d in REPORT_GROUPS)) | QUIET
+    errors = sum(1 for e in ledger if e["disposition"] == "toolkit-error")
+    gaps = sum(1 for e in ledger if e["disposition"] in ("unresolved", "unmapped-source-key") or e["disposition"] not in known)
+    by_hand = sum(1 for e in ledger if e["disposition"] == "not-readable")
+    if errors or gaps:
+        return "Incomplete for preconfig: {} gap(s), {} toolkit error(s).".format(gaps, errors)
+    return "Complete for preconfig" + ("; {} item(s) to check by hand.".format(by_hand) if by_hand else ".")
 
 
 def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: Dict[str, Any], release: str) -> str:
@@ -520,7 +532,7 @@ def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: 
     confirm = [e for e in ledger if e["disposition"] == "mapped" and "assumption" in e["note"]]
     lines.append("## Mapped on an assumption: confirm with the owner ({})".format(len(confirm)))
     lines += ["- `{}` -> `{}`: {}".format(e["item"], e["target"], e["note"]) for e in confirm] or ["- none"]
-    lines += ["", "Not listed: {} entries that are mapped, default, runtime state or context (see ledger.json).".format(sum(1 for e in ledger if e["disposition"] in QUIET) - len(confirm))]
+    lines += ["", "Verdict: " + verdict(ledger), "", "Not listed: {} entries that are mapped, default, runtime state or context (see ledger.json).".format(sum(1 for e in ledger if e["disposition"] in QUIET) - len(confirm))]
     return "\n".join(lines) + "\n"
 
 
@@ -652,6 +664,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         n = sum(1 for e in ledger if e["disposition"] in dispositions)
         if n:
             print("{}: {}".format(title.split(":")[0], n))
+    print("verdict:", verdict(ledger))
     print("report from", out / "summary.md")
     print(out)
     return 0

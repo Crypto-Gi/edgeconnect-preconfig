@@ -89,7 +89,7 @@ class MapperRules(unittest.TestCase):
         self.assertEqual(m_tunnelConfiguration(ctx({"passthrough-tunnels": {"a": dict(user, ipsecAntiReplayWindow="disable")}})[0])["tunnels"][0]["ipsecConfig"]["enableIpSecArcWindow"], 0)  # ECOS stores 0 as "disable"
         c, notes = ctx({"passthrough-tunnels": {"a": dict(user, ipsecAntiReplayWindow="odd"), "b": dict(user, alias="T2")}})
         self.assertEqual([t["tunnelName"] for t in m_tunnelConfiguration(c)["tunnels"]], ["T2"])
-        self.assertTrue(any(n["disposition"] == "unresolved" and "T1" in n["note"] for n in notes))
+        self.assertTrue(any(n["disposition"] == "toolkit-error" and "T1" in n["note"] for n in notes))  # a value the mapper cannot read is a toolkit error, not a gap
         self.assertEqual(m_tunnelConfiguration(ctx({"passthrough-tunnels": {"a": dict(user, esp="null")}})[0])["tunnels"][0]["ipsecConfig"]["ipsecEncryptAlgorithm"], "none")
         for esp in ("null", ""):
             gmac = m_tunnelConfiguration(ctx({"passthrough-tunnels": {"a": dict(user, ah="aes128gmac", esp=esp)}})[0])

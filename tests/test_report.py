@@ -78,6 +78,48 @@ class Report(unittest.TestCase):
         self.assertIn("## Not readable", text)
         self.assertIn("## Gaps: the preconfig format has a place for it, but the value was not carried (0)", text)
 
+    def test_cached_default_templates_are_not_local_edits(self):
+        import common
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp)
+            (skill / "references" / "default-templates").mkdir(parents=True)
+            (skill / "scripts").mkdir()
+            (skill / "VERSION").write_text("9.9.9\n")
+            git = ["git", "-C", tmp, "-c", "user.name=t", "-c", "user.email=t@example.com"]
+            subprocess.run(git + ["init", "-q"], check=True)
+            subprocess.run(git + ["add", "-A"], check=True)
+            subprocess.run(git + ["commit", "-q", "-m", "base"], check=True)
+            with mock.patch.object(common, "SKILL_DIR", skill):
+                (skill / "references" / "default-templates" / "orchestrator-10.0.0.1.yml").write_text("applianceInfo: {}\n")  # what capture.py caches
+                self.assertNotIn("LOCAL EDITS", common.toolkit_version())
+                (skill / "scripts" / "mine.py").write_text("x = 1\n")
+                self.assertIn("LOCAL EDITS", common.toolkit_version())
+
+    def test_summary_ends_with_the_verdict(self):
+        src = {"appliance": {}}
+        self.assertIn("Verdict: Complete for preconfig.", translate.summary_md([entry("mapped")], {}, src, "r"))
+        self.assertIn("Verdict: Complete for preconfig; 1 item(s) to check by hand.", translate.summary_md([entry("not-readable")], {}, src, "r"))
+        text = translate.summary_md([entry("unresolved"), entry("unmapped-source-key"), entry("brand-new"), entry("toolkit-error")], {}, src, "r")
+        self.assertIn("Verdict: Incomplete for preconfig: 3 gap(s), 1 toolkit error(s).", text)
+
+    def test_unmapped_keys_of_a_section_the_release_lacks_are_outside_preconfig(self):
+        ledger = [entry("unmapped-source-key", "multicast"), entry("unmapped-source-key", "vrrp")]
+        translate.scope_by_template(ledger, {"vrrp"})
+        self.assertEqual([e["disposition"] for e in ledger], ["outside-preconfig", "unmapped-source-key"])
+
+    def test_names_only_nat_policy_map_does_not_crash(self):
+        self.assertTrue(translate.DEFAULT_ONLY["nat-maps"]({"data": {"map1": "map1"}}))
+
+    def test_a_tunnel_the_mapper_cannot_read_is_a_toolkit_error(self):
+        from mappers import Ctx, m_tunnelConfiguration
+        notes = []
+        cap = FakeCap()
+        cap.data = lambda ident, prefer="live": {"passthrough-tunnels": {"t1": {"alias": "odd"}}, "deployment": DEP}.get(ident)
+        self.assertIsNone(m_tunnelConfiguration(Ctx(cap, notes)))
+        self.assertEqual([n["disposition"] for n in notes if n["item"].startswith("passthrough-tunnels")], ["toolkit-error"])
+
     def test_toolkit_version_starts_with_the_version_file(self):
         self.assertTrue(toolkit_version().startswith((SKILL_DIR / "VERSION").read_text().strip()))
 

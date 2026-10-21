@@ -892,13 +892,15 @@ def m_tunnelConfiguration(ctx: Ctx) -> Optional[Dict[str, Any]]:
                 t["ipsecConfig"] = {"ipsecAuthAlgorithm": v["ah"], "ipsecEncryptAlgorithm": "null" if "gmac" in str(v["ah"]) else {"": "auto", None: "auto", "null": "none"}.get(v.get("esp"), v.get("esp")), "enableIpSecArcWindow": 0 if v["ipsecAntiReplayWindow"] == "disable" else int(v["ipsecAntiReplayWindow"]), "ipsecLifetime": v["lifetime"],
                                     "ipsecLifetimeBytes": v["lifebytes"], "secrecyGroup": int(v["pfsgroup"]) if v.get("pfs") else "disable", "ipsecSuiteB": v["ipsec_Suite_b"]}  # null lets the appliance default (PFS on, group 2)
         except (KeyError, TypeError, ValueError) as err:
-            ctx.note("passthrough-tunnels[{}]".format(k), "unresolved", "tunnelConfiguration", "tunnel {} not written: {}: {}".format(v.get("alias", k), type(err).__name__, err))
+            ctx.note("passthrough-tunnels[{}]".format(k), "toolkit-error", "tunnelConfiguration", "tunnel {} not written: the mapper could not read it ({}: {}); a toolkit bug to report".format(v.get("alias", k), type(err).__name__, err))
             continue
         tunnels.append(t)
         ctx.unmapped("passthrough-tunnels[{}]".format(k), v, {"id", "alias", "mode", "adminStatus", "sourceIpAddress", "destIpAddress", "natMode", "peerName", "max_bw_auto", "max_bw", "presharedkey", "ike_aalg", "ike_ealg", "dhgroup",
                                                              "ike_lifetime", "dpd_delay", "dpd_retry", "id_type", "id_str", "exchange_mode", "ike_version", "ike_id_local", "ike_id_remote", "ike_prf", "ah", "esp", "ipsecAntiReplayWindow",
                                                              "lifetime", "lifebytes", "pfs", "pfsgroup", "ipsec_Suite_b", "srcNePk", "destNePk", "destTunnelId", "destTunnelAlias", "operStatus", "remoteIdState", "fecStatus",
                                                              "fecRatio", "parallelTunnelId", "local_vrf", "overlayId", "tag", "ipsec_enabled", "max_bw_unshaped"}, "tunnelConfiguration")
+    if not tunnels:  # tunnelConfiguration replaces on apply: an empty list would remove the target's tunnels
+        return None
     ctx.note("passthrough-tunnels", "mapped", "tunnelConfiguration", "{} user passthrough tunnels; operStatus and ids are runtime; the pre-shared key is a secret column; an empty esp (IPsec encryption) is the stored form of 'auto' and esp 'null' of 'none'; under gmac authentication it is written 'null', which the validator requires".format(len(tunnels)))
     return {"tunnels": tunnels}
 
@@ -958,7 +960,7 @@ def m_branchNatMapsConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
                 rule["translateDestinationPort"] = str(st["trans_dport"])
             rules.append(rule)
     names_only = sorted(k for k, v in data.items() if not isinstance(v, dict)) if isinstance(data, dict) else []
-    if not rules and names_only:  # owner ruling 2026-10-21: names-only means no rules
+    if not rules and names_only:  # owner ruling, docs/decisions/0004: names-only means no rules
         ctx.note("branch-nat-maps", "default-omitted", "branchNatMapsConfig", "no branch NAT rules configured (/nat/maps lists map {} by name only, with no rules)".format(", ".join(names_only)))
         return None
     if not rules:

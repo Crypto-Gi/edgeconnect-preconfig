@@ -130,10 +130,6 @@ class RedactTest(unittest.TestCase):
         self.assertEqual(paths, ["$.nac.server[0].key"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class DefaultTemplateTest(unittest.TestCase):
     """capture.py caches the default template of an Orchestrator release the toolkit does not bundle."""
 
@@ -161,9 +157,14 @@ class DefaultTemplateTest(unittest.TestCase):
         return folder / "orchestrator-10.0.0.99999.yml", err.getvalue()
 
     def test_template_in_a_base64_json_configdata_field_is_cached(self):
-        # The shape seteam's Orchestrator 10.0.0.40625 returns: base64 YAML inside a JSON object.
+        # The shape an Orchestrator on 10.0.0.40625 returns: base64 YAML inside a JSON object.
         yaml_text = "# Preconfiguration Template\napplianceInfo:\n  hostname: example\n"
         saved, _ = self.run_with({"configData": base64.b64encode(yaml_text.encode()).decode(), "autoApply": False, "nepk": None})
+        self.assertEqual(saved.read_text(encoding="utf-8"), yaml_text)
+
+    def test_line_wrapped_base64_configdata_is_cached(self):
+        yaml_text = "# Preconfiguration Template\napplianceInfo:\n  hostname: example\n" * 5
+        saved, _ = self.run_with({"configData": base64.encodebytes(yaml_text.encode()).decode()})  # MIME-style lines of 76
         self.assertEqual(saved.read_text(encoding="utf-8"), yaml_text)
 
     def test_configdata_that_is_not_a_yaml_mapping_is_not_cached(self):
@@ -190,3 +191,6 @@ class TranslateMissingTemplateTest(unittest.TestCase):
         self.assertIn("10.0.0.99999", err.getvalue())
         self.assertIn("capture", err.getvalue())
 
+
+if __name__ == "__main__":
+    unittest.main()
