@@ -630,6 +630,28 @@ class AuditRegressions(unittest.TestCase):
         self.assertIsNone(m_branchNatMapsConfig(c))
         self.assertEqual([n["disposition"] for n in notes if n["item"] == "branch-nat-maps"], ["default-omitted"])
 
+    def test_branch_nat_reads_live_rules_when_cached_lists_names_only(self):
+        # seen on 9.6.2.1 and 9.7.1 right after an apply: Orchestrator's cached /nat/maps lags the appliance
+        import json
+        import tempfile
+        from translate import Capture
+        rule = {"dir": "outbound", "enable": True, "match": {"intf": "any", "segment": "0", "proto": "any", "src_subnet": "192.0.2.0/24"}, "set": {"trans_src": "198.51.100.0/24"}}
+        copies = {"cached": {"map1": "map1"}, "live": {"map1": {"prio": {"10": rule}}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "capture").mkdir()
+            (folder / "run.json").write_text(json.dumps({"appliance": {"nePk": "2.NE"}}))
+            index = [{"id": "deployment", "label": "live", "status": "ok", "file": "capture/deployment.json"}]
+            (folder / "capture/deployment.json").write_text(json.dumps({"data": DEP}))
+            for label, data in copies.items():  # cached first, as capture.py writes the index
+                index.append({"id": "branch-nat-maps", "label": label, "status": "ok", "file": "capture/branch-nat-maps.{}.json".format(label)})
+                (folder / "capture/branch-nat-maps.{}.json".format(label)).write_text(json.dumps({"data": data}))
+            (folder / "capture-index.json").write_text(json.dumps(index))
+            notes = []
+            nat = m_branchNatMapsConfig(Ctx(Capture(folder), notes))
+        self.assertEqual([(r["priorityLevel"], r["translateSourceIpSubnet"]) for r in nat["branchNatRules"]], [(10, "198.51.100.0/24")])
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "branch-nat-maps"], ["mapped"])
+
     def test_ids_profile_is_substituted_by_signature_family(self):
         inv = {"segments": ["Default"], "zones": ["Default"], "lan": ["L"], "wan": ["W"], "groups": ["g"], "templateGroups": ["t"], "overlays": ["o"],
                "idsProfiles": ["Default", "Default_S5", "Default_S7"]}
