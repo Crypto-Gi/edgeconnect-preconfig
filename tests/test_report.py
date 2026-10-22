@@ -73,6 +73,20 @@ class Report(unittest.TestCase):
             translate.tag_unmapped(Cap(text), ledger)
             self.assertEqual([e["target"] for e in ledger if e["item"] == "running-config"], [",".join(expected)] if expected else [])
 
+    def test_a_refused_read_is_reported_to_check_by_hand(self):
+        class Cap(FakeCap):
+            index = [{"id": "static-routes-configured", "path": "/appliance/rest", "query": {"nePk": "9.NE", "url": "subnets3/configured"}, "label": "live",
+                      "status": "denied", "http": 403, "sections": ["localRoutes", "segmentLocalRoutes"]}]
+
+            def data(self, ident, prefer="live"):
+                return None
+        ledger = []
+        translate.tag_unmapped(Cap(), ledger)
+        refused = [e for e in ledger if e["item"] == "static-routes-configured"]
+        self.assertEqual([(e["disposition"], e["target"]) for e in refused], [("not-readable", "localRoutes,segmentLocalRoutes")])
+        self.assertIn("url=subnets3/configured (HTTP 403)", refused[0]["note"])
+        self.assertEqual(translate.verdict(refused), "Complete for preconfig; 1 item(s) to check by hand.")
+
     def test_business_hours_are_checked_by_hand_not_a_gap(self):
         text = translate.summary_md([entry("not-readable", "availabilityTimeSettings")], {}, {"appliance": {}}, "9.7.1.42046")
         self.assertIn("## Not readable", text)

@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, WORK_DIR, client_for, load_yaml, parse_yaml, redact_secrets, utc_stamp, write_json  # noqa: E402
 
-STOP_ERRORS = ("AuthenticationError", "PermissionDeniedError", "TransportError")  # 401, 403, redirect, TLS, network
+STOP_ERRORS = ("AuthenticationError", "TransportError")  # 401, redirect, TLS, network; a 403 is one read the key may not make
 LABELS = {"cached": ("cached", "live"), "fromGms": ("cached", "live")}
 
 
@@ -140,8 +140,8 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
                 item["reused"] = True
             else:
                 result = reader.get(entry["path"], query)
-                if not result["ok"]:
-                    item.update(status="error", error=result["error"], http=result["http"], message=result["message"])
+                if not result["ok"]:  # a 403 (the key's RBAC roles refuse this read) is "denied": translate reports it, never silently
+                    item.update(status="denied" if result["error"] == "PermissionDeniedError" else "error", error=result["error"], http=result["http"], message=result["message"])
                     index.append(item)
                     continue
                 payload = result["data"]

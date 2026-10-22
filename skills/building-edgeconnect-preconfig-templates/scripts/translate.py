@@ -547,6 +547,14 @@ def tag_unmapped(cap: Capture, ledger: List[Dict[str, Any]]) -> None:
     selected = sorted({t for g in groups if g["name"] in assoc for t in g.get("selectedTemplateNames", [])})
     catalogue = {e["id"]: e for e in load_yaml(CATALOGUE)["endpoints"]}
     seen = set()
+    readable = {i["id"] for i in cap.index if i["status"] == "ok"}
+    for item in cap.index:  # a read the API key's roles refuse is reported, whatever it feeds (docs/decisions/0009)
+        if item["status"] == "denied" and item["id"] not in readable and item["id"] not in seen:
+            seen.add(item["id"])
+            url = (item.get("query") or {}).get("url")
+            ledger.append({"item": item["id"], "disposition": "not-readable", "target": ",".join(item.get("sections") or []),
+                           "note": "Orchestrator refused GET {}{} (HTTP 403): the API key's RBAC roles do not allow it, so these sections may lack values; "
+                                   "check them by hand or widen the key's read roles and capture again".format(item["path"], " url=" + url if url else "")})
     for item in cap.index:
         ident = item["id"]
         if ident in seen or ident in mapped or ident in context:

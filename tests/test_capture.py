@@ -107,8 +107,12 @@ class CaptureTest(unittest.TestCase):
     def test_a_key_that_may_not_read_the_release_still_captures(self):
         final = self.run_capture(FakeClient(fail={"/gms/versions": PermissionDeniedError("403")}), ["deployment"])
         self.assertIsNone(json.loads((final / "run.json").read_text())["release"])
-        with self.assertRaises(capture.Stop):  # any other refused read stops: it would be a silently missing section
-            self.run_capture(FakeClient(fail={"/deployment": PermissionDeniedError("403")}), ["deployment"])
+
+    def test_a_read_the_key_may_not_make_is_recorded_as_denied_and_capture_continues(self):
+        final = self.run_capture(FakeClient(fail={"/deployment": PermissionDeniedError("403")}), ["deployment", "bgp-system"])
+        index = json.loads((final / "capture-index.json").read_text())
+        self.assertEqual([(i["id"], i["status"]) for i in index],
+                         [("deployment", "denied"), ("deployment", "denied"), ("bgp-system", "ok"), ("bgp-system", "ok")])
 
     def test_write_counter_above_zero_stops(self):
         client = FakeClient()
