@@ -323,7 +323,7 @@ EOF
 fi
 if picked edgeconnect-preconfig; then
 install_command edgeconnect-preconfig <<EOF
-# Usage: edgeconnect-preconfig COMMAND [options]: appliances, build, variables, compare, validate, upload, or a stage name (--help lists them)
+# Usage: edgeconnect-preconfig COMMAND [options]: list, build, variables, compare, validate, upload, or a stage name (--help lists them)
 EC_DOTENV="\${EC_DOTENV:-$ROOT/.env}" exec "$ROOT/.venv/bin/python" "$PRECONFIG_SCRIPTS/cli.py" "\$@"
 EOF
 fi

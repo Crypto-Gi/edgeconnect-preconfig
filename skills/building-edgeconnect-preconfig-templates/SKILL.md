@@ -49,7 +49,7 @@ If `edgeconnect-preconfig` is on PATH (installed by `setup.sh` from any of the t
 
 **For people without an AI, the same command has six short verbs** (`edgeconnect-preconfig --help`). They run the stages below for you, and you can show them to a user who wants to work alone:
 ```bash
-edgeconnect-preconfig appliances --orchestrator lab                     # test the .env profile, list appliances (GET only)
+edgeconnect-preconfig list --orchestrator lab                     # test the .env profile, list appliances (GET only)
 edgeconnect-preconfig build --orchestrator lab --appliance <name|nePk>  # capture, translate, check; kept only if /validate accepts it
 edgeconnect-preconfig variables <build folder>                          # pick per-site settings: Top 10, Top 20 or all, by section
 edgeconnect-preconfig compare <build folder> <site> <site>              # other sites of the same design pick them; a CSV row per site

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """edgeconnect-preconfig: build preconfig templates from a working appliance, without an AI.
 
-  appliances --orchestrator NICK [--search TEXT]       test the Orchestrator profile, list its appliances
+  list       --orchestrator NICK [--search TEXT]       test the Orchestrator profile, list its appliances
   build      --orchestrator NICK --appliance NAME       read one appliance, write a validated YAML, template and CSV
              [--out DIR] [--validate-on NICK]
   variables  FOLDER [--pick top10|top20] [--set C,..]  choose the per-site settings: Top 10, Top 20 or all, by section
@@ -90,10 +90,10 @@ def quiet(fn: Callable[..., Any], *args: Any) -> Any:
     return result, buffer.getvalue()
 
 
-# ---------------------------------------------------------------- appliances
+# ---------------------------------------------------------------- list
 
-def cmd_appliances(argv: List[str]) -> int:
-    p = argparse.ArgumentParser(prog=PROG + " appliances", description="Test an Orchestrator profile from .env and list its appliances (GET only).")
+def cmd_list(argv: List[str]) -> int:
+    p = argparse.ArgumentParser(prog=PROG + " list", description="Test an Orchestrator profile from .env and list its appliances (GET only).")
     p.add_argument("--orchestrator", required=True, help=".env profile nickname")
     p.add_argument("--search", help="show only appliances whose hostname, nePk, model or site contains this text")
     a = p.parse_args(argv)
@@ -116,7 +116,7 @@ def cmd_appliances(argv: List[str]) -> int:
     print(table(["Hostname", "nePk", "Model", "ECOS", "Site", "Reachable"], rows) if rows else "no appliances{}".format(" match" if a.search else ""))
     print("{} appliance(s), {} reachable".format(len(rows), sum(1 for r in rows if r[5].startswith("yes"))))
     if client.write_requests:
-        raise Fail("write counter is {}; appliances is read-only".format(client.write_requests))
+        raise Fail("write counter is {}; list is read-only".format(client.write_requests))
     return 0
 
 
@@ -592,7 +592,7 @@ def cmd_upload(argv: List[str]) -> int:
 
 # ---------------------------------------------------------------- dispatch
 
-VERBS: Dict[str, Callable[[List[str]], int]] = {"appliances": cmd_appliances, "build": cmd_build, "variables": cmd_variables,
+VERBS: Dict[str, Callable[[List[str]], int]] = {"list": cmd_list, "build": cmd_build, "variables": cmd_variables,
                                                 "compare": cmd_compare, "validate": cmd_validate, "upload": cmd_upload}
 
 

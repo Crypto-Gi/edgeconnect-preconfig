@@ -50,7 +50,7 @@ Picking 3 installs the MCP guide skill, `edgeconnect-guide`, and, if you choose 
 `setup.sh` installs the `edgeconnect-preconfig` command. Six verbs cover the whole job; `edgeconnect-preconfig --help` lists them, and each takes `--help`.
 
 ```bash
-edgeconnect-preconfig appliances --orchestrator lab                      # test the .env profile and list appliances: hostname, nePk, model, ECOS, site, reachable
+edgeconnect-preconfig list --orchestrator lab                      # test the .env profile and list appliances: hostname, nePk, model, ECOS, site, reachable
 edgeconnect-preconfig build --orchestrator lab --appliance Branch-01     # read it (GET only), convert, check; kept only if /validate accepts it
 edgeconnect-preconfig variables ./preconfig-output/Branch-01             # choose the per-site settings: Top 10, Top 20 or all, by section
 edgeconnect-preconfig compare ./preconfig-output/Branch-01 Branch-07 Branch-12   # or let sites of the same design choose; a CSV row per site
