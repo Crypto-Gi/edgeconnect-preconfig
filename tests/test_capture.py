@@ -120,6 +120,12 @@ class CaptureTest(unittest.TestCase):
         self.assertIn(("reachability", "denied"), [(i["id"], i["status"]) for i in index])
         self.assertEqual([(i["label"], i["status"]) for i in index if i["id"] == "deployment"], [("cached", "ok"), ("live", "ok")])
 
+    def test_a_refused_routes_read_stops_the_capture(self):
+        for path, only in (("/subnets", ["subnets"]), ("/subnets/all", ["subnets-all-vrfs"])):
+            with self.assertRaises(capture.Stop) as stop:
+                self.run_capture(FakeClient(fail={path: PermissionDeniedError("403")}), only)
+            self.assertIn("routes", str(stop.exception))
+
     def test_a_stopped_capture_leaves_no_folder(self):
         capture.client_for = lambda nickname: FakeClient()
         out = Path(tempfile.mkdtemp())

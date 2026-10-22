@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, WORK_DIR, client_for, load_yaml, parse_yaml, redact_secrets, utc_stamp, write_json  # noqa: E402
 
+MUST_READ = {"/subnets": "routes", "/subnets/all": "segment routes"}  # a refused read here would silently drop the site's routes
 STOP_ERRORS = ("AuthenticationError", "TransportError")  # 401, redirect, TLS, network; a 403 is one read the key may not make
 LABELS = {"cached": ("cached", "live"), "fromGms": ("cached", "live")}
 
@@ -143,6 +144,9 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
                     item["reused"] = True
                 else:
                     result = reader.get(entry["path"], query)
+                    if not result["ok"] and result["error"] == "PermissionDeniedError" and entry["path"] in MUST_READ:
+                        raise Stop("GET {} refused (HTTP 403): the API key may not read the {}, so the preconfig would lose them; "
+                                   "give the key read rights for them and capture again".format(entry["path"], MUST_READ[entry["path"]]))
                     if not result["ok"]:  # a 403 (the key's RBAC roles refuse this read) is "denied": translate reports it, never silently
                         item.update(status="denied" if result["error"] == "PermissionDeniedError" else "error", error=result["error"], http=result["http"], message=result["message"])
                         index.append(item)

@@ -31,12 +31,13 @@ from typing import Any, Callable, Dict, List, Optional
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from variables import ALWAYS_SECTIONS, LAYOUT  # noqa: E402
+from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT  # noqa: E402
 from common import DEFAULT_TEMPLATES_DIR, VALIDATORS, WORK_DIR, EdgeConnectError, PermissionDeniedError, client_for, load_yaml, toolkit_version, utc_stamp, write_json  # noqa: E402
 
 PROG = "edgeconnect-preconfig"
 STATES = {1: "yes", 2: "NO", 3: "unsupported version", 4: "yes (out of sync)", 5: "yes (syncing)"}  # /appliance `state`
 NOT_STAGES = {"cli", "common", "decisions", "mappers", "variables"}  # libraries, not commands
+INTERFACE_NAME_KEYS = ("interfaceName", "dhcpInterfaceName", "raInterfaceName")
 ADDRESS_REASONS = ("this site's own interface address", "inside one of this site's own subnets")
 
 
@@ -230,8 +231,14 @@ class Picker:
         self.sections = sorted({r["section"] for r in self.free})
         self.on = {r["path"]: r["decision"] == "variable" for r in self.free}
 
+    def start_all(self) -> None:
+        """--pick all: every setting per site."""
+        for r in self.free:
+            self.on[r["path"]] = True
+
     def ranked(self, count: int) -> List[Dict[str, str]]:
-        hits = sorted((r for r in self.free if r["pct"] is not None and r["reason"] != LAYOUT), key=lambda r: (-r["pct"], -r["support"], r["n"]))  # layout: only by a flip
+        hits = sorted((r for r in self.free if r["pct"] is not None and r["reason"] != LAYOUT and r["path"] not in COMMA_LISTS),
+                      key=lambda r: (-r["pct"], -r["support"], r["n"]))  # layout, template groups and overlays: only by a flip
         return hits[:count]
 
     def start_top(self, count: int) -> None:
@@ -412,20 +419,26 @@ def build_site(folder: Path, info: Dict[str, Any], name: str, sheet: List[Dict[s
 
 
 def layout_differences(reference: Dict[str, Any], other: Dict[str, Any]) -> List[str]:
-    """List items another site holds at the same position under another name (wan1 where this site has wan0).
+    """List items another site holds at the same position under another interface name (wan1 where this site has wan0).
 
-    Rows are matched by position, so such a site's values would land on the wrong interface or item."""
-    from variables import IF_KIND, labelled, sheet_items
-    theirs = dict(sheet_items(other))
-    out = set()
-    for path, _ in sheet_items(reference):
-        if "[" in path and path in theirs:
-            mine, yours = (re.findall(r"[^\[]*\[[^\]]*\]", labelled(doc, path)) for doc in (reference, other))
-            # only interface names mark a different layout; a tunnel or rule name may differ per site at the same position
-            first = next((i for i, (x, y) in enumerate(zip(mine, yours)) if x != y and IF_KIND.match(x[x.index("[") + 1:-1])), None)
-            if first is not None:
-                out.add("".join(mine[:first + 1]).replace("deploymentInfo.", "", 1))
-    return sorted(out)
+    Rows are matched by position, so such a site's values would land on the wrong interface. Names are compared directly;
+    a tunnel or rule name may differ per site and does not count."""
+    out: List[str] = []
+
+    def walk(mine: Any, yours: Any, path: str) -> None:
+        if isinstance(mine, dict) and isinstance(yours, dict):
+            for key in mine:
+                if key in yours:
+                    walk(mine[key], yours[key], "{}.{}".format(path, key) if path else key)
+        elif isinstance(mine, list) and isinstance(yours, list):
+            for i, (x, y) in enumerate(zip(mine, yours)):
+                name = next((k for k in INTERFACE_NAME_KEYS if isinstance(x, dict) and k in x), None)
+                if name and isinstance(y, dict) and x.get(name) != y.get(name):
+                    out.append("{}[{}]: {} vs {}".format(path, i, x.get(name), y.get(name)).replace("deploymentInfo.", "", 1))
+                walk(x, y, "{}[{}]".format(path, i))
+
+    walk(reference, other, "")
+    return out
 
 
 def write_rows(site_dir: Path, name: str, others: List[Dict[str, Any]]) -> None:
@@ -476,7 +489,7 @@ def finish(picker: Picker, reference: Dict[str, Any], default_name: str, name: O
 def cmd_variables(argv: List[str], read: Callable[[str], str] = input) -> int:
     p = argparse.ArgumentParser(prog=PROG + " variables", description="Choose which settings are per site (CSV columns) and build site-<name>/ from a build folder.")
     p.add_argument("folder", type=Path)
-    p.add_argument("--pick", choices=("top10", "top20", "all"), help="start from the Top 10 or Top 20 (all: browse every section); with --yes no questions are asked")
+    p.add_argument("--pick", choices=("top10", "top20", "all"), help="start from the Top 10 or Top 20, or tick every setting (all); with --yes no questions are asked")
     p.add_argument("--set", help="comma-separated column names or paths to make per site as well")
     p.add_argument("--name", help="site type name (default: the appliance's)")
     p.add_argument("--yes", action="store_true", help="accept the choice without the tick list or questions")
@@ -489,13 +502,16 @@ def cmd_variables(argv: List[str], read: Callable[[str], str] = input) -> int:
     mode = a.pick
     if not mode:
         if a.yes:
-            raise Fail("--yes needs --pick top10 or top20")
+            raise Fail("--yes needs --pick top10, top20 or all")
         print("Hostname, serial number and secrets are always per site.\nHow do you want to pick the rest?\n"
               "  1) Top 10 - the settings most often different between sites (start here)\n  2) Top 20\n  3) All settings, by section")
         mode = {"1": "top10", "2": "top20", "3": "all", "": "top10"}.get(read("> ").strip())
         if not mode:
             raise Fail("answer 1, 2 or 3")
-    picker.start_top(20 if mode == "top20" else 10)
+    if mode == "all" and a.pick:
+        picker.start_all()
+    else:
+        picker.start_top(20 if mode == "top20" else 10)
     if a.set:
         unknown = picker.set_by_name([s.strip() for s in a.set.split(",") if s.strip()])
         if unknown:
@@ -576,6 +592,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         return 1
     rows_for = [{"hostname": n, "items": s} for n, s in zip(names, seen) if not misfits[n]]
     target = build_site(a.folder, info, name, picker.sheet(reference), rows_for)
+    ensure_sites_csv(target)  # every other site may have been left out: sites.csv still holds this site's row
     return validate_rows(target, target / "sites.csv", info, None)
 
 

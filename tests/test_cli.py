@@ -163,18 +163,76 @@ class CompareRows(unittest.TestCase):
         self.assertEqual((second[secret], second["serial_number"]), ("", ""))  # never copied: typed in by a person
 
 
+class TopAndAll(unittest.TestCase):
+    def test_top_n_never_ticks_template_groups_or_overlays(self):
+        ref = copy.deepcopy(REFERENCE)
+        ref["templateGroups"] = {"groups": ["G1", "G2"]}
+        ref["businessIntentOverlays"] = {"overlays": ["O1"]}
+        ranking = dict(RANKING, **{"templateGroups.groups": {"differs_pct": 97, "appliances": 60}, "businessIntentOverlays.overlays": {"differs_pct": 99, "appliances": 60}})
+        p = cli.Picker(ref, sheet_rows(ref), ranking)
+        p.start_top(20)
+        self.assertEqual((p.on["templateGroups.groups"], p.on["businessIntentOverlays.overlays"]), (False, False))
+
+    def test_pick_all_yes_ticks_every_setting(self):
+        import yaml
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "build.json").write_text(json.dumps({"site_type": "br", "orchestrator": "lab", "validator": "lab", "capture": "c", "target_release": "9.7.1.42046", "appliance": {}}))
+            (folder / "reference.yaml").write_text(yaml.safe_dump(REFERENCE))
+            write_sheet(sheet_rows(), folder / "variables.csv")
+            with mock.patch.object(cli, "build_site", return_value=folder) as built, mock.patch.object(cli, "ensure_sites_csv"), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.cmd_variables([str(folder), "--pick", "all", "--yes"]), 0)
+        sheet = by_path(built.call_args.args[3])
+        fixed = sorted(p for p, r in sheet.items() if r["decision"] == "fixed")
+        self.assertEqual(fixed, [])
+
+
 class CompareLayout(unittest.TestCase):
     def test_a_site_with_another_interface_layout_gets_no_row(self):
         other = copy.deepcopy(REFERENCE)
         other["applianceInfo"]["hostname"] = "br-2"
         other["deploymentInfo"]["deploymentInterfaces"][2] = {"interfaceName": "wan1", "ipAddressMask": "203.0.113.2/24", "outboundMaxBandwidth": 5000}
-        self.assertEqual(cli.layout_differences(REFERENCE, other), ["deploymentInterfaces[wan0]"])
+        self.assertEqual(cli.layout_differences(REFERENCE, other), ["deploymentInterfaces[2]: wan0 vs wan1"])
         self.assertEqual(cli.layout_differences(REFERENCE, copy.deepcopy(REFERENCE)), [])
         per_site = copy.deepcopy(REFERENCE)
         per_site["tunnels"] = [{"tunnelName": "zs-br1", "mtu": 1400}]
         theirs = copy.deepcopy(per_site)
         theirs["tunnels"][0]["tunnelName"] = "zs-br2"
         self.assertEqual(cli.layout_differences(per_site, theirs), [])  # per-site tunnel names are values, not a different layout
+        renamed = copy.deepcopy(REFERENCE)
+        renamed["deploymentInfo"]["deploymentInterfaces"][2]["interfaceName"] = "uplink"  # any other name, not only lanN/wanN
+        self.assertEqual(cli.layout_differences(REFERENCE, renamed), ["deploymentInterfaces[2]: wan0 vs uplink"])
+
+    def test_when_every_other_site_is_left_out_the_csv_still_exists(self):
+        import yaml
+        other = copy.deepcopy(REFERENCE)
+        other["applianceInfo"]["hostname"] = "br-2"
+        other["deploymentInfo"]["deploymentInterfaces"][2]["interfaceName"] = "wan1"
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "build.json").write_text(json.dumps({"site_type": "br", "orchestrator": "lab", "validator": "lab", "capture": "c", "target_release": "9.7.1.42046", "appliance": {"hostName": "br-1"}}))
+            (folder / "reference.yaml").write_text(yaml.safe_dump(REFERENCE))
+            site = folder / "site-br"
+            site.mkdir()
+            (site / "example.csv").write_text("hostname\nbr-1\n")
+            seen = {}
+            with mock.patch("capture.capture", return_value=folder), mock.patch("translate.Capture"), mock.patch("translate.build", return_value=other), \
+                    mock.patch.object(cli, "build_site", return_value=site), \
+                    mock.patch.object(cli, "validate_rows", side_effect=lambda target, csv_path, info, nick: seen.setdefault("exists", csv_path.is_file()) and 0), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                cli.cmd_compare([str(folder), "br-2", "--yes"])
+        self.assertTrue(seen["exists"])
+
+    def test_an_offline_site_without_cache_is_one_line(self):
+        from translate import NothingToConvert
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "build.json").write_text(json.dumps({"site_type": "br", "orchestrator": "lab", "validator": "lab", "capture": "c", "target_release": "9.7.1.42046", "appliance": {}}))
+            with mock.patch("capture.capture", return_value=folder), mock.patch("translate.Capture"), \
+                    mock.patch("translate.build", side_effect=NothingToConvert("capture 'x' lacks appliance or deployment.sysConfig data")), \
+                    contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.main(["compare", str(folder), "br-2"]), 2)
+        self.assertEqual(err.getvalue(), "error: capture 'x' lacks appliance or deployment.sysConfig data\n")
 
 
 class ListLogin(unittest.TestCase):
