@@ -104,6 +104,7 @@ def _main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--out", type=Path, help="folder for rendered <preconfig_name>.yml files (default: <site-dir>/rendered, else ./preconfig-output/<site>/rendered)")
     parser.add_argument("--columns", type=Path, help="columns.json from generate.py, enables the cell and flow-through checks (automatic with --site-dir)")
     parser.add_argument("--validate", metavar="ORCHESTRATOR", help="validate each row via Orchestrator /validate before writing its .yml file")
+    parser.add_argument("--substitute", action="store_true", help="with --validate: replace object names by names that exist on the validator (configuration from another Orchestrator); the written file keeps the real names")
     args = parser.parse_args(argv)
     if args.site_dir:
         meta = json.loads((args.site_dir / "columns.json").read_text())
@@ -118,10 +119,13 @@ def _main(argv: Optional[List[str]] = None) -> int:
     columns = meta.get("columns")
     limits = option_limits(meta.get("release"))
     seen_addresses: Dict[str, int] = {}
-    val_client = None
+    val_client, inv = None, None
     if args.validate:
         from validate import validate_text, validator
         val_client = validator(args.validate)
+        if args.substitute:
+            from synth import dump, inventory, substitute
+            inv = inventory(val_client)
     failed = 0
     seen_files: Dict[str, int] = {}
     seen_serials: Dict[str, int] = {}
@@ -162,7 +166,7 @@ def _main(argv: Optional[List[str]] = None) -> int:
             except Exception as err:
                 problems.append(str(err))
         if not problems and val_client is not None:
-            verdict = validate_text(val_client, text, norm_serial)
+            verdict = validate_text(val_client, dump(substitute(parse_yaml(text), inv)) if inv is not None else text, norm_serial)
             if not verdict["accepted"]:
                 problems.append("Orchestrator /validate rejected row: {}".format(verdict["error"]))
         if problems:

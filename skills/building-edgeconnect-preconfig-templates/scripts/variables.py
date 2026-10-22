@@ -25,7 +25,7 @@ COLUMN_OK = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 IDENTITY_FIXED = {"networkRole", "softwareVersion", "clusterProfile", "group"}
 BANDWIDTH_KEY = re.compile(r"(?i)bandwidth$")
 SITE_NUMBER_KEY = re.compile(r"^(asn|peerAsn|routerId|rtr_id|vxlanId|vni|ipsecUdpPort|peerIpAddress|peerIp|remoteIp|haPeer\w+|macAddress)$")
-LABEL_KEYS = ("interfaceName", "interfaceId", "tunnelName", "name")
+LABEL_KEYS = ("interfaceName", "dhcpInterfaceName", "interfaceId", "tunnelName", "name")
 ALIASES = {"ipAddressMask": "ip", "nextHop": "next_hop", "outboundMaxBandwidth": "bw_out", "inboundMaxBandwidth": "bw_in",
            "startIpAddress": "start", "endIpAddress": "end", "gatewayIpAddress": "gateway"}
 ANY = {"any", "0.0.0.0", "0.0.0.0/0", "::", "::/0"}
@@ -69,6 +69,47 @@ def column_name(reference: Dict[str, Any], path: str) -> str:
         tokens[-1] = ALIASES[path.split(".")[-1]]
     name = "_".join(t for t in tokens if t not in ("deployment_info", "appliance_info", "location"))
     return name if not name[:1].isdigit() else "c_" + name
+
+
+IF_KIND = re.compile(r"^(lan|wan|mgmt|blan|slan|bvi|lo|vti|tun)\d*(\.\d+)?$")
+RANKING = Path(__file__).resolve().parents[1] / "references" / "variable-ranking.json"
+
+
+def setting_key(reference: Dict[str, Any], path: str) -> str:
+    """The kind of setting a path is, the same at every site: list items by interface kind (lan, wan, lan.vlan), else [*] or [#].
+
+    deploymentInfo.deploymentInterfaces[2].ipAddressMask on lan0.71 -> deploymentInfo.deploymentInterfaces[lan.vlan].ipAddressMask
+    """
+    parts, walked = [], ""
+    for key, index in re.findall(r"([^.\[\]]+)|\[(\d+)\]", path):
+        if key:
+            walked = "{}.{}".format(walked, key) if walked else key
+            parts.append("." + key if parts else key)
+            continue
+        walked += "[{}]".format(index)
+        item = _walk(reference, walked)
+        label = next((str(item[k]) for k in LABEL_KEYS if isinstance(item, dict) and isinstance(item.get(k), str) and item[k]), None)
+        kind = IF_KIND.match(label) if label else None
+        parts.append("[{}]".format((kind.group(1) + (".vlan" if kind.group(2) else "")) if kind else "*" if label else "#"))
+    return "".join(parts)
+
+
+def labelled(reference: Dict[str, Any], path: str) -> str:
+    """The path with each list index replaced by the item's own name (lan0.71, a tunnel name), so sites are compared item by item, not by position."""
+    def name(match):
+        item = _walk(reference, path[:match.end()])
+        label = next((str(item[k]) for k in LABEL_KEYS if isinstance(item, dict) and isinstance(item.get(k), str) and item[k]), None)
+        return "[{}]".format(label or match.group(1))
+    return re.sub(r"\[(\d+)\]", name, path)
+
+
+def load_ranking() -> Dict[str, Dict[str, Any]]:
+    """setting_key -> {differs_pct, appliances}, from references/variable-ranking.json; empty if the file is missing."""
+    try:
+        import json
+        return {r["setting"]: r for r in json.loads(RANKING.read_text(encoding="utf-8"))["settings"]}
+    except (OSError, ValueError, KeyError):
+        return {}
 
 
 def sheet_items(reference: Dict[str, Any]) -> List[Tuple[str, Any]]:

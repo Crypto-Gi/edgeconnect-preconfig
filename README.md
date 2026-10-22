@@ -45,6 +45,27 @@ Picking 3 installs the MCP guide skill, `edgeconnect-guide`, and, if you choose 
 
 ---
 
+## Use It Without an AI: the Command Line
+
+`setup.sh` installs the `edgeconnect-preconfig` command. Six verbs cover the whole job; `edgeconnect-preconfig --help` lists them, and each takes `--help`.
+
+```bash
+edgeconnect-preconfig appliances --orchestrator lab                      # test the .env profile and list appliances: hostname, nePk, model, ECOS, site, reachable
+edgeconnect-preconfig build --orchestrator lab --appliance Branch-01     # read it (GET only), convert, check; kept only if /validate accepts it
+edgeconnect-preconfig variables ./preconfig-output/Branch-01             # choose the per-site settings: Top 10, Top 20 or all, by section
+edgeconnect-preconfig compare ./preconfig-output/Branch-01 Branch-07 Branch-12   # or let sites of the same design choose; a CSV row per site
+edgeconnect-preconfig validate ./preconfig-output/Branch-01/site-branch --csv sites.csv
+edgeconnect-preconfig upload ./preconfig-output/Branch-01/site-branch --csv sites.csv            # table only
+edgeconnect-preconfig upload ./preconfig-output/Branch-01/site-branch --csv sites.csv --approve  # uploads the valid, non-conflicting rows
+```
+
+- **build** writes `preconfig-output/<hostname>/`: `reference.yaml`, the template, `example.csv`, `summary.md` with the verdict, and `build.json`. Nothing is kept unless Orchestrator's `/validate` accepts the result. Validation runs on the Orchestrator the appliance came from; `--validate-on <lab>` names another. Either way it must be listed in `EC_VALIDATORS`. An earlier folder of the same name is renamed, never overwritten.
+- **variables** shows the settings as a tick list. Hostname, serial and secrets are always per site. The Top 10 and Top 20 are the settings that differed most often between appliances of the same design in the captured corpus (`references/variable-ranking.json`); "All" opens one section at a time. Type numbers to flip a setting, a word to search, Enter when done. A gateway that equals an interface address follows that address. `--pick top10 --yes` and `--set column,...` do the same without questions.
+- **compare** reads the other sites (GET only), makes every setting whose value differs between them per site, and asks you to confirm or edit. Its `sites.csv` has a row for every site with that site's own values (serials and secrets blank), and every row is validated.
+- **variables** and **compare** write `site-<name>/` inside the build folder; the build's own files never change. The old stage scripts still run by name (`edgeconnect-preconfig capture ...`); the live-versus-cached check is now `cache-check`.
+
+---
+
 ## Quick Start (5 Steps)
 
 > **Everything at once:** see [The EdgeConnect toolkit](#the-edgeconnect-toolkit) above for the one-line `setup.sh` install.
@@ -222,7 +243,7 @@ edgeconnect-preconfig/
 │   └── building-edgeconnect-preconfig-templates/   # <-- Lean installable skill (23 files: zero README/test bloat)
 │       ├── SKILL.md
 │       ├── references/                       # 9.6/9.7/10.0 default templates, endpoint-catalogue, known-constraints, lessons, validate-behaviour
-│       └── scripts/                          # 15 runtime scripts (capture, compare, translate, mappers, decisions, variables, generate, cells, render, check, validate, upload, synth, options, common)
+│       └── scripts/                          # 16 runtime scripts (cli, capture, cache_check, translate, mappers, decisions, variables, generate, cells, render, check, validate, upload, synth, options, common)
 ├── tests/                                    # offline unit tests & maintainer lab harnesses
 │   ├── test_capture.py
 │   ├── test_cells.py

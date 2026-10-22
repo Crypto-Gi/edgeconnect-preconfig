@@ -323,16 +323,8 @@ EOF
 fi
 if picked edgeconnect-preconfig; then
 install_command edgeconnect-preconfig <<EOF
-# Usage: edgeconnect-preconfig STAGE [options], where STAGE is capture, compare, translate, render, check, upload, ...
-case "\${1:-}" in
-  ""|-h|--help|*[!a-z_]*)
-    echo "usage: edgeconnect-preconfig STAGE [options]; stages:"
-    ls "$PRECONFIG_SCRIPTS" | sed -n 's/[.]py\$//p' | grep -v '^common\$'
-    exit 2 ;;
-esac
-script="$PRECONFIG_SCRIPTS/\$1.py"; shift
-[ -f "\$script" ] || { echo "unknown stage; run: edgeconnect-preconfig --help" >&2; exit 2; }
-EC_DOTENV="\${EC_DOTENV:-$ROOT/.env}" exec "$ROOT/.venv/bin/python" "\$script" "\$@"
+# Usage: edgeconnect-preconfig COMMAND [options]: appliances, build, variables, compare, validate, upload, or a stage name (--help lists them)
+EC_DOTENV="\${EC_DOTENV:-$ROOT/.env}" exec "$ROOT/.venv/bin/python" "$PRECONFIG_SCRIPTS/cli.py" "\$@"
 EOF
 fi
 if [ "$MCP_MODE" = stdio ]; then

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage 2: compare live with cached captures, per endpoint. Offline; reads one capture folder.
+"""Stage 2 (cache-check): compare live with cached captures, per endpoint. Offline; reads one capture folder.
 
 Writes live-vs-cached.json and live-vs-cached.md into the capture folder. Differences are reported, never resolved.
 """
