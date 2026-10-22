@@ -32,7 +32,7 @@ from typing import Any, Callable, Dict, List, Optional
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from variables import ALWAYS_SECTIONS  # noqa: E402
-from common import VALIDATORS, WORK_DIR, EdgeConnectError, client_for, load_yaml, toolkit_version, utc_stamp, write_json  # noqa: E402
+from common import DEFAULT_TEMPLATES_DIR, VALIDATORS, WORK_DIR, EdgeConnectError, client_for, load_yaml, toolkit_version, utc_stamp, write_json  # noqa: E402
 
 PROG = "edgeconnect-preconfig"
 STATES = {1: "yes", 2: "NO", 3: "unsupported version", 4: "yes (out of sync)", 5: "yes (syncing)"}  # /appliance `state`
@@ -98,8 +98,11 @@ def cmd_appliances(argv: List[str]) -> int:
     p.add_argument("--search", help="show only appliances whose hostname, nePk, model or site contains this text")
     a = p.parse_args(argv)
     client = client_for(a.orchestrator)
-    versions = client.get("/gms/versions")
-    release = versions.get("current") if isinstance(versions, dict) else "?"
+    try:
+        versions = client.get("/gms/versions")
+        release = versions.get("current") if isinstance(versions, dict) else "?"
+    except EdgeConnectError:  # a key without that right still lists appliances
+        release = "unknown (GET /gms/versions refused)"
     validates = "yes" if a.orchestrator.lower() in VALIDATORS else "no (not in EC_VALIDATORS)"
     print("Orchestrator {}: {} | release {} | login OK | /validate allowed: {}".format(a.orchestrator, client.config.base_url, release, validates))
     listing = client.get("/appliance")
@@ -140,6 +143,7 @@ def cmd_build(argv: List[str]) -> int:
     p.add_argument("--appliance", required=True, help="hostname or nePk (e.g. 12.NE)")
     p.add_argument("--out", type=Path, default=Path.cwd() / "preconfig-output", help="parent folder (default ./preconfig-output)")
     p.add_argument("--validate-on", metavar="NICK", help="validate on this Orchestrator instead of the source one")
+    p.add_argument("--target-release", help="the validator's Orchestrator release, when its key may not read it")
     a = p.parse_args(argv)
     validator = a.validate_on or a.orchestrator
     check_validator(validator)
@@ -151,7 +155,10 @@ def cmd_build(argv: List[str]) -> int:
         raise Fail(str(stop))
     run = json.loads((cap / "run.json").read_text(encoding="utf-8"))
     host = run["appliance"].get("hostName") or run["appliance"]["nePk"]
-    release = run["release"] if validator == a.orchestrator else client_for(validator).get("/gms/versions").get("current")
+    release = a.target_release or (run["release"] if validator == a.orchestrator else client_for(validator).get("/gms/versions").get("current"))
+    if not release:
+        raise Fail("{} did not give its release (GET /gms/versions refused): pass --target-release, e.g. one of {}".format(
+            validator, ", ".join(sorted(p.stem[len("orchestrator-"):] for p in DEFAULT_TEMPLATES_DIR.glob("orchestrator-*.yml")))))
     site = safe_name(host).lower()
     folder = a.out / safe_name(host)
     staging = a.out / ".building-{}".format(safe_name(host))

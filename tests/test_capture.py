@@ -21,6 +21,10 @@ class ServerError(Exception):
     status = 500
 
 
+class PermissionDeniedError(Exception):
+    status = 403
+
+
 class FakeClient:
     def __init__(self, state=1, fail=None):
         self.calls, self.write_requests, self.state, self.fail = [], 0, state, fail or {}
@@ -99,6 +103,12 @@ class CaptureTest(unittest.TestCase):
     def test_authentication_failure_stops(self):
         with self.assertRaises(capture.Stop):
             self.run_capture(FakeClient(fail={"/deployment": AuthenticationError("401")}), ["deployment"])
+
+    def test_a_key_that_may_not_read_the_release_still_captures(self):
+        final = self.run_capture(FakeClient(fail={"/gms/versions": PermissionDeniedError("403")}), ["deployment"])
+        self.assertIsNone(json.loads((final / "run.json").read_text())["release"])
+        with self.assertRaises(capture.Stop):  # any other refused read stops: it would be a silently missing section
+            self.run_capture(FakeClient(fail={"/deployment": PermissionDeniedError("403")}), ["deployment"])
 
     def test_write_counter_above_zero_stops(self):
         client = FakeClient()

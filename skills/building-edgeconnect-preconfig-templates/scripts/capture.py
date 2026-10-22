@@ -71,7 +71,10 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
     (tmp / "capture").mkdir(parents=True, exist_ok=True)
     reader = Reader(client, tmp / "requests.jsonl", pause)
 
-    versions = reader.get("/gms/versions")
+    try:
+        versions = reader.get("/gms/versions")
+    except Stop:  # a key limited to appliance and preconfig rights may not read the release; the rest of the capture still works
+        versions = {"ok": False}
     release = versions["data"].get("current") if versions["ok"] and isinstance(versions["data"], dict) else None
     if release and not only and not (DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)).is_file():
         def_tmpl = reader.get("/gms/appliance/preconfiguration/default")
