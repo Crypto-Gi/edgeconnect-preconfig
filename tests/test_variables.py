@@ -35,17 +35,17 @@ class Compare(unittest.TestCase):
     def test_other_sites_decide(self):
         import copy
         other = copy.deepcopy(REFERENCE)
-        other["deploymentInfo"]["deploymentInterfaces"][1]["outboundMaxBandwidth"] = 9000  # differs: a variable
-        other["deploymentInfo"]["deploymentInterfaces"][0]["dhcpServer"]["dnsServers"] = ["198.51.100.54"]  # differs outside the own subnet
+        other["deploymentInfo"]["deploymentInterfaces"][1]["outboundMaxBandwidth"] = 9000
+        other["localRoutes"]["staticRoutes"][0]["routeIpSubnet"] = "198.51.100.0/24"  # differs: a variable
         other["radius"]["server"].append({"host": "198.51.100.8", "key": "x"})  # only at the other site: not in this sheet
         third = copy.deepcopy(REFERENCE)
         del third["radius"]["server"][0]["host"]  # this site lacks a field: a different site type
         rows = {r["path"]: r for r in classify(REFERENCE, {"radius.server[0].key"}, others=[other, third])}
-        bw = rows["deploymentInfo.deploymentInterfaces[1].outboundMaxBandwidth"]
-        self.assertEqual((bw["decision"], bw["reason"]), ("variable", "differs between the sites you gave"))
-        dns = rows["deploymentInfo.deploymentInterfaces[0].dhcpServer.dnsServers[0]"]
-        self.assertEqual(dns["decision"], "variable")  # evidence replaces the (check) guess
-        self.assertEqual(rows["deploymentInfo.totalOutboundBandwidth"]["decision"], "fixed")  # equal everywhere, whatever its name
+        route = rows["localRoutes.staticRoutes[0].routeIpSubnet"]
+        self.assertEqual((route["decision"], route["reason"]), ("variable", "differs between the sites you gave"))
+        self.assertEqual(rows["localRoutes.staticRoutes[0].interfaceName"]["reason"], "same at every site you gave")
+        self.assertEqual(rows["deploymentInfo.totalOutboundBandwidth"]["decision"], "variable")  # equal everywhere, but the Deployment page is always per site
+        self.assertEqual(rows["deploymentInfo.deploymentInterfaces[0].interfaceName"]["decision"], "fixed")  # layout stays fixed
         self.assertEqual(rows["deploymentInfo.deploymentInterfaces[0].ipAddressMask"]["decision"], "variable")  # own address stays a column
         other["templateGroups"]["groups"] = ["G1", "G3"]
         other["applianceInfo"]["group"] = "Other"
@@ -67,7 +67,7 @@ class Classify(unittest.TestCase):
             return rows[path]["decision"], rows[path]["column"]
         self.assertEqual(at("applianceInfo.hostname"), ("variable", "hostname"))
         self.assertEqual(at("applianceInfo.site")[0], "variable")
-        self.assertEqual(at("applianceInfo.group")[0], "fixed")
+        self.assertEqual(at("applianceInfo.group")[0], "variable")  # appliance info is always per site (decision 0006)
         self.assertEqual(at("applianceInfo.location.city"), ("variable", "city"))
         self.assertEqual(at("templateGroups.groups"), ("fixed", "template_groups"))
         self.assertEqual(at("deploymentInfo.deploymentInterfaces[0].ipAddressMask"), ("variable", "lan0_ip"))
@@ -83,8 +83,7 @@ class Classify(unittest.TestCase):
         self.assertEqual(at("radius.server[0].key")[0], "variable")
         self.assertEqual(rows["radius.server[0].key"]["value"], "")  # a secret never reaches the sheet
         dns = rows["deploymentInfo.deploymentInterfaces[0].dhcpServer.dnsServers[0]"]
-        self.assertEqual(dns["decision"], "fixed")
-        self.assertTrue(dns["flag"])  # outside the site's own subnets: shared or per site?
+        self.assertEqual((dns["decision"], dns["flag"]), ("variable", False))  # on the Deployment page: per site, no question
         self.assertEqual(rows["radius.server[0].host"]["decision"], "fixed")
 
     def test_names_are_unique_and_valid(self):

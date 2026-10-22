@@ -29,14 +29,15 @@ REFERENCE = {
         ],
         "dhcpInfo": [{"dhcpInterfaceName": "lan0", "dhcpType": "server", "gatewayIpAddress": "192.0.2.1", "dnsServers": ["203.0.113.53"]}],
     },
-    "localRoutes": {"staticRoutes": [{"routeIpSubnet": "0.0.0.0/0", "nextHop": "203.0.113.1"}]},
+    "localRoutes": {"staticRoutes": [{"routeIpSubnet": "0.0.0.0/0", "nextHop": "203.0.113.1"}, {"routeIpSubnet": "203.0.113.64/26", "nextHop": "192.0.2.254"}]},
+    "bgpSystemConfig": {"asn": 65001, "routerId": "203.0.113.9", "neighbors": [{"peerIpAddress": "192.0.2.254"}]},
     "radius": {"server": [{"host": "203.0.113.7", "key": "<SECRET:radius>"}]},
 }
 SECRETS = {"radius.server[0].key"}
 RANKING = {  # setting kind -> rank, as references/variable-ranking.json holds it
-    "deploymentInfo.totalOutboundBandwidth": {"differs_pct": 91, "appliances": 60},
-    "applianceInfo.location.city": {"differs_pct": 99, "appliances": 60},
-    "deploymentInfo.dhcpInfo[lan].dnsServers[#]": {"differs_pct": 51, "appliances": 18},
+    "applianceInfo.location.city": {"differs_pct": 99, "appliances": 60},  # locked anyway: appliance info is always per site
+    "bgpSystemConfig.routerId": {"differs_pct": 100, "appliances": 17},
+    "bgpSystemConfig.asn": {"differs_pct": 96, "appliances": 17},
 }
 
 
@@ -77,28 +78,35 @@ class PickerChoice(unittest.TestCase):
         p = self.picker()
         p.start_top(1)
         on = {path for path, v in p.on.items() if v}
-        self.assertIn("applianceInfo.location.city", on)  # the top ranked
-        self.assertNotIn("deploymentInfo.totalOutboundBandwidth", on)  # ranked, but below the Top 1
-        self.assertIn("deploymentInfo.deploymentInterfaces[1].ipAddressMask", on)  # this site's own address, always offered
-        self.assertNotIn("applianceInfo.hostname", p.on)  # locked rows are not choices
-        self.assertNotIn("radius.server[0].key", p.on)
+        self.assertIn("bgpSystemConfig.routerId", on)  # the top ranked
+        self.assertNotIn("bgpSystemConfig.asn", on)  # ranked, but below the Top 1
+        self.assertIn("localRoutes.staticRoutes[1].nextHop", on)  # inside this site's own subnet, always offered
+        for locked in ("applianceInfo.hostname", "radius.server[0].key", "applianceInfo.location.city", "deploymentInfo.totalOutboundBandwidth",
+                       "deploymentInfo.dhcpInfo[0].dnsServers[0]"):
+            self.assertNotIn(locked, p.on)  # locked rows are not choices
+        self.assertIn("deploymentInfo.deploymentInterfaces[0].interfaceName", p.on)  # layout: fixed, but can be flipped
+        self.assertFalse(p.on["deploymentInfo.deploymentInterfaces[0].interfaceName"])
+        sheet = by_path(p.sheet(REFERENCE))
+        self.assertEqual(sheet["deploymentInfo.dhcpInfo[0].dnsServers[0]"]["decision"], "variable")  # Deployment page, no question
 
     def test_follower_takes_its_primary_decision(self):
         p = self.picker()
         p.start_top(10)
-        primary = next(r for r in p.free if r["path"] == "deploymentInfo.deploymentInterfaces[0].ipAddressMask")
-        p.flip([primary["n"]])  # lan0 address now fixed
+        primary = next(r for r in p.free if r["path"] == "localRoutes.staticRoutes[1].nextHop")
+        follower = "bgpSystemConfig.neighbors[0].peerIpAddress"  # the same address: typed once
+        p.flip([primary["n"]])  # now fixed
         sheet = by_path(p.sheet(REFERENCE))
-        self.assertEqual(sheet["deploymentInfo.dhcpInfo[0].gatewayIpAddress"]["decision"], "fixed")
+        self.assertEqual(sheet[follower]["decision"], "fixed")
         p.flip([primary["n"]])
         sheet = by_path(p.sheet(REFERENCE))
-        self.assertEqual(sheet["deploymentInfo.dhcpInfo[0].gatewayIpAddress"]["decision"], "variable")
-        self.assertEqual(sheet["deploymentInfo.dhcpInfo[0].gatewayIpAddress"]["column"], sheet[primary["path"]]["column"])
+        self.assertEqual((sheet[follower]["decision"], sheet[follower]["column"]), ("variable", sheet[primary["path"]]["column"]))
+        gateway = sheet["deploymentInfo.dhcpInfo[0].gatewayIpAddress"]  # follows the lan0 address, which is locked
+        self.assertEqual((gateway["decision"], gateway["column"]), ("variable", sheet["deploymentInfo.deploymentInterfaces[0].ipAddressMask"]["column"]))
 
     def test_sheet_builds_a_template_with_the_chosen_columns(self):
         p = self.picker()
         p.start_top(10)
-        self.assertEqual(p.set_by_name(["deploymentInfo.dhcpInfo[0].dnsServers[0]", "nonsense"]), ["nonsense"])
+        self.assertEqual(p.set_by_name(["bgpSystemConfig.asn", "nonsense"]), ["nonsense"])
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "variables.csv"
             write_sheet(p.sheet(REFERENCE), path)
@@ -108,19 +116,20 @@ class PickerChoice(unittest.TestCase):
             found = headers((Path(tmp) / "br.jinja2").read_text())
         dns = chosen["names"]["deploymentInfo.dhcpInfo[0].dnsServers[0]"]
         self.assertTrue(dns.startswith("lan0"))  # dhcp items are named by their interface
-        for column in (dns, "hostname", "city", chosen["names"]["deploymentInfo.totalOutboundBandwidth"]):
+        for column in (dns, "hostname", "city", chosen["names"]["deploymentInfo.totalOutboundBandwidth"], chosen["names"]["bgpSystemConfig.asn"]):
             self.assertIn(column, found)
         self.assertNotIn("deploymentInfo.localRoutes", chosen["names"])
 
     def test_tick_list_commands(self):
         p = self.picker()
         p.start_top(10)
-        dns = next(r for r in p.free if "dnsServers" in r["path"])
-        before = p.on[dns["path"]]
+        asn = next(r for r in p.free if r["path"] == "bgpSystemConfig.asn")
+        before = p.on[asn["path"]]
         with contextlib.redirect_stdout(io.StringIO()) as out:
-            done = cli.interact(p, "top10", scripted("dns", str(dns["n"]), "a", "s1", "zzz", ""))
+            done = cli.interact(p, "top10", scripted("asn", str(asn["n"]), "a", "s1", "l", "zzz", ""))
         self.assertTrue(done)
-        self.assertEqual(p.on[dns["path"]], not before)
+        self.assertEqual(p.on[asn["path"]], not before)
+        self.assertIn("Always per site (locked)", out.getvalue())
         self.assertIn("nothing matches", out.getvalue())
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertFalse(cli.interact(p, "all", scripted("q")))
@@ -167,6 +176,13 @@ class Dispatch(unittest.TestCase):
             self.assertEqual(cli.run_stage("nope", []), 2)
         self.assertIn("cache-check", cli.stages())
         self.assertNotIn("compare", cli.stages())  # the old stage name is now the compare verb
+
+    def test_a_refused_validator_is_one_line_not_a_traceback(self):
+        from validate import Stop
+        with mock.patch.dict(cli.VERBS, {"build": mock.Mock(side_effect=Stop("PermissionDeniedError (HTTP 403) from /validate"))}), \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(cli.main(["build"]), 2)
+        self.assertEqual(err.getvalue(), "error: PermissionDeniedError (HTTP 403) from /validate\n")
 
     def test_load_build_from_a_site_folder(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -4,11 +4,13 @@ classify() proposes a decision and a reason for every scalar leaf; write_sheet()
 `decision` (variable or fixed) or `column` in any editor; read_sheet() turns the edited sheet into what generate.py needs.
 Replaces the per-section modes in decisions.py, which still work with `translate.py --decisions`.
 
-Rules, first match wins: secret, hostname, identity (site, region, location, contact), the site's own interface address,
-an address equal to or inside the site's own interface addresses (linked to that interface), then, when other sites of the
-same type are given (`others`), what they show: a field that differs is a variable, one that is equal everywhere is fixed,
-one the others lack is fixed and flagged (a different site type). The group and the template-group and overlay lists are fixed unless the sites differ. Without `others`: bandwidth/ASN/router ID/peer,
-blank, any other address (fixed, flagged), everything else (fixed).
+Rules, first match wins: secret, hostname, the site's own interface address, an address equal to or inside the site's own
+interface addresses (linked to that interface); then in applianceInfo and deploymentInfo (the Deployment page and the
+appliance's initial settings) interface names, labels, types, zones, segments, firewall and deployment mode are fixed and every
+other value is a variable (owner, docs/decisions/0006); then, when other sites of the same type are given (`others`), what they
+show: a field that differs is a variable, one that is equal everywhere is fixed, one the others lack is fixed and flagged (a
+different site type). The template-group and overlay lists are fixed unless the sites differ. Without `others`:
+bandwidth/ASN/router ID/peer, blank, any other address (fixed, flagged), everything else (fixed).
 """
 import csv
 import ipaddress
@@ -22,7 +24,9 @@ SHEET_COLUMNS = ["decision", "column", "linked_to", "value", "path", "reason"]
 COMMA_LISTS = {"templateGroups.groups": "template_groups", "businessIntentOverlays.overlays": "overlays"}
 RESERVED = {"preconfig_name", "serial_number"}
 COLUMN_OK = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-IDENTITY_FIXED = {"networkRole", "softwareVersion", "clusterProfile", "group"}
+ALWAYS_SECTIONS = ("applianceInfo", "deploymentInfo")  # the Deployment page and the appliance's initial settings
+ALWAYS = "deployment page or appliance info: always per site"
+LAYOUT_KEYS = {"interfaceName", "dhcpInterfaceName", "interfaceLabel", "interfaceType", "zone", "segment", "firewallMode", "deploymentMode"}
 BANDWIDTH_KEY = re.compile(r"(?i)bandwidth$")
 SITE_NUMBER_KEY = re.compile(r"^(asn|peerAsn|routerId|rtr_id|vxlanId|vni|ipsecUdpPort|peerIpAddress|peerIp|remoteIp|haPeer\w+|macAddress)$")
 LABEL_KEYS = ("interfaceName", "dhcpInterfaceName", "interfaceId", "tunnelName", "name")
@@ -174,10 +178,6 @@ def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Op
             row(path, value, "fixed", "usually the same for every site of this type; make it variable if sites differ", COMMA_LISTS[path])
         elif all_sections and section in all_sections:
             row(path, value, "variable", "section copied from the default template (include_from_default): every field is a column", unique(column_name(reference, path)))
-        elif section == "applianceInfo" and key not in IDENTITY_FIXED:
-            row(path, value, "variable", "identifies this site", unique(column_name(reference, path)))
-        elif section == "applianceInfo":
-            row(path, value, "fixed", "same for every site of this type")
         elif path in own:
             row(path, value, "variable", "this site's own interface address", own_name[path])
         elif addr is not None and str(value).lower() not in ANY and value in columns:
@@ -191,6 +191,10 @@ def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Op
             else:
                 local_cols[value] = unique(column_name(reference, path))
                 row(path, value, "variable", "inside one of this site's own subnets", local_cols[value])
+        elif section in ALWAYS_SECTIONS and key in LAYOUT_KEYS:  # owner's rule, docs/decisions/0006
+            row(path, value, "fixed", "interface names, labels, zones, segments, firewall and deployment mode stay fixed unless you flip them")
+        elif section in ALWAYS_SECTIONS and value is not None:
+            row(path, value, "variable", ALWAYS, unique(column_name(reference, path)))
         elif seen_at:
             seen = [o[path] for o in seen_at if path in o]
             if len(seen) < len(seen_at):

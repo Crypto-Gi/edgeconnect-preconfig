@@ -31,6 +31,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+from variables import ALWAYS_SECTIONS  # noqa: E402
 from common import VALIDATORS, WORK_DIR, EdgeConnectError, client_for, load_yaml, toolkit_version, utc_stamp, write_json  # noqa: E402
 
 PROG = "edgeconnect-preconfig"
@@ -196,7 +197,8 @@ class Picker:
         primary = {r["column"]: r for r in rows if r["decision"] == "variable" and not r.get("linked_to")}
         for r in rows:
             r["label"] = labelled(reference, r["path"]).replace("deploymentInfo.", "", 1)  # the section column says it
-            r["locked"] = r["path"] == "applianceInfo.hostname" or r["reason"].startswith("secret")
+            r["locked"] = (r["path"] == "applianceInfo.hostname" or r["reason"].startswith("secret")
+                           or (r["decision"] == "variable" and r["path"].split(".")[0] in ALWAYS_SECTIONS))  # docs/decisions/0006
             r["follows"] = primary.get(r.get("linked_to") or "") if r.get("linked_to") else None
             rank = ranking.get(setting_key(reference, r["path"]))
             r["pct"] = rank["differs_pct"] if rank else None
@@ -237,7 +239,7 @@ class Picker:
         return "| " + (cell(other[r["path"]]) if r["path"] in other else "-")[:20]
 
     def follower_lines(self, r: Dict[str, str]) -> List[str]:
-        return ["        {:<52} follows #{}".format(f["label"][:52], r["n"]) for f in self.rows if f["follows"] is r]
+        return ["        {:<52} follows {}".format(f["label"][:52], "#{}".format(r["n"]) if "n" in r else "the line above") for f in self.rows if f["follows"] is r]
 
     def show(self, rows: List[Dict[str, str]], title: str) -> List[str]:
         out = ["  -- {} {}".format(title, "-" * max(0, 60 - len(title)))]
@@ -248,7 +250,13 @@ class Picker:
 
     def header(self) -> List[str]:
         locked = [r for r in self.rows if r["locked"]]
-        return ["  {:>4}  {:<52} {:<30} {:>5}  {}".format("#", "Setting", "Value now", "Diff", "Choice")] + self.show(locked, "Always per site (locked)")
+        secrets = sum(1 for r in locked if r["reason"].startswith("secret"))
+        return ["  Always per site, no questions: hostname, {} secret(s) and {} Deployment-page and appliance-info values (type l to list them)".format(
+                    secrets, len(locked) - secrets - 1),
+                "  {:>4}  {:<52} {:<30} {:>5}  {}".format("#", "Setting", "Value now", "Diff", "Choice")]
+
+    def locked_view(self) -> List[str]:
+        return self.show([r for r in self.rows if r["locked"] and r["follows"] is None], "Always per site (locked)")
 
     def top_view(self, count: int) -> List[str]:
         top = self.ranked(count)
@@ -303,9 +311,11 @@ class Picker:
         out = []
         for r in self.rows:
             row = {k: r[k] for k in ("decision", "column", "linked_to", "value", "path", "reason")}
-            if r["follows"] is not None:
-                row["decision"] = "variable" if self.on.get(r["follows"]["path"]) else "fixed"
-            elif not r["locked"]:
+            if r["locked"]:
+                pass
+            elif r["follows"] is not None:
+                row["decision"] = "variable" if r["follows"]["locked"] or self.on.get(r["follows"]["path"]) else "fixed"
+            else:
                 row["decision"] = "variable" if self.on[r["path"]] else "fixed"
                 if row["decision"] == "variable" and not row["column"]:
                     base, n = column_name(reference, r["path"]), 2
@@ -317,11 +327,11 @@ class Picker:
             out.append(row)
         return out
 
-    def columns(self) -> List[str]:
-        names = []
-        for r in self.rows:
-            if (r["locked"] or (r["follows"] is None and self.on.get(r["path"]))) and r["column"] not in names:
-                names.append(r["column"] or r["label"])
+    def columns(self, reference: Dict[str, Any]) -> List[str]:
+        names: List[str] = []
+        for r in self.sheet(reference):
+            if r["decision"] == "variable" and r["column"] not in names:
+                names.append(r["column"])
         return names
 
 
@@ -329,7 +339,7 @@ def interact(picker: Picker, mode: str, read: Callable[[str], str]) -> bool:
     """The tick list. Returns False when the user quits."""
     view = picker.top_view(int(mode[3:])) if mode.startswith("top") else picker.section_list()
     print("\n".join(view))
-    help_line = "Type numbers to flip (e.g. 4 12), s1.. to open a section, a for all sections, t for the Top list, a word to search, Enter when done, q to quit."
+    help_line = "Type numbers to flip (e.g. 4 12), s1.. to open a section, a for all sections, t for the Top list, l for the locked ones, a word to search, Enter when done, q to quit."
     print(help_line)
     while True:
         answer = read("> ").strip()
@@ -337,7 +347,9 @@ def interact(picker: Picker, mode: str, read: Callable[[str], str]) -> bool:
             return True
         if answer.lower() == "q":
             return False
-        if answer.lower() == "a":
+        if answer.lower() == "l":
+            print("\n".join(picker.locked_view()))
+        elif answer.lower() == "a":
             print("\n".join(picker.section_list()))
         elif answer.lower() == "t":
             print("\n".join(picker.top_view(int(mode[3:]) if mode.startswith("top") else 20)))
@@ -415,7 +427,7 @@ def read_sheet_rows(path: Path) -> List[Dict[str, str]]:
 
 
 def finish(picker: Picker, reference: Dict[str, Any], default_name: str, name: Optional[str], yes: bool, read: Callable[[str], str]) -> Optional[str]:
-    cols = picker.columns()
+    cols = picker.columns(reference)
     print("\n{} columns: {}".format(len(cols), ", ".join(cols)))
     if not name:
         name = (read("Site type name [{}]: ".format(default_name)).strip() if not yes else "") or default_name
@@ -605,9 +617,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return run_stage(verb, rest)  # the stage form: validate --orchestrator X files..., upload --site-dir ...
     if verb not in VERBS:
         return run_stage(verb, rest)
+    from validate import Stop as ValidatorStop  # 401/403/network on /validate: every row would fail the same way
     try:
         return VERBS[verb](rest)
-    except Fail as fail:
+    except (Fail, ValidatorStop) as fail:
         print("error: {}".format(fail), file=sys.stderr)
         return 2
     except EdgeConnectError as error:
