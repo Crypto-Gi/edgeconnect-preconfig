@@ -85,9 +85,9 @@ def keep_previous(folder: Path) -> None:
 
 
 def quiet(fn: Callable[..., Any], *args: Any) -> Any:
-    """Run a stage function with its stdout captured; returns (result, text)."""
+    """Run a stage function with its stdout and stderr captured; returns (result, text)."""
     buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer):
+    with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
         result = fn(*args)
     return result, buffer.getvalue()
 

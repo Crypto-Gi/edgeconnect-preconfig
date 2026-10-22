@@ -609,7 +609,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     IGNORE_OWNERSHIP = args.ignore_template_ownership
     cap = Capture(args.capture)
     ledger: List[Dict[str, Any]] = []
-    reference = prune(build(cap, ledger), gated_paths(args.target_release), ledger)
+    try:
+        reference = prune(build(cap, ledger), gated_paths(args.target_release), ledger)
+    except ValueError as error:  # e.g. an offline appliance with no Orchestrator cache: nothing to convert
+        print(error, file=sys.stderr)
+        return 2
     unseen = sorted(flat_paths(reference) - flat_paths(load_yaml(DEFAULT_TEMPLATE.parent / "orchestrator-{}.yml".format(args.target_release))))
     if unseen:
         ledger.append({"item": "release fit", "disposition": "context", "target": "", "note": "{} key paths are not shown in the {} default template (valid optional keys or unverified for that release): {}".format(len(unseen), args.target_release, ", ".join(unseen[:12]) + (" ..." if len(unseen) > 12 else ""))})

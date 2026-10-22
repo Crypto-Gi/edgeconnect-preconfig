@@ -10,6 +10,7 @@ import base64
 import binascii
 import json
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -70,104 +71,108 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
     tmp = out_root / ".incomplete-{}-{}-{}".format(appliance, stamp, os.getpid())
     (tmp / "capture").mkdir(parents=True, exist_ok=True)
     reader = Reader(client, tmp / "requests.jsonl", pause)
-
     try:
-        versions = reader.get("/gms/versions")
-    except Stop:  # a key limited to appliance and preconfig rights may not read the release; the rest of the capture still works
-        versions = {"ok": False}
-    release = versions["data"].get("current") if versions["ok"] and isinstance(versions["data"], dict) else None
-    if release and not only and not (DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)).is_file():
-        def_tmpl = reader.get("/gms/appliance/preconfiguration/default")
-        text = def_tmpl["data"] if def_tmpl["ok"] else None
-        if isinstance(text, dict):  # 10.0.0.40625 answers {"configData": "<base64 of the YAML>", ...}
-            try:
-                text = base64.b64decode("".join(str(text.get("configData") or "").split()), validate=True).decode("utf-8")
-            except (TypeError, binascii.Error, UnicodeDecodeError):
-                text = None
+
         try:
-            usable = isinstance(text, str) and isinstance(parse_yaml(text), dict)
-        except Exception:  # not YAML at all
-            usable = False
-        if usable:
-            DEFAULT_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
-            (DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)).write_text(text, encoding="utf-8")
-        else:
-            print("warning: could not cache the default preconfig template of Orchestrator release {}; translate.py --target-release {} "
-                  "needs {}".format(release, release, DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)), file=sys.stderr)
-    listing = reader.get("/appliance")
-    if not listing["ok"]:
-        raise Stop("cannot list appliances: {}".format(listing))
-    target = find_appliance(listing["data"], appliance)
-    nepk = str(target.get("nePk") or target.get("id"))
-    reach = reader.get("/reachability/gms", {"nePk": nepk})
-    reachable = bool(reach["ok"] and isinstance(reach["data"], dict) and int(reach["data"].get("state", 2)) in (1, 4))
-
-    # Opt-in only: a re-capture after an apply must re-read Orchestrator-scope state (associations, ids-state), never reuse it.
-    orch_cache: Dict[str, Any] = {}
-    for prev in sorted(out_root.glob("*.NE/*Z/capture/*.orchestrator.json")) if reuse else []:
-        if time.time() - prev.stat().st_mtime < 3600:
+            versions = reader.get("/gms/versions")
+        except Stop:  # a key limited to appliance and preconfig rights may not read the release; the rest of the capture still works
+            versions = {"ok": False}
+        release = versions["data"].get("current") if versions["ok"] and isinstance(versions["data"], dict) else None
+        if release and not only and not (DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)).is_file():
+            def_tmpl = reader.get("/gms/appliance/preconfiguration/default")
+            text = def_tmpl["data"] if def_tmpl["ok"] else None
+            if isinstance(text, dict):  # 10.0.0.40625 answers {"configData": "<base64 of the YAML>", ...}
+                try:
+                    text = base64.b64decode("".join(str(text.get("configData") or "").split()), validate=True).decode("utf-8")
+                except (TypeError, binascii.Error, UnicodeDecodeError):
+                    text = None
             try:
-                orch_cache[prev.name] = json.loads(prev.read_text(encoding="utf-8")).get("data")
-            except Exception:
-                pass
-
-    index: List[Dict[str, Any]] = []
-    secret_paths: Dict[str, List[str]] = {}
-    for entry in load_yaml(CATALOGUE)["endpoints"]:
-        if only and entry["id"] not in only:
-            continue
-        base = dict(entry.get("params") or {})
-        if entry["scope"] == "appliance":
-            base["nePk"] = nepk
-        source = entry["source"]
-        if source == "single":
-            variants = [("orchestrator", base)]
-        elif source in ("live", "backup"):
-            variants = [(source, base if (reachable or source == "backup") else None)]
-        else:
-            cached_label, live_label = LABELS[source]
-            variants = [(cached_label, dict(base, **{source: "true"}))]
-            variants.append((live_label, dict(base, **{source: "false"})) if reachable else (live_label, None))
-        for label, query in variants:
-            item = {"id": entry["id"], "path": entry["path"], "label": label, "query": query, "sections": entry.get("sections", [])}
-            if query is None:
-                item.update(status="unavailable", reason="appliance unreachable; live read not attempted")
-                index.append(item)
-                continue
-            name = "{}.{}.json".format(entry["id"], label)
-            if entry["scope"] == "orchestrator" and name in orch_cache and role == "sample":
-                payload = orch_cache[name]
-                item["reused"] = True
+                usable = isinstance(text, str) and isinstance(parse_yaml(text), dict)
+            except Exception:  # not YAML at all
+                usable = False
+            if usable:
+                DEFAULT_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+                (DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)).write_text(text, encoding="utf-8")
             else:
-                result = reader.get(entry["path"], query)
-                if not result["ok"]:  # a 403 (the key's RBAC roles refuse this read) is "denied": translate reports it, never silently
-                    item.update(status="denied" if result["error"] == "PermissionDeniedError" else "error", error=result["error"], http=result["http"], message=result["message"])
+                print("warning: could not cache the default preconfig template of Orchestrator release {}; translate.py --target-release {} "
+                      "needs {}".format(release, release, DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)), file=sys.stderr)
+        listing = reader.get("/appliance")
+        if not listing["ok"]:
+            raise Stop("cannot list appliances: {}".format(listing))
+        target = find_appliance(listing["data"], appliance)
+        nepk = str(target.get("nePk") or target.get("id"))
+        reach = reader.get("/reachability/gms", {"nePk": nepk})
+        reachable = bool(reach["ok"] and isinstance(reach["data"], dict) and int(reach["data"].get("state", 2)) in (1, 4))
+
+        # Opt-in only: a re-capture after an apply must re-read Orchestrator-scope state (associations, ids-state), never reuse it.
+        orch_cache: Dict[str, Any] = {}
+        for prev in sorted(out_root.glob("*.NE/*Z/capture/*.orchestrator.json")) if reuse else []:
+            if time.time() - prev.stat().st_mtime < 3600:
+                try:
+                    orch_cache[prev.name] = json.loads(prev.read_text(encoding="utf-8")).get("data")
+                except Exception:
+                    pass
+
+        index: List[Dict[str, Any]] = []
+        secret_paths: Dict[str, List[str]] = {}
+        for entry in load_yaml(CATALOGUE)["endpoints"]:
+            if only and entry["id"] not in only:
+                continue
+            base = dict(entry.get("params") or {})
+            if entry["scope"] == "appliance":
+                base["nePk"] = nepk
+            source = entry["source"]
+            if source == "single":
+                variants = [("orchestrator", base)]
+            elif source in ("live", "backup"):
+                variants = [(source, base if (reachable or source == "backup") else None)]
+            else:
+                cached_label, live_label = LABELS[source]
+                variants = [(cached_label, dict(base, **{source: "true"}))]
+                variants.append((live_label, dict(base, **{source: "false"})) if reachable else (live_label, None))
+            for label, query in variants:
+                item = {"id": entry["id"], "path": entry["path"], "label": label, "query": query, "sections": entry.get("sections", [])}
+                if query is None:
+                    item.update(status="unavailable", reason="appliance unreachable; live read not attempted")
                     index.append(item)
                     continue
-                payload = result["data"]
-                if entry.get("reduce") == "latest-backup" and isinstance(payload, list) and payload:
-                    latest = max(payload, key=lambda b: int(b.get("backupTime") or 0))
-                    payload = {k: latest.get(k) for k in ("id", "backupTime", "swVersion", "fileName", "runningConfig")}
-                    payload["backupCount"] = len(result["data"])
-            data, secrets = redact_secrets(payload)
-            write_json(tmp / "capture" / name, {
-                "orchestrator": orchestrator, "release": release, "nePk": nepk, "label": label,
-                "path": entry["path"], "query": query, "captured_at": utc_stamp(), "data": data})
-            if secrets:
-                secret_paths[name] = secrets
-            item.update(status="ok", file="capture/" + name, empty=data in (None, [], {}, ""))
-            index.append(item)
+                name = "{}.{}.json".format(entry["id"], label)
+                if entry["scope"] == "orchestrator" and name in orch_cache and role == "sample":
+                    payload = orch_cache[name]
+                    item["reused"] = True
+                else:
+                    result = reader.get(entry["path"], query)
+                    if not result["ok"]:  # a 403 (the key's RBAC roles refuse this read) is "denied": translate reports it, never silently
+                        item.update(status="denied" if result["error"] == "PermissionDeniedError" else "error", error=result["error"], http=result["http"], message=result["message"])
+                        index.append(item)
+                        continue
+                    payload = result["data"]
+                    if entry.get("reduce") == "latest-backup" and isinstance(payload, list) and payload:
+                        latest = max(payload, key=lambda b: int(b.get("backupTime") or 0))
+                        payload = {k: latest.get(k) for k in ("id", "backupTime", "swVersion", "fileName", "runningConfig")}
+                        payload["backupCount"] = len(result["data"])
+                data, secrets = redact_secrets(payload)
+                write_json(tmp / "capture" / name, {
+                    "orchestrator": orchestrator, "release": release, "nePk": nepk, "label": label,
+                    "path": entry["path"], "query": query, "captured_at": utc_stamp(), "data": data})
+                if secrets:
+                    secret_paths[name] = secrets
+                item.update(status="ok", file="capture/" + name, empty=data in (None, [], {}, ""))
+                index.append(item)
 
-    run = {
-        "stage": "capture", "orchestrator": orchestrator, "release": release, "role": role,
-        "appliance": {"nePk": nepk, "hostName": target.get("hostName"), "model": target.get("model"),
-                      "softwareVersion": target.get("softwareVersion"), "state": target.get("state")},
-        "reachable": reachable, "started": stamp, "finished": utc_stamp(), "only": only or None, "reused_orchestrator_reads": reuse,
-        "counts": {s: sum(1 for i in index if i["status"] == s) for s in ("ok", "error", "unavailable")},
-        "write_requests": client.write_requests, "secret_paths": secret_paths,
-    }
-    write_json(tmp / "capture-index.json", index)
-    write_json(tmp / "run.json", run)
+        run = {
+            "stage": "capture", "orchestrator": orchestrator, "release": release, "role": role,
+            "appliance": {"nePk": nepk, "hostName": target.get("hostName"), "model": target.get("model"),
+                          "softwareVersion": target.get("softwareVersion"), "state": target.get("state")},
+            "reachable": reachable, "started": stamp, "finished": utc_stamp(), "only": only or None, "reused_orchestrator_reads": reuse,
+            "counts": {s: sum(1 for i in index if i["status"] == s) for s in ("ok", "error", "unavailable")},
+            "write_requests": client.write_requests, "secret_paths": secret_paths,
+        }
+        write_json(tmp / "capture-index.json", index)
+        write_json(tmp / "run.json", run)
+    except BaseException:  # a stopped capture leaves no half-written folder behind
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
     final = out_root / nepk / stamp
     final.parent.mkdir(parents=True, exist_ok=True)
     tmp.rename(final)

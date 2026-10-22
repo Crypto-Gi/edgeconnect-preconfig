@@ -114,6 +114,13 @@ class CaptureTest(unittest.TestCase):
         self.assertEqual([(i["id"], i["status"]) for i in index],
                          [("deployment", "denied"), ("deployment", "denied"), ("bgp-system", "ok"), ("bgp-system", "ok")])
 
+    def test_a_stopped_capture_leaves_no_folder(self):
+        capture.client_for = lambda nickname: FakeClient()
+        out = Path(tempfile.mkdtemp())
+        with self.assertRaises(capture.Stop):
+            capture.capture("lab", "no-such-appliance", "reference", 0, out, ["deployment"])
+        self.assertEqual(list(out.iterdir()), [])
+
     def test_write_counter_above_zero_stops(self):
         client = FakeClient()
         client.write_requests = 1

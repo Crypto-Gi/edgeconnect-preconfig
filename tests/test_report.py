@@ -87,6 +87,16 @@ class Report(unittest.TestCase):
         self.assertIn("url=subnets3/configured (HTTP 403)", refused[0]["note"])
         self.assertEqual(translate.verdict(refused), "Complete for preconfig; 1 item(s) to check by hand.")
 
+    def test_an_appliance_with_nothing_to_convert_stops_with_one_line(self):
+        import contextlib
+        import io
+        err = io.StringIO()
+        with mock.patch.object(translate, "Capture", return_value=FakeCap()), \
+                mock.patch.object(translate, "build", side_effect=ValueError("capture 'x' lacks appliance or deployment.sysConfig data")), \
+                contextlib.redirect_stderr(err):
+            self.assertEqual(translate.main(["--capture", "x", "--site-type", "t", "--out", "/nonexistent-out"]), 2)
+        self.assertIn("lacks appliance", err.getvalue())
+
     def test_business_hours_are_checked_by_hand_not_a_gap(self):
         text = translate.summary_md([entry("not-readable", "availabilityTimeSettings")], {}, {"appliance": {}}, "9.7.1.42046")
         self.assertIn("## Not readable", text)
