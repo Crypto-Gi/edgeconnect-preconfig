@@ -79,7 +79,7 @@ We captured `45` real appliances (read-only `GET`) across 4 Orchestrators (`9.6.
 
 ## Phase 4: Closed-Loop Feature Verification on Lab Topology (Batches `0`–`9`)
 
-Because `/validate` only checks YAML syntax and Orchestrator object names, we built `tests/harnesses/apply_and_diff.py` and tested applying rendered preconfigurations onto a 5-appliance KVM `EC-V` lab (`0.NE`..`4.NE`) with:
+Because `/validate` only checks YAML syntax and Orchestrator object names, we built the lab apply-and-diff tool (`apply_and_diff.py`, kept outside this repository since 1.2.0) and tested applying rendered preconfigurations onto a 5-appliance KVM `EC-V` lab (`0.NE`..`4.NE`) with:
 - **NICs 1–3 (`br0`):** Trunked VLANs (`mgmt0` DHCP, `wan0.4000` DHCP at `100000`/`100000` Kbps, LAN VLAN subinterfaces `lan0.71`, `lan0.72`, `lan0.81`, `lan0.82`, `lan0.130`).
 - **NIC 4 (`MPLS` bridge -> `wan1`):** Isolated L2 bridge for static MPLS underlay (`192.0.2.1/24`..`192.0.2.5/24`).
 - **NIC 5 (`HA` bridge -> `lan1`):** Isolated L2 bridge for EdgeHA interconnect (`169.254.1.0/24`, VLANs `100`–`103`) and LACP/Bridge group testing (`blan0`, `slan0`).
@@ -202,7 +202,7 @@ The YAML-level diff saw none of these. Fixed in the converter: route flags and c
 - Live (2026-10-22): `list` (then named `appliances`) against two Orchestrators read-only. `build` from the Test Lab Orchestrator with validation there: the capture (GET) worked, and `POST .../preconfiguration/validate` answered HTTP 403, because that profile's API key is read-only and Orchestrator counts `/validate` as a write permission although nothing is saved. Nothing was kept, as designed; the run also found that the refusal printed a traceback, now a one-line error (`tests/test_cli.py::Dispatch`).
 - Live on the SE team's lab Orchestrator (10.0.0.40625, 2026-10-22, reads and `/validate` only, no upload): `list` listed and tested the profile; `build` of a cloud hub captured it (GET only, about 2.5 minutes), and `/validate` accepted the result; `variables --pick top10 --yes` built a 33-column site type whose example row was accepted; `validate` passed 1 of 1 rows; `compare` with two hubs of the same design found the 2 settings that differ besides the always-per-site ones and wrote `sites.csv` with a row per hub, and `/validate` accepted all 3 rows, each rendered with its own hub's values. The run found that Top 10 pre-ticked interface labels and zones (ranked high, but layout stays fixed unless flipped), fixed with a test.
 - Upload on the virtual lab Orchestrator (9.7.1, 2026-10-22): `build` of its one reachable appliance (`/validate` accepted), then `upload` of one row without `--approve` (table only, 0 writes) and with it: uploaded, read back, no serial and `autoApply` off. Not applied, by the owner's choice.
-- Apply gates (`tests/test_apply_gate.py`): code then `yes` passes; a wrong code, an empty answer, `y` or `YES please` stops; the code is new each run; with no terminal the gate stops without reading stdin; `upload --auto-apply` uploads nothing unless the gates pass (seen failing with the gate removed), and a plain upload asks nothing and sends `autoApply: false`.
+- No apply path (`tests/test_no_apply.py`): no script or test calls `/gms/appliance/preconfiguration/apply` or sets `autoApply` true, and `upload` has no `--auto-apply` (the scan was seen failing on a reintroduced `autoApply` line). The lab apply-and-diff tool behind the batches and cohorts above now lives outside this repository, behind two terminal gates; its guardrails and diff are `tests/harnesses/lab_diff.py` (`docs/decisions/0008`).
 - RBAC on that Orchestrator: an API key with roles can call only the endpoints its roles' menus allow, and the appliance passthrough is filtered by the URL inside it. `/natMaps`, `/natAll` and `/gms/versions` needed menus that only roles created on older releases still carry, and `subnets3/configured` through `/appliance/rest` stayed refused even with every menu the 10.0 UI offers. `GET /rbac/allowedRestApis?method=GET` lists what a key may call.
 - Dry run on real captures (2026-10-22, capture and `/validate` stubbed): `build`, `variables` (Top 10, search, sections) and `compare` with two other appliances ran end to end; the comparison flagged the three appliances as different designs, as they were.
 
@@ -228,7 +228,7 @@ The YAML-level diff saw none of these. Fixed in the converter: route flags and c
 ## Harness notes
 
 - `tests/harnesses/scan.py --orchestrator <profile>` (GET only) writes `samples/<profile>/scan.json`: which catalogue endpoints return data per appliance, used to choose a varied corpus.
-- `tests/harnesses/apply_and_diff.py` refuses any Orchestrator profile whose name does not contain `vlab`, and any preconfig with `managementIp`.
+- The lab apply-and-diff tool (`lab_diff.check_guardrails`) refuses any Orchestrator profile whose name does not contain `vlab`, and any preconfig with `managementIp`.
 
 ## Catalogue of the 21 Bugs & Behavioral Rules Found Before PR #2
 

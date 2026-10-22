@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Real-config round-trip diff: compare two capture.py runs (an original appliance and its clone) on raw appliance data.
 
-apply_and_diff.py checks only the leaves the preconfig asked for, after translating them back to YAML. This compares what the
+The lab apply-and-diff tool checks only the leaves the preconfig asked for, after translating them back to YAML. This compares what the
 appliances actually hold: every appliance-scope endpoint in the capture, the CLI running-config of the newest backup, and where
 each appliance appears in Orchestrator-wide objects (overlays, template groups, IDS state). The original's values are rewritten
 through --map (its IPs, names and nePk to the clone's) first, so whatever still differs is a real round-trip gap.

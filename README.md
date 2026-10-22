@@ -62,7 +62,7 @@ edgeconnect-preconfig upload ./preconfig-output/Branch-01/site-branch --csv site
 - **build** writes `preconfig-output/<hostname>/`: `reference.yaml`, the template, `example.csv`, `summary.md` with the verdict, and `build.json`. Nothing is kept unless Orchestrator's `/validate` accepts the result. Validation runs on the Orchestrator the appliance came from; `--validate-on <lab>` names another. Either way it must be listed in `EC_VALIDATORS`. An earlier folder of the same name is renamed, never overwritten.
 - **variables** shows the settings as a tick list. Hostname, serial, secrets and every Deployment-page and appliance-info value (addresses, next hops, bandwidths, DHCP, location) are always per site, no questions; interface names, labels, zones, segments, firewall and deployment mode stay fixed unless you flip them. The Top 10 and Top 20 are the settings that differed most often between appliances of the same design in the captured corpus (`references/variable-ranking.json`); "All" opens one section at a time. Type numbers to flip a setting, a word to search, Enter when done. A gateway that equals an interface address follows that address. `--pick top10 --yes` and `--set column,...` do the same without questions.
 - **compare** reads the other sites (GET only), makes every setting whose value differs between them per site, and asks you to confirm or edit. Its `sites.csv` has a row for every site with that site's own values (serials and secrets blank), and every row is validated.
-- **Nothing applies for you.** The command line stops at upload. `upload --auto-apply` (Orchestrator would apply each preconfig when its appliance appears) first asks a person at the terminal to type a fresh code and then `yes`; piped input or a run without a terminal stops it.
+- **Nothing applies.** The command line stops at upload, and every upload has `autoApply` off. Applying a preconfig to an appliance is done by a person in Orchestrator; no script here can do it.
 - **variables** and **compare** write `site-<name>/` inside the build folder; the build's own files never change. The old stage scripts still run by name (`edgeconnect-preconfig capture ...`); the live-versus-cached check is now `cache-check`.
 
 ---
@@ -253,7 +253,7 @@ edgeconnect-preconfig/
 │   ├── test_mappers.py
 │   ├── test_raw_diff.py
 │   ├── test_variables.py
-│   └── harnesses/                            # apply_and_diff.py, corpus.py, probes.py, raw_diff.py, scan.py, suite.py
+│   └── harnesses/                            # corpus.py, lab_diff.py, probes.py, rank_variables.py, raw_diff.py, scan.py, suite.py
 └── dist/                                     # Pre-built archives for Claude Desktop / Cowork upload
     ├── building-edgeconnect-preconfig-templates.zip
     └── building-edgeconnect-preconfig-templates.skill
