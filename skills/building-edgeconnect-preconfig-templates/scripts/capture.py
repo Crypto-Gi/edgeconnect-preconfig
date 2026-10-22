@@ -73,10 +73,7 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
     reader = Reader(client, tmp / "requests.jsonl", pause)
     try:
 
-        try:
-            versions = reader.get("/gms/versions")
-        except Stop:  # a key limited to appliance and preconfig rights may not read the release; the rest of the capture still works
-            versions = {"ok": False}
+        versions = reader.get("/gms/versions")  # a 403 comes back as not ok: no release, the rest of the capture goes on
         release = versions["data"].get("current") if versions["ok"] and isinstance(versions["data"], dict) else None
         if release and not only and not (DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)).is_file():
             def_tmpl = reader.get("/gms/appliance/preconfiguration/default")
@@ -103,6 +100,11 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
         nepk = str(target.get("nePk") or target.get("id"))
         reach = reader.get("/reachability/gms", {"nePk": nepk})
         reachable = bool(reach["ok"] and isinstance(reach["data"], dict) and int(reach["data"].get("state", 2)) in (1, 4))
+        index: List[Dict[str, Any]] = []
+        if reach.get("error") == "PermissionDeniedError":  # unknown, not unreachable: try the live reads and report the refusal (decision 0009)
+            reachable = None
+            index.append({"id": "reachability", "path": "/reachability/gms", "label": "orchestrator", "query": {"nePk": nepk}, "sections": [],
+                          "status": "denied", "error": reach["error"], "http": reach["http"], "message": reach["message"]})
 
         # Opt-in only: a re-capture after an apply must re-read Orchestrator-scope state (associations, ids-state), never reuse it.
         orch_cache: Dict[str, Any] = {}
@@ -113,7 +115,6 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
                 except Exception:
                     pass
 
-        index: List[Dict[str, Any]] = []
         secret_paths: Dict[str, List[str]] = {}
         for entry in load_yaml(CATALOGUE)["endpoints"]:
             if only and entry["id"] not in only:
@@ -125,11 +126,11 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
             if source == "single":
                 variants = [("orchestrator", base)]
             elif source in ("live", "backup"):
-                variants = [(source, base if (reachable or source == "backup") else None)]
+                variants = [(source, base if (reachable is not False or source == "backup") else None)]
             else:
                 cached_label, live_label = LABELS[source]
                 variants = [(cached_label, dict(base, **{source: "true"}))]
-                variants.append((live_label, dict(base, **{source: "false"})) if reachable else (live_label, None))
+                variants.append((live_label, dict(base, **{source: "false"})) if reachable is not False else (live_label, None))
             for label, query in variants:
                 item = {"id": entry["id"], "path": entry["path"], "label": label, "query": query, "sections": entry.get("sections", [])}
                 if query is None:

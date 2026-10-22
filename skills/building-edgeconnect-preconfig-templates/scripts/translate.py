@@ -30,6 +30,10 @@ NETWORK_ROLE = {0: "non-hub", 1: "hub"}  # verified across multiple Orchestrator
 DEFAULT_TEMPLATE = DEFAULT_TEMPLATES_DIR / "orchestrator-9.7.1.42046.yml"
 
 
+class NothingToConvert(ValueError):
+    """The capture has no appliance or deployment data, e.g. an offline appliance with no Orchestrator cache."""
+
+
 class Capture:
     def __init__(self, folder: Path) -> None:
         self.folder = folder
@@ -163,7 +167,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     extra = cap.data("extra-info") or {}
     dep = cap.data("deployment") or {}
     if not app.get("hostName") or not dep.get("sysConfig"):
-        raise ValueError("capture {!r} lacks appliance or deployment.sysConfig data (appliance may be offline with no Orchestrator cache)".format(str(cap.folder)))
+        raise NothingToConvert("capture {!r} lacks appliance or deployment.sysConfig data (appliance may be offline with no Orchestrator cache)".format(str(cap.folder)))
     nepk = cap.run["appliance"]["nePk"]
     groups = {g["id"]: g["name"] for g in cap.data("groups") or []}
     out: Dict[str, Any] = {}
@@ -611,7 +615,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ledger: List[Dict[str, Any]] = []
     try:
         reference = prune(build(cap, ledger), gated_paths(args.target_release), ledger)
-    except ValueError as error:  # e.g. an offline appliance with no Orchestrator cache: nothing to convert
+    except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2
     unseen = sorted(flat_paths(reference) - flat_paths(load_yaml(DEFAULT_TEMPLATE.parent / "orchestrator-{}.yml".format(args.target_release))))

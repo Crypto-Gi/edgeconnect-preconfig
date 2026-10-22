@@ -32,7 +32,7 @@ from typing import Any, Callable, Dict, List, Optional
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from variables import ALWAYS_SECTIONS, LAYOUT  # noqa: E402
-from common import DEFAULT_TEMPLATES_DIR, VALIDATORS, WORK_DIR, EdgeConnectError, client_for, load_yaml, toolkit_version, utc_stamp, write_json  # noqa: E402
+from common import DEFAULT_TEMPLATES_DIR, VALIDATORS, WORK_DIR, EdgeConnectError, PermissionDeniedError, client_for, load_yaml, toolkit_version, utc_stamp, write_json  # noqa: E402
 
 PROG = "edgeconnect-preconfig"
 STATES = {1: "yes", 2: "NO", 3: "unsupported version", 4: "yes (out of sync)", 5: "yes (syncing)"}  # /appliance `state`
@@ -103,11 +103,11 @@ def cmd_list(argv: List[str]) -> int:
     try:
         versions = client.get("/gms/versions")
         release = versions.get("current") if isinstance(versions, dict) else "?"
-    except EdgeConnectError:  # a key without that right still lists appliances
+    except PermissionDeniedError:  # a key without that right still lists appliances
         release = "unknown (GET /gms/versions refused)"
+    listing = client.get("/appliance")
     validates = "yes" if a.orchestrator.lower() in VALIDATORS else "no (not in EC_VALIDATORS)"
     print("Orchestrator {}: {} | release {} | login OK | /validate allowed: {}".format(a.orchestrator, client.config.base_url, release, validates))
-    listing = client.get("/appliance")
     rows = []
     for item in listing if isinstance(listing, list) else []:
         row = [item.get("hostName") or "", item.get("nePk") or item.get("id") or "", item.get("model") or "", item.get("softwareVersion") or "",
@@ -139,6 +139,15 @@ def checked(folder: Path, site: str, validator: str, substitute: bool) -> List[s
     return ["{}: {}".format(name, json.dumps(c["detail"])[:400]) for name, c in result["checks"].items() if not c["ok"]]
 
 
+def release_of(nick: str) -> Optional[str]:
+    """The Orchestrator's release, or None when its key may not read it."""
+    try:
+        versions = client_for(nick).get("/gms/versions")
+    except PermissionDeniedError:
+        return None
+    return versions.get("current") if isinstance(versions, dict) else None
+
+
 def cmd_build(argv: List[str]) -> int:
     p = argparse.ArgumentParser(prog=PROG + " build", description="Read one appliance (GET only), convert it, and keep the result only if Orchestrator /validate accepts it.")
     p.add_argument("--orchestrator", required=True, help=".env profile nickname to read the appliance from")
@@ -157,7 +166,7 @@ def cmd_build(argv: List[str]) -> int:
         raise Fail(str(stop))
     run = json.loads((cap / "run.json").read_text(encoding="utf-8"))
     host = run["appliance"].get("hostName") or run["appliance"]["nePk"]
-    release = a.target_release or (run["release"] if validator == a.orchestrator else client_for(validator).get("/gms/versions").get("current"))
+    release = a.target_release or (run["release"] if validator == a.orchestrator else release_of(validator))
     if not release:
         raise Fail("{} did not give its release (GET /gms/versions refused): pass --target-release, e.g. one of {}".format(
             validator, ", ".join(sorted(p.stem[len("orchestrator-"):] for p in DEFAULT_TEMPLATES_DIR.glob("orchestrator-*.yml")))))
@@ -402,6 +411,22 @@ def build_site(folder: Path, info: Dict[str, Any], name: str, sheet: List[Dict[s
     return target
 
 
+def layout_differences(reference: Dict[str, Any], other: Dict[str, Any]) -> List[str]:
+    """List items another site holds at the same position under another name (wan1 where this site has wan0).
+
+    Rows are matched by position, so such a site's values would land on the wrong interface or item."""
+    from variables import labelled, sheet_items
+    theirs = dict(sheet_items(other))
+    out = set()
+    for path, _ in sheet_items(reference):
+        if "[" in path and path in theirs:
+            mine, yours = (re.findall(r"[^\[]*\[[^\]]*\]", labelled(doc, path)) for doc in (reference, other))
+            first = next((i for i, (x, y) in enumerate(zip(mine, yours)) if x != y), None)
+            if first is not None:
+                out.add("".join(mine[:first + 1]).replace("deploymentInfo.", "", 1))
+    return sorted(out)
+
+
 def write_rows(site_dir: Path, name: str, others: List[Dict[str, Any]]) -> None:
     """sites.csv: the example row, then one row per compared site with its own values (secrets and serial left blank)."""
     meta = json.loads((site_dir / "columns.json").read_text(encoding="utf-8"))
@@ -499,7 +524,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     info = load_build(a.folder)
     base = a.folder if (a.folder / "build.json").is_file() else a.folder.parent
     from capture import Stop, capture
-    from translate import Capture, build, gated_paths, prune
+    from translate import Capture, NothingToConvert, build, gated_paths, prune
     from variables import classify, sheet_items, write_sheet
     caps = []
     for site in a.sites:
@@ -509,7 +534,10 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         except Stop as stop:
             raise Fail(str(stop))
     gated = gated_paths(info["target_release"])
-    others = [prune(build(Capture(c), []), gated, []) for c in caps]
+    try:
+        others = [prune(build(Capture(c), []), gated, []) for c in caps]
+    except NothingToConvert as error:
+        raise Fail(str(error))
     reference = load_yaml(base / "reference.yaml")
     from generate import Builder
     probe = Builder()
@@ -522,18 +550,18 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     same = sum(1 for r in rows if r["reason"] == "same at every site you gave")
     only = sum(1 for r in rows if r["flag"] == "true" and r["reason"].startswith("only "))
     locked = sum(1 for r in picker.rows if r["locked"])
-    print("\n{} settings are always per site (hostname, secrets, Deployment page, appliance info), and {} more differ between {} and {}:".format(
+    print("\n{} settings are always per site (hostname, secrets, Deployment page, appliance info), and {} more are per site at {} and {}:".format(
         locked, len(differ), info["appliance"].get("hostName"), ", ".join(names)))
     print("  {:>4}  {:<52} {:<30} {:>5}  {}   {}".format("#", "Setting", info["appliance"].get("hostName"), "", "Choice", "   ".join("| " + n for n in names)))
     print("\n".join(picker.show(differ, "Different between your sites (pre-ticked)")))
     print("{} settings are the same at every site and stay fixed.".format(same))
     if only:
         print("{} settings exist only at some of the sites and are left fixed.".format(only))
-    layout = [r for r in rows if re.search(r"(?i)interfacename$", r["path"]) and r["decision"] == "variable"]
-    if layout or only:
-        print("Note: the sites' interface layouts differ ({}). Settings are matched by position, so compare is reliable only for sites "
-              "of the same design; for different designs build one template per design.".format(
-                  ", ".join(sorted({r["value"] for r in layout})[:4]) or "{} settings missing at some sites".format(only)))
+    misfits = {n: layout_differences(reference, o) for n, o in zip(names, others)}
+    for n, diffs in misfits.items():
+        if diffs:
+            print("Note: {} lists its items differently ({}{}). Its values would land on the wrong interfaces, so sites.csv gets no row for it; "
+                  "build a separate template for that design.".format(n, ", ".join(diffs[:4]), " ..." if len(diffs) > 4 else ""))
     if not a.yes:
         answer = read("Build the template with these settings per site? [Y/n/edit] ").strip().lower()
         if answer in ("n", "no"):
@@ -545,7 +573,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     name = finish(picker, reference, info["site_type"], a.name, a.yes, read)
     if not name:
         return 1
-    rows_for = [{"hostname": n, "items": s} for n, s in zip(names, seen)]
+    rows_for = [{"hostname": n, "items": s} for n, s in zip(names, seen) if not misfits[n]]
     target = build_site(a.folder, info, name, picker.sheet(reference), rows_for)
     return validate_rows(target, target / "sites.csv", info, None)
 

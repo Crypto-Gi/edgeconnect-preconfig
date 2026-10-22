@@ -86,6 +86,18 @@ class Classify(unittest.TestCase):
         self.assertEqual((dns["decision"], dns["flag"]), ("variable", False))  # on the Deployment page: per site, no question
         self.assertEqual(rows["radius.server[0].host"]["decision"], "fixed")
 
+    def test_every_interface_name_on_the_deployment_page_stays_fixed(self):
+        import copy
+        ref = copy.deepcopy(REFERENCE)
+        ref["deploymentInfo"]["raInfo"] = [{"raInterfaceName": "lan0", "raMinInterval": 200}]
+        ref["deploymentInfo"]["haConfig"] = {"haInterface": "wan2", "haSubnetMask": 30}
+        ref["applianceInfo"]["contact"] = {"name": ""}
+        rows = {r["path"]: r for r in classify(ref, set())}
+        self.assertEqual(rows["deploymentInfo.raInfo[0].raInterfaceName"]["decision"], "fixed")
+        self.assertEqual(rows["deploymentInfo.haConfig.haInterface"]["decision"], "fixed")
+        self.assertEqual(rows["deploymentInfo.raInfo[0].raMinInterval"]["column"], "lan0_ra_min_interval")  # named by its interface
+        self.assertEqual(rows["applianceInfo.contact.name"]["decision"], "fixed")  # blank in the source: nothing to vary (decision 0006)
+
     def test_names_are_unique_and_valid(self):
         cols = [r["column"] for r in classify(REFERENCE, set()) if r["decision"] == "variable"]
         self.assertEqual(len(cols), len(set(cols)) + sum(1 for r in classify(REFERENCE, set()) if r["linked_to"]))

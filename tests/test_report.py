@@ -92,7 +92,7 @@ class Report(unittest.TestCase):
         import io
         err = io.StringIO()
         with mock.patch.object(translate, "Capture", return_value=FakeCap()), \
-                mock.patch.object(translate, "build", side_effect=ValueError("capture 'x' lacks appliance or deployment.sysConfig data")), \
+                mock.patch.object(translate, "build", side_effect=translate.NothingToConvert("capture 'x' lacks appliance or deployment.sysConfig data")), \
                 contextlib.redirect_stderr(err):
             self.assertEqual(translate.main(["--capture", "x", "--site-type", "t", "--out", "/nonexistent-out"]), 2)
         self.assertIn("lacks appliance", err.getvalue())

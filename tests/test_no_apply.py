@@ -11,11 +11,17 @@ sys.path.insert(0, str(SCRIPTS))
 import upload  # noqa: E402
 from generate import generate  # noqa: E402
 
-APPLY = re.compile(r"preconfiguration/apply|autoApply\"?\s*[:=]\s*(True|true|bool\()")
+APPLY = re.compile(r"preconfiguration/apply|autoApply[\"']?\]?\s*[:=](?!=)\s*(?![\s]|False\b)")  # any autoApply value other than a literal False
 
 
 class NoApply(unittest.TestCase):
     """The toolkit cannot apply a preconfig, not even later through Orchestrator's autoApply (docs/decisions/0008)."""
+
+    def test_the_scan_catches_every_way_to_turn_autoapply_on(self):
+        for line in ('"autoApply": True', 'payload["autoApply"] = flag', "body['autoApply']=args.auto", '"autoApply": bool(x)', 'POST /gms/appliance/preconfiguration/apply'):
+            self.assertTrue(APPLY.search(line), line)
+        for line in ('"autoApply": False,', 'payload["autoApply"] == False'):
+            self.assertFalse(APPLY.search(line), line)
 
     def test_no_shipped_or_test_code_calls_apply(self):
         found = [(p.relative_to(ROOT), n) for p in list(SCRIPTS.glob("*.py")) + list((ROOT / "tests").rglob("*.py")) if p.name != "test_no_apply.py"

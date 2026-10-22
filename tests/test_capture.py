@@ -114,6 +114,12 @@ class CaptureTest(unittest.TestCase):
         self.assertEqual([(i["id"], i["status"]) for i in index],
                          [("deployment", "denied"), ("deployment", "denied"), ("bgp-system", "ok"), ("bgp-system", "ok")])
 
+    def test_a_refused_reachability_read_is_reported_and_live_reads_still_run(self):
+        final = self.run_capture(FakeClient(fail={"/reachability/gms": PermissionDeniedError("403")}), ["deployment"])
+        index = json.loads((final / "capture-index.json").read_text())
+        self.assertIn(("reachability", "denied"), [(i["id"], i["status"]) for i in index])
+        self.assertEqual([(i["label"], i["status"]) for i in index if i["id"] == "deployment"], [("cached", "ok"), ("live", "ok")])
+
     def test_a_stopped_capture_leaves_no_folder(self):
         capture.client_for = lambda nickname: FakeClient()
         out = Path(tempfile.mkdtemp())

@@ -163,6 +163,42 @@ class CompareRows(unittest.TestCase):
         self.assertEqual((second[secret], second["serial_number"]), ("", ""))  # never copied: typed in by a person
 
 
+class CompareLayout(unittest.TestCase):
+    def test_a_site_with_another_interface_layout_gets_no_row(self):
+        other = copy.deepcopy(REFERENCE)
+        other["applianceInfo"]["hostname"] = "br-2"
+        other["deploymentInfo"]["deploymentInterfaces"][2] = {"interfaceName": "wan1", "ipAddressMask": "203.0.113.2/24", "outboundMaxBandwidth": 5000}
+        self.assertEqual(cli.layout_differences(REFERENCE, other), ["deploymentInterfaces[wan0]"])
+        self.assertEqual(cli.layout_differences(REFERENCE, copy.deepcopy(REFERENCE)), [])
+
+
+class ListLogin(unittest.TestCase):
+    def client(self, versions_error=None):
+        client = mock.Mock(write_requests=0, config=mock.Mock(base_url="https://orch.example.com/gms/rest"))
+        def get(path, query=None):
+            if path == "/gms/versions":
+                if versions_error:
+                    raise versions_error
+                return {"current": "9.7.1.42046"}
+            return [{"hostName": "br-1", "nePk": "1.NE", "model": "EC-V", "softwareVersion": "9.7.1", "site": "s", "state": 1}]
+        client.get.side_effect = get
+        return client
+
+    def test_a_refused_release_read_still_lists(self):
+        from common import PermissionDeniedError
+        with mock.patch.object(cli, "client_for", return_value=self.client(PermissionDeniedError("403", status=403))), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(cli.cmd_list(["--orchestrator", "lab"]), 0)
+        self.assertIn("release unknown", out.getvalue())
+        self.assertIn("br-1", out.getvalue())
+
+    def test_a_bad_key_never_says_login_ok(self):
+        from common import AuthenticationError
+        with mock.patch.object(cli, "client_for", return_value=self.client(AuthenticationError("401", status=401))), contextlib.redirect_stdout(io.StringIO()) as out:
+            with self.assertRaises(AuthenticationError):
+                cli.cmd_list(["--orchestrator", "lab"])
+        self.assertNotIn("login OK", out.getvalue())
+
+
 class Dispatch(unittest.TestCase):
     def test_stage_names_still_work(self):
         with mock.patch.object(cli, "run_stage", return_value=0) as stage:
