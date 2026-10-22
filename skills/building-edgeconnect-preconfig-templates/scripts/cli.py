@@ -31,7 +31,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from variables import ALWAYS_SECTIONS  # noqa: E402
+from variables import ALWAYS_SECTIONS, LAYOUT  # noqa: E402
 from common import DEFAULT_TEMPLATES_DIR, VALIDATORS, WORK_DIR, EdgeConnectError, client_for, load_yaml, toolkit_version, utc_stamp, write_json  # noqa: E402
 
 PROG = "edgeconnect-preconfig"
@@ -220,7 +220,7 @@ class Picker:
         self.on = {r["path"]: r["decision"] == "variable" for r in self.free}
 
     def ranked(self, count: int) -> List[Dict[str, str]]:
-        hits = sorted((r for r in self.free if r["pct"] is not None), key=lambda r: (-r["pct"], -r["support"], r["n"]))
+        hits = sorted((r for r in self.free if r["pct"] is not None and r["reason"] != LAYOUT), key=lambda r: (-r["pct"], -r["support"], r["n"]))  # layout: only by a flip
         return hits[:count]
 
     def start_top(self, count: int) -> None:
@@ -519,7 +519,9 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     differ = [r for r in picker.free if picker.on[r["path"]]]
     same = sum(1 for r in rows if r["reason"] == "same at every site you gave")
     only = sum(1 for r in rows if r["flag"] == "true" and r["reason"].startswith("only "))
-    print("\n{} settings are per site at {} and {}:".format(len(differ), info["appliance"].get("hostName"), ", ".join(names)))
+    locked = sum(1 for r in picker.rows if r["locked"])
+    print("\n{} settings are always per site (hostname, secrets, Deployment page, appliance info), and {} more differ between {} and {}:".format(
+        locked, len(differ), info["appliance"].get("hostName"), ", ".join(names)))
     print("  {:>4}  {:<52} {:<30} {:>5}  {}   {}".format("#", "Setting", info["appliance"].get("hostName"), "", "Choice", "   ".join("| " + n for n in names)))
     print("\n".join(picker.show(differ, "Different between your sites (pre-ticked)")))
     print("{} settings are the same at every site and stay fixed.".format(same))

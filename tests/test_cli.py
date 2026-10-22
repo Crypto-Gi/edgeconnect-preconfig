@@ -38,6 +38,7 @@ RANKING = {  # setting kind -> rank, as references/variable-ranking.json holds i
     "applianceInfo.location.city": {"differs_pct": 99, "appliances": 60},  # locked anyway: appliance info is always per site
     "bgpSystemConfig.routerId": {"differs_pct": 100, "appliances": 17},
     "bgpSystemConfig.asn": {"differs_pct": 96, "appliances": 17},
+    "deploymentInfo.deploymentInterfaces[lan].interfaceName": {"differs_pct": 100, "appliances": 7},  # layout: never pre-ticked
 }
 
 
@@ -86,6 +87,8 @@ class PickerChoice(unittest.TestCase):
             self.assertNotIn(locked, p.on)  # locked rows are not choices
         self.assertIn("deploymentInfo.deploymentInterfaces[0].interfaceName", p.on)  # layout: fixed, but can be flipped
         self.assertFalse(p.on["deploymentInfo.deploymentInterfaces[0].interfaceName"])
+        p.start_top(20)
+        self.assertFalse(p.on["deploymentInfo.deploymentInterfaces[0].interfaceName"])  # ranked high, but layout stays fixed unless flipped
         sheet = by_path(p.sheet(REFERENCE))
         self.assertEqual(sheet["deploymentInfo.dhcpInfo[0].dnsServers[0]"]["decision"], "variable")  # Deployment page, no question
 

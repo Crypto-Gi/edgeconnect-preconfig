@@ -26,6 +26,7 @@ RESERVED = {"preconfig_name", "serial_number"}
 COLUMN_OK = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ALWAYS_SECTIONS = ("applianceInfo", "deploymentInfo")  # the Deployment page and the appliance's initial settings
 ALWAYS = "deployment page or appliance info: always per site"
+LAYOUT = "interface names, labels, zones, segments, firewall and deployment mode stay fixed unless you flip them"
 LAYOUT_KEYS = {"interfaceName", "dhcpInterfaceName", "interfaceLabel", "interfaceType", "zone", "segment", "firewallMode", "deploymentMode"}
 BANDWIDTH_KEY = re.compile(r"(?i)bandwidth$")
 SITE_NUMBER_KEY = re.compile(r"^(asn|peerAsn|routerId|rtr_id|vxlanId|vni|ipsecUdpPort|peerIpAddress|peerIp|remoteIp|haPeer\w+|macAddress)$")
@@ -192,7 +193,7 @@ def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Op
                 local_cols[value] = unique(column_name(reference, path))
                 row(path, value, "variable", "inside one of this site's own subnets", local_cols[value])
         elif section in ALWAYS_SECTIONS and key in LAYOUT_KEYS:  # owner's rule, docs/decisions/0006
-            row(path, value, "fixed", "interface names, labels, zones, segments, firewall and deployment mode stay fixed unless you flip them")
+            row(path, value, "fixed", LAYOUT)
         elif section in ALWAYS_SECTIONS and value is not None:
             row(path, value, "variable", ALWAYS, unique(column_name(reference, path)))
         elif seen_at:
