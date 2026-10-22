@@ -362,6 +362,39 @@ def redact_secrets(value: Any, path: str = "$") -> Tuple[Any, List[str]]:
     return walk(value, path, False), found
 
 
+class GateRefused(EdgeConnectError):
+    """A person did not pass the apply gates; nothing was applied."""
+
+
+def human_gate(action: str, details: List[str], tty: Any = None) -> None:
+    """Two gates before anything is applied to an appliance (owner's rule, docs/decisions/0007): type a fresh code, then yes.
+
+    Answers are read from the controlling terminal (/dev/tty), never from stdin, an option or an environment variable, so piped
+    input cannot pass them and a run with no terminal (as an agent's tool calls usually are) stops here.
+    """
+    import secrets
+    own = tty is None
+    try:
+        tty = tty or open("/dev/tty", "r+", encoding="utf-8")
+    except OSError:
+        raise GateRefused("{} needs a person at a terminal to pass two gates; no terminal is attached, so nothing was applied".format(action)) from None
+    try:
+        code = "APPLY-" + secrets.token_hex(3).upper()
+        tty.write("\nWARNING: {} changes the running configuration of live appliances.\n".format(action))
+        tty.write("".join("  {}\n".format(line) for line in details))
+        tty.write("Gate 1 of 2: type {} to continue: ".format(code))
+        tty.flush()
+        if tty.readline().strip() != code:
+            raise GateRefused("gate 1: the code did not match; nothing was applied")
+        tty.write("Gate 2 of 2: this cannot be undone from here. Type yes to apply: ")
+        tty.flush()
+        if tty.readline().strip() != "yes":
+            raise GateRefused("gate 2: not confirmed; nothing was applied")
+    finally:
+        if own:
+            tty.close()
+
+
 def toolkit_version() -> str:
     """'1.1.0 (commit 456f08b, 2026-10-21)' from VERSION and, in a git checkout, the last commit; local edits to the toolkit are flagged."""
     version = (SKILL_DIR / "VERSION").read_text().strip() if (SKILL_DIR / "VERSION").is_file() else "unknown"

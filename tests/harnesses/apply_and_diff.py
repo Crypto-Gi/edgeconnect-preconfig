@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
-from common import SKILL_DIR, WORK_DIR, client_for, normalize_serial, parse_yaml, paths_of, redact_secrets, utc_stamp, write_json  # noqa: E402
+from common import SKILL_DIR, WORK_DIR, client_for, human_gate, normalize_serial, parse_yaml, paths_of, redact_secrets, utc_stamp, write_json  # noqa: E402
 from validate import validate_text  # noqa: E402
 
 
@@ -152,6 +152,8 @@ def run_apply_and_diff(
     if norm_serial:
         payload["serialNum"] = norm_serial
 
+    human_gate("Applying a preconfig", ["Orchestrator: {}".format(orchestrator), "Appliance: {}".format(nepk or "discovered #{}".format(discovered_id)),
+                                         "Preconfig: {} ({})".format(pcfg_name, yaml_path)])  # docs/decisions/0007
     created = client.request("POST", "/gms/appliance/preconfiguration", json_body=payload, expected_status=(200, 201), expect_json=True)
     preconfig_id = created["id"] if isinstance(created, dict) else int(created)
     print("Created preconfig id={} name={}".format(preconfig_id, pcfg_name), flush=True)

@@ -48,7 +48,9 @@ def table(header: List[str], rows: List[List[Any]]) -> str:
     """A bordered table, the setup.sh style."""
     widths = [max(len(str(c)) for c in col) for col in zip(header, *rows)]
     line = "+" + "+".join("-" * (w + 2) for w in widths) + "+"
-    fmt = lambda cells: "| " + " | ".join(str(c).ljust(w) for c, w in zip(cells, widths)) + " |"  # noqa: E731
+
+    def fmt(cells: List[Any]) -> str:
+        return "| " + " | ".join(str(c).ljust(w) for c, w in zip(cells, widths)) + " |"
     return "\n".join([line, fmt(header), line] + [fmt(r) for r in rows] + [line])
 
 

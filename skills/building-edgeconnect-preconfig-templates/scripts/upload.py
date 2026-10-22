@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cells import cell_problems, interface_addresses, option_limits, subnet_problems  # noqa: E402
-from common import EdgeConnectError, client_for, normalize_serial, parse_yaml, resolve_output_filename, utc_stamp, write_json  # noqa: E402
+from common import EdgeConnectError, client_for, human_gate, normalize_serial, parse_yaml, resolve_output_filename, utc_stamp, write_json  # noqa: E402
 from render import flow_through, read_rows, render_row  # noqa: E402
 from validate import Stop, validate_text  # noqa: E402
 
@@ -167,6 +167,9 @@ def run_batch(
 
     uploaded_count = 0
     if approve and ready_to_upload:
+        if auto_apply:  # Orchestrator would apply these by itself: a person passes two gates first (docs/decisions/0007)
+            human_gate("Uploading with autoApply on", ["Orchestrator: {}".format(getattr(getattr(client, "config", None), "name", "?"))] + [
+                "{}  serial {}".format(i["entry"]["preconfig_name"], i["entry"]["serial_number"] or "-") for i in ready_to_upload])
         for item in ready_to_upload:
             entry = item["entry"]
             payload: Dict[str, Any] = {
@@ -232,7 +235,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--out", type=Path, help="output directory (default: ./preconfig-output/<site>)")
     parser.add_argument("--orchestrator", required=True, help="Orchestrator profile nickname")
     parser.add_argument("--approve", action="store_true", help="upload valid non-conflicting rows after user approval")
-    parser.add_argument("--auto-apply", action="store_true", help="set autoApply=true on uploaded preconfigs (default: false)")
+    parser.add_argument("--auto-apply", action="store_true", help="set autoApply=true: Orchestrator then applies each preconfig by itself when its appliance appears; asks a person at the terminal to pass two gates first")
     args = parser.parse_args(argv)
 
     if args.site_dir:
