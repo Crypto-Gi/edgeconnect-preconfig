@@ -415,13 +415,14 @@ def layout_differences(reference: Dict[str, Any], other: Dict[str, Any]) -> List
     """List items another site holds at the same position under another name (wan1 where this site has wan0).
 
     Rows are matched by position, so such a site's values would land on the wrong interface or item."""
-    from variables import labelled, sheet_items
+    from variables import IF_KIND, labelled, sheet_items
     theirs = dict(sheet_items(other))
     out = set()
     for path, _ in sheet_items(reference):
         if "[" in path and path in theirs:
             mine, yours = (re.findall(r"[^\[]*\[[^\]]*\]", labelled(doc, path)) for doc in (reference, other))
-            first = next((i for i, (x, y) in enumerate(zip(mine, yours)) if x != y), None)
+            # only interface names mark a different layout; a tunnel or rule name may differ per site at the same position
+            first = next((i for i, (x, y) in enumerate(zip(mine, yours)) if x != y and IF_KIND.match(x[x.index("[") + 1:-1])), None)
             if first is not None:
                 out.add("".join(mine[:first + 1]).replace("deploymentInfo.", "", 1))
     return sorted(out)

@@ -170,6 +170,11 @@ class CompareLayout(unittest.TestCase):
         other["deploymentInfo"]["deploymentInterfaces"][2] = {"interfaceName": "wan1", "ipAddressMask": "203.0.113.2/24", "outboundMaxBandwidth": 5000}
         self.assertEqual(cli.layout_differences(REFERENCE, other), ["deploymentInterfaces[wan0]"])
         self.assertEqual(cli.layout_differences(REFERENCE, copy.deepcopy(REFERENCE)), [])
+        per_site = copy.deepcopy(REFERENCE)
+        per_site["tunnels"] = [{"tunnelName": "zs-br1", "mtu": 1400}]
+        theirs = copy.deepcopy(per_site)
+        theirs["tunnels"][0]["tunnelName"] = "zs-br2"
+        self.assertEqual(cli.layout_differences(per_site, theirs), [])  # per-site tunnel names are values, not a different layout
 
 
 class ListLogin(unittest.TestCase):

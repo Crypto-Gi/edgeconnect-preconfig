@@ -638,7 +638,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         decisions_in.setdefault("sections", {}).setdefault(section, "all")
     order = list(default_doc)
     reference = {k: reference[k] for k in sorted(reference, key=lambda x: order.index(x) if x in order else 999)}
-    others = [] if section_modes else [prune(build(Capture(folder), []), gated_paths(args.target_release), []) for folder in args.compare or []]
+    try:
+        others = [] if section_modes else [prune(build(Capture(folder), []), gated_paths(args.target_release), []) for folder in args.compare or []]
+    except NothingToConvert as error:
+        print(error, file=sys.stderr)
+        return 2
     if others:
         mine = {p for p, _ in sheet_items(reference)}
         extra = sorted({p for o in others for p, _ in sheet_items(o)} - mine)
