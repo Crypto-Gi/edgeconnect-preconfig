@@ -243,7 +243,10 @@ def _load_env_map(dotenv_path: Optional[str] = None) -> Dict[str, str]:
 
 
 def configured_validators(dotenv_path: Optional[str] = None) -> Set[str]:
-    """Return allowed validator nicknames (from EC_VALIDATORS/orch_validators in .env, or any profile with lab/vlab in its name)."""
+    """Return allowed validator nicknames: exactly those listed in EC_VALIDATORS (or orch_validators) in .env, else none.
+
+    No name pattern allows a profile by itself (docs/decisions/0011).
+    """
     env = _load_env_map(dotenv_path)
     explicit = env.get("ec_validators") or env.get("orch_validators") or ""
     out: Set[str] = set()
@@ -252,14 +255,7 @@ def configured_validators(dotenv_path: Optional[str] = None) -> Set[str]:
             out.add(part.strip().lower())
             out.add(part.strip().lower().replace("_", "-"))
             out.add(part.strip().lower().replace("-", "_"))
-    for k, v in env.items():
-        if re.match(r"^orch_\d+$", k) and v:
-            low = v.strip().lower()
-            if any(tag in low for tag in ("lab", "vlab", "test", "sandbox")):
-                out.add(low)
-                out.add(low.replace("_", "-"))
-                out.add(low.replace("-", "_"))
-    return out or {"lab", "vlab"}
+    return out
 
 
 VALIDATORS = configured_validators()

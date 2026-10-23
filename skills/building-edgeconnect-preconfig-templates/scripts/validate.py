@@ -24,7 +24,8 @@ class Stop(Exception):
 
 def validator(nickname: str) -> Any:
     if nickname not in VALIDATORS:
-        raise Stop("{} is not a validator Orchestrator (allowed: {})".format(nickname, ", ".join(sorted(VALIDATORS))))
+        raise Stop("{} is not a validator Orchestrator (allowed: {}). To allow it, add it to EC_VALIDATORS in .env "
+                   "(comma-separated nicknames).".format(nickname, ", ".join(sorted(VALIDATORS)) or "none"))
     client = client_for(nickname)
     if "read_only" not in inspect.signature(client.request).parameters:
         raise Stop("edgeconnect_automation ApiClient.request has no read_only flag; use a checkout that includes it (branch fix/safety-sweep)")

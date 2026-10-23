@@ -522,7 +522,7 @@ def verdict(ledger: List[Dict[str, Any]]) -> str:
 
 def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: Dict[str, Any], release: str) -> str:
     lines = ["# Translation summary", "",
-             "- Toolkit: {}. If a newer version exists, refresh it (re-run setup.sh; `--refresh-skills` for the skill) and translate again before reporting gaps.".format(toolkit_version()),
+             "- Toolkit: {}. If a newer version exists, refresh it (re-run setup.sh in the install folder; it pulls main and reinstalls the skill) and translate again before reporting gaps.".format(toolkit_version()),
              "- Source: {} {} ({}), Orchestrator release {}; written for Orchestrator release {}.".format(
                  source.get("orchestrator"), (source.get("appliance") or {}).get("nePk"), (source.get("appliance") or {}).get("hostName"), source.get("release"), release),
              "- Sections written ({}): {}.".format(len(reference), ", ".join(reference) or "none"), ""]

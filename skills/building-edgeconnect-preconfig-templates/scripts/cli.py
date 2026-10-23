@@ -67,7 +67,8 @@ def safe_name(text: str) -> str:
 def check_validator(nick: str) -> None:
     if nick.lower() not in VALIDATORS:
         raise Fail("{} is not a validator Orchestrator: /validate runs only on the ones listed in EC_VALIDATORS in .env "
-                   "(now: {}). Add it there if /validate may run on it, or pass --validate-on <lab profile>.".format(nick, ", ".join(sorted(VALIDATORS))))
+                   "(now: {}). Add it there (comma-separated nicknames) if /validate may run on it, or pass --validate-on <lab profile>."
+                   .format(nick, ", ".join(sorted(VALIDATORS)) or "none"))
 
 
 def load_build(folder: Path) -> Dict[str, Any]:

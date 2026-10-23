@@ -121,12 +121,12 @@ lab_base_url=https://lab-orchestrator.example.com
 lab_api_key=YOUR_LAB_API_KEY
 # Self-signed lab certificate: pin it instead of turning checks off.
 # lab_tls_sha256=<SHA-256 fingerprint, e.g. from: openssl x509 -noout -fingerprint -sha256>
-# Orchestrators /validate may run on (a nickname containing lab, vlab, test or sandbox is allowed too)
+# Orchestrators /validate may run on: exact nicknames, comma-separated; no other profile is allowed
 EC_VALIDATORS=lab
 ```
 
 - Each profile is a nickname: `orch_N=<nick>`, `<nick>_base_url` (https only; the path defaults to `/gms/rest`) and `<nick>_api_key`. Optional: `<nick>_tls_sha256` (pin a self-signed certificate; a profile name never turns certificate checks off), `<nick>_ca_bundle=/path/to/ca.pem` (a private CA), `<nick>_api_key_header` (default `X-Auth-Token`).
-- `EC_VALIDATORS` lists the nicknames `/validate` may run on (build, variables, compare, validate, render, check). A profile whose nickname contains `lab`, `vlab`, `test` or `sandbox` is allowed too, even when it is not listed; with neither, only `lab` and `vlab` are. Name a production profile so it does not match by accident.
+- `EC_VALIDATORS` lists the nicknames `/validate` may run on (build, variables, compare, validate, render, check), exactly as named in `orch_N`. A nickname is never allowed for what it contains: a profile not listed is refused, and with `EC_VALIDATORS` unset none is allowed. `upload` does not read this list; it sends only with `--approve`.
 - `/validate` may need more than a read-only key: in testing, Orchestrator refused it (HTTP 403) for a read-only key, although nothing is saved. A read-only key is enough for capture and `list`.
 
 ### 3. Capture a Reference Appliance (Read-Only `GET`)
@@ -286,7 +286,7 @@ edgeconnect-preconfig/
 ├── skills/
 │   └── building-edgeconnect-preconfig-templates/   # <-- Lean installable skill (26 files: zero README/test bloat)
 │       ├── SKILL.md
-│       ├── VERSION                           # toolkit version (1.2.2)
+│       ├── VERSION                           # toolkit version (1.2.3)
 │       ├── references/                       # 9.6/9.7/10.0 default templates, endpoint-catalogue, known-constraints, lessons, validate-behaviour, variable-ranking.json
 │       └── scripts/                          # 16 runtime scripts (cli, capture, cache_check, translate, mappers, decisions, variables, generate, cells, render, check, validate, upload, synth, options, common)
 ├── tests/                                    # offline unit tests & maintainer lab harnesses
@@ -300,6 +300,7 @@ edgeconnect-preconfig/
 │   ├── test_no_apply.py                      # fails if any script or test calls the apply API or sets autoApply true
 │   ├── test_raw_diff.py
 │   ├── test_report.py
+│   ├── test_validators.py                    # /validate runs only on nicknames listed exactly in EC_VALIDATORS
 │   ├── test_variables.py
 │   └── harnesses/                            # corpus.py, lab_diff.py, probes.py, rank_variables.py, raw_diff.py, scan.py, suite.py
 └── dist/                                     # Pre-built archives for Claude Desktop / Cowork upload

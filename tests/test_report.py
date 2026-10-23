@@ -55,6 +55,7 @@ class Report(unittest.TestCase):
         text = translate.summary_md(ledger, {"applianceInfo": {}}, {"orchestrator": "lab", "release": "9.7.1.42046", "appliance": {"nePk": "9.NE", "hostName": "br-1"}}, "9.7.1.42046")
         self.assertIn("Toolkit: " + toolkit_version(), text)
         self.assertIn("refresh", text)
+        self.assertNotIn("--refresh-skills", text)  # setup.sh ignores it and no parser has it
         for heading in ("Toolkit errors", "Gaps", "Outside preconfig", "Owned elsewhere", "Unknown disposition", "Mapped on an assumption"):
             self.assertIn("## " + heading, text)
         self.assertIn("`x` -> `z`", text)  # an unknown disposition is shown, never hidden
