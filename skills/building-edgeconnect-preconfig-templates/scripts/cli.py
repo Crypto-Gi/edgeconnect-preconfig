@@ -194,7 +194,7 @@ def cmd_build(argv: List[str]) -> int:
     verdict = next((l.split(":", 1)[1].strip() for l in text.splitlines() if l.startswith("verdict:")), "")
     print("\nSaved {}  (/validate on {}: accepted)".format(folder, validator))
     print("  reference.yaml      the appliance as preconfig YAML")
-    print("  {:<20}the template".format(site + ".jinja2"))
+    print("  {:<19} the template".format(site + ".jinja2"))
     print("  example.csv         one row: this appliance's own values")
     print("  summary.md          what was carried and what was not; verdict: {}".format(verdict))
     print("\nNext: choose the per-site settings\n  {} variables {}\nor let other sites of the same design choose them\n  {} compare {} <site> <site>".format(PROG, folder, PROG, folder))

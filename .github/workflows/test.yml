@@ -1,0 +1,24 @@
+# Runs the offline unit tests on every pull request and push to main, on the oldest and newest supported Python.
+name: test
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  test:
+    # ubuntu-latest (26.04) has no Python 3.9 build for setup-python; 24.04 still does.
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests
+        env:
+          EC_DOTENV: /nonexistent/.env  # no Orchestrator: the tests are offline
