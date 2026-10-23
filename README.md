@@ -301,6 +301,7 @@ edgeconnect-preconfig/
 │   ├── test_raw_diff.py
 │   ├── test_report.py
 │   ├── test_validators.py                    # /validate runs only on nicknames listed exactly in EC_VALIDATORS
+│   ├── test_env_example.py                   # every .env key the scripts read is documented in .env.example
 │   ├── test_variables.py
 │   └── harnesses/                            # corpus.py, lab_diff.py, probes.py, rank_variables.py, raw_diff.py, scan.py, suite.py
 └── dist/                                     # Pre-built archives for Claude Desktop / Cowork upload
