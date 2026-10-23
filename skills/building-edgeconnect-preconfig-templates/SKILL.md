@@ -19,7 +19,7 @@ Convert an HPE Aruba EdgeConnect appliance configuration into a verified site-ty
   ```bash
   edgeconnect-preconfig capture --orchestrator lab --appliance 0.NE --role reference
   ```
-  If `edgeconnect-preconfig` is not on the PATH, give the full form with the install folder's real path: `"<install folder>/.venv/bin/python" "<install folder>/edgeconnect-preconfig/skills/building-edgeconnect-preconfig-templates/scripts/capture.py" --orchestrator lab ...`.
+  If `edgeconnect-preconfig` is not on the PATH, give the full form with the install folder's real path: `"<install folder>/.venv/bin/python" "<install folder>/edgeconnect-preconfig/toolkit/scripts/capture.py" --orchestrator lab ...`.
 - Real values only: the Orchestrator nickname (`--orchestrator`, `--validate`), real paths (quoted when they hold spaces), the real site folder and CSV. No placeholders the user has to fill in.
 - When you change `variables.csv` or the site CSV, that is an edit, not a command: name the file and each changed cell (row, column, old value to new value), then show the command that re-runs with it.
 - An upload command with `--approve` is shown only after the user approved the validation table.

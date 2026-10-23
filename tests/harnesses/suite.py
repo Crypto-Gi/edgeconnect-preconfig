@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "toolkit" / "scripts"))
 from common import DEFAULT_TEMPLATES_DIR, WORK_DIR, load_yaml, parse_yaml, utc_stamp, write_json  # noqa: E402
 from generate import generate  # noqa: E402
 from options import extract  # noqa: E402

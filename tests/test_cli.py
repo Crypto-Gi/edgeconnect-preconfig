@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(ROOT / "toolkit" / "scripts"))
 sys.path.insert(0, str(ROOT / "tests" / "harnesses"))
 import cli  # noqa: E402
 from generate import generate  # noqa: E402

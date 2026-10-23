@@ -8,7 +8,7 @@ import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "scripts"))
 from common import ConfigurationError, TransportError, client_for  # noqa: E402  guard-ok: scripts are imported after the sys.path insert, as in the other test modules
 
 

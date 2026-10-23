@@ -1,0 +1,3612 @@
+# Preconfiguration Template for Appliance Setup
+# If any fields aren't needed then remove them.
+  # softwareVersion - Version of the software to upgrade the appliance to,
+  #                   this will happen before the rest of the preconfiguration
+  #                   is applied. The valid versions to use can be seen in the
+  #                   "Appliance Upgrade" dialog in Orchestrator
+  #                   Value: string representation of the software version.
+  #                          ex: "8.4.0.0_12345"
+  # hostname    -     Hostname to set for this appliance
+  #                   Value: string with maximum 60 characters, optional
+  # group -          The group in the Orchestrator tree into which
+  #                  this appliance should be added
+  #                  Value: Orchestrator tree group name, required
+  # site  -       Name of the site where this appliance resides.
+  #               Site name is mainly used to prevent tunnels from being built
+  #               between appliances with the same site name
+  #               Value: any string, optional, default empty
+  #
+  # clusterProfile - Cluster Profile which will be used to form cluster between
+  #                   appliances in the same site.
+  #
+  # networkRole - Role that appliance plays in the network, specifically
+  #              tunnel topology. Appliances designated as "hub"s can serve
+  #              as hubs in an overlay topology. Appliances designated as "nrhub"s
+  #              can serve as hubs in an overlay topology but do not re-advertise
+  #              routes learned from other regions or spokes within the current region.
+  #              Appliances designated as "non-hub"s cannot serve as hubs in an overlay topology.
+  #              Value: "non-hub", "hub", "nrhub". required
+  #
+  # region -       Region to which appliance belongs, if applicable.
+  #                This applies when configuring a multi-region
+  #                topology for the SD-WAN.
+  #                Value: valid region name, optional, default without region
+  #
+  # location -    Location information associated with deployed appliance.
+  #               These are put into the appliance SNMP configuration.
+  #               This section is required.
+  #               Location comprises the following key/value pairs:
+  #   address -   Address 1
+  #                 Value: any string, optional, default empty
+  #   address2 -  Address 2
+  #                 Value: any string, optional, default empty
+  #   city    -   City
+  #                 Value: any string, optional, default empty
+  #   state   -   State
+  #                 Value: any string, optional, default empty
+  #   zipCode -   Zip Code
+  #                 Value: any string, optional, default empty
+  #   country -   Country
+  #                 Value: any string, optional, default empty
+  #
+  #   latitude -  Latitude
+  #                 Value: decimal degrees (eg:36.7), optional, default empty
+  #   longitude - Longitude
+  #                 Value: decimal degrees (eg:36.7), optional, default empty
+  # Both latitude and longitude must be specified if used, not allow just single
+  # one specified, and they take precedence over the address.
+  #
+  # contact -   Contact info, used primarily for notifications.
+  #             This section is required.
+  #             Contact comprises the following key/value pairs:
+  #   name  -       Contact name
+  #                   Value: any string, optional, default empty
+  #   email -       Contact email
+  #                   Value: any string, optional, default empty
+  #   phoneNumber - Contact phone number
+  #                   Value: any string, optional, default empty
+  #
+  # Post-approval behavior: replace
+applianceInfo:
+  softwareVersion:
+  hostname: Appliance-Hostname
+  group: Group 1
+  site: site1
+  clusterProfile:
+  networkRole: non-hub
+  region:
+  location:
+    address: 2100 Moorpark Ave
+    address2:
+    city: San Jose
+    state: California
+    zipCode: 94088
+    country: US
+    latitude: 36.7
+    longitude: 119.4
+  contact:
+    name: sjcc.edu
+    email: school@sjcc.edu
+    phoneNumber: "(408) 298-2181"
+# end of appliance info
+
+# Template groups to associate with appliance.
+# If no templates needed, remove this section
+  # groups -  list of template groups.
+  #           order of the list doesn't matter as Orchestrator
+  #          will decide templates application order
+  #          Value: list of template groups names
+  #
+  # Post-approval behavior: replace
+templateGroups:
+  groups:
+    - Default Template Group
+# end of template group
+
+# Preconfiguration Template for associating Business Intent Overlays
+  # overlays - list of overlays to be applied to appliance,
+  #             Overlays must be already defined in Orchestrator
+  #             Value: list of overlays names
+  #
+  # Post-approval behavior: merge
+businessIntentOverlays:
+    overlays:
+      - RealTime
+      - CriticalApps
+      - BulkApps
+      - DefaultOverlay
+# end of Business Intent Overlays section
+
+
+
+# Preconfiguration Template for Deployment
+  # deploymentMode - deployment mode to set for this appliance
+  #                  Value: "inline-router" is the only valid value
+  #                  This field is optional, default "inline-router"
+  # serverPerSegment - flag to set Distinct DHCP relay server per segment (true) or Common DHCP relay server (false).
+  #                  Value: [true, false], optional, default false
+  # totalOutboundBandwidth - total outbound system bandwidth in Kbps
+  #                          Value: integer[1-100,000,000], required
+  # totalInboundBandwidth - total inbound system bandwidth in Kbps
+  #                         Value: integer[1-100,000,000], required
+  # ipsecUdpPort         - customized port number used to build ipsec UDP
+  #                        tunnels originating from appliance
+  #                       Value : [1-65535], optional, default:12000
+  #                       NOTE: If configuring EdgeHA ensure that the
+  #                             IPsec UDP port is configured with a
+  #                             unique value per peer.
+  #                             example 12000 for EC-1 and 12010 for EC-2.
+  # passThroughShapedTraffic - this subsection is optional
+  #   outboundMaxBandwidth - maximum outbound bandwidth in Kbps to shape
+  #                          pass-through tunnel traffic
+  #                          Value: integer[0-10,000,000], Optional
+  #                          Default: 10000000
+  #
+  # deploymentInterfaces  - deployment interfaces
+  #                         Value: array of interfaces
+  #                         This subsection is required
+  #
+  #  interfaceName - interface name, If interface is a VLAN interface,
+  #                   append VLAN number to interface name.
+  #                   For example, lan0.100, or wan1.22
+  #                    Value:[wan0, wan1, wan2, lan0, lan1, lan2, tlan0,
+  #                    tlan1, twan0, twlan0, blan0, blan1, bwan0, bwan1]
+  #                   This field is required
+  #
+  #  interfaceLabel - interface label from Orchestrator interface labels
+  #                   list to assign to this interface
+  #                     Value: string, required
+  #  interfaceType    - the side of network this interface is on.
+  #                    Value: [lan,wan], required
+  #  interfaceComment - comment regarding this interface
+  #                      Value: any string, optional, default empty
+  #  addressingMode - the addressing mode which should be considered for this interface
+  #                      Value: [static, dhcpv4, dhcpv6, slaac], optional, default empty
+  #                   in case of dhcpv4, dhcpv6 and slaac, ipAddressMask and nextHop should be left empty
+  #
+  #                   Dual Stack example for dhcpv4 and dhcpv6
+  #
+  #                    - interfaceName: wan1
+  #                       interfaceLabel: INET
+  #                       interfaceType: wan
+  #                       addressingMode: dhcpv4
+  #                       ipAddressMask:
+  #                       nextHop:
+  #                       inboundMaxBandwidth: 5000
+  #                       outboundMaxBandwidth: 5000
+  #                       firewallMode: statefulSNAT
+  #                       behindNAT: "none"
+  #
+  #                    - interfaceName: wan1
+  #                       interfaceLabel: INET1
+  #                       interfaceType: wan
+  #                       addressingMode: dhcpv6
+  #                       ipAddressMask:
+  #                       nextHop:
+  #                       inboundMaxBandwidth: 5000
+  #                       outboundMaxBandwidth: 5000
+  #                       firewallMode: statefulSNAT
+  #                       behindNAT: "none"
+  #
+  #                    Dual stack with dhcpv6 and slaac is an invalid combination.
+  #                    With vlan greater than zero, we cannot have dual stack configuration.
+  #
+  #
+  #  ipAddressMask  -  IP/mask, in x.x.x.x/x format or x:y::z/w format
+  #                    leave this field empty if this interface
+  #                    uses DHCP to obtain IP address
+  #                    value: IPv4/IPv6 format
+  #                    required for lan interfaces only
+  #
+  #  nextHop        -  IP/mask, in x.x.x.x/x format or x:y::z/w format
+  #                    value: IPv4/IPv6 format
+  #                    required for wan interfaces only
+  #  inboundMaxBandwidth -  maximum shaped inbound bandwidth in Kbps
+  #                         Value: integer[0-100,000,000, exclusive]
+  #                         required for wan interfaces only
+  #  outboundMaxBandwidth - maximum shaped outbound bandwidth in Kbps
+  #                         Value: integer[0-100,000,000, exclusive]
+  #                         required for wan interfaces only
+  #  firewallMode - firewall mode
+  #                 Value:[All,stateful,statefulSNAT,harden]
+  #                 required for wan interfaces only
+  #  behindNat   -  field to config NAT settings
+  #                 Value: "auto" (behind a NAT),
+  #                        "none" (not behind a NAT)
+  #                        Ipv4/Ipv6 address (use ip for behindNat)
+  #                 this field is optional, default is none
+  #  segment    -  name of virtual routing and forwarding
+  #                Value: valid segment name, optional, default: Default
+  #                this field only available for EdgeOS releases >= 9.0.0.0
+  #  zone       -  firewall zone
+  #                 Value: a valid zone string, optional
+  #                 default without zone
+  #  role       -  role name
+  #                 Value: a valid role string, optional
+  #                 default value - default
+  #
+  # haConfig - High availability cluster configuration
+  #            NOTE: The values of below four attributes have to be
+  #                  same otherwise HA connections would be incorrect
+  #            this subsection is optional
+  #            [haIPPool, haSubnetMask, haVlanStart, haInterfaceOrder]
+  #
+  #  haPeerSerial or haPeerHostname must be specified for the peer appliance,
+  #
+  #
+  #  You could use either haPeerSerial or haPeerHostname to peer other appliance
+  #  And for those virtual appliances which may not have serial number
+  #  please use haPeerHostname instead of haPeerSerial to peer
+  #
+  #   haPeerSerial   - serial number of the other side appliance
+  #                    Value: 12 characters
+  #   haPeerHostname - host name of the other side appliance
+  #                    Value: String
+  #                    either field 'haPeerSerial' or 'haPeerHostname'
+  #                    have to be provided
+  #
+  #   haIpPool       - addresses pool for being used to establish
+  #                  each peer vlan/physical connection.
+  #                  Value: IPv4 format, required
+  #   haSubnetMask - subnet mask for each vlan/physical interfaces
+  #                  Value: positive integer, required
+  #   hav6IpPool       - IPv6 address pool used for establishing 
+  #                  each peer vlan/physical connection.
+  #                  Value: IPv6 format, optional. 
+  #                  If not provided, Default Value: fd00::a9fe:0000/112
+  #   hav6SubnetMask - v6 subnet mask for each vlan/physical interfaces
+  #                  Value: positive integer, optional.
+  #                  If not provided, Default Value: 126
+  #   haVlanStart  - vlan start number
+  #                  Value: integer:1-4000, required
+  #   haInterface  - name of interface used to build HA connection
+  #                  Value:[wan0, wan1, wan2, lan0, lan1, lan2, tlan0,
+  #                       tlan1, twan0, twlan0, blan0, blan1, bwan0, bwan1]
+  #                  this field is required
+  #
+  #   haInterfaceOrder - list of interface labels used to identify
+  #                  which interfaces need creating HA connection.
+  #                  all wan side labels of either side appliance
+  #                  have to be included
+  #                  Value: labels concatenated with comma
+  #                  this field is required
+  #   haPeerInterfaceInfo - submodule to config specific attributes
+  #                         wan side labels used for the other side appliance
+  #     interfaceLabel  - wan label of the other side appliance
+  #                       Value: string, required
+  #     outbound        - size of outbound bandwidth
+  #                       Value: positive integer, required
+  #     inbound         - size of inbound bandwidth
+  #                       Value: positive integer, required
+  #  segment    -  name of virtual routing and forwarding
+  #                Value: valid segment name, optional, default: Default
+  #                this field only available for EdgeOS releases >= 9.0.0.0
+  #     zone            -  firewall zone
+  #                       Value: a valid zone string, optional
+  #                       default without zone
+  #     ipVersion       -  IP version of the HA interface
+  #                        Value: [4, 6], optional, default 4
+  #   
+  #
+  #
+  #
+  # dhcpInfo - array of DHCP server,
+  #           only available to interfaces with side set to "lan"
+  #           This section is optional.
+  #           Remove this section if DHCP feature is not needed
+  #
+  ##==========Below are options for DHCP server settings ===============##
+  #
+  #   dhcpInterfaceName - interface you want to be applied with this
+  #                       DHCP config append VLAN number to interface name.
+  #                       For example, lan0.100, or wan1.22
+  #                       Value:[wan0, wan1, wan2, lan0, lan1, lan2, tlan0,
+  #                       tlan1, twan0, twlan0, blan0, blan1, bwan0, bwan1]
+  #                       this field is required
+  #
+  #   dhcpType      -   dhcp type
+  #                     Value:[server], required
+  #   dhcpAddressMask - IPv4 dhcp address with mask
+  #                     Value:IPv4 address with mask, required
+  #   startIpAddress -  the first ip address to do allocation
+  #                     Value:IPv4 address, optional
+  #                     default would be empty if not provided
+  #   endIpAddress -    the last IP address to do allocation
+  #                     Value:IPv4 address, optional, default empty
+  #                     default would be empty if not provided
+  #   iPRanges -        Additional list of IP address pool ranges, each with a starting and ending IP address.
+  #                     Value: list of IP address ranges.
+  #                       - startIp: IPv4 address,
+  #                         endIp: IPv4 address
+  #                       - startIp: IPv4 address,
+  #                         endIp: IPv4 address
+  #                     This field is optional.
+  #   gatewayIpAddress - this is the default gateway IP address
+  #                      Value:IPv4 address, optional, default empty
+  #   dnsServers -      list of DNS server IP addresses
+  #                     Value: list of IPv4 address, optional, default empty
+  #   ntpServers -      list of NTP server IP addresses
+  #                     Value: list of IPv4 address, optional, default empty
+  #   netbiosNameServers - list of NetBIOS name server IP addresses
+  #                        Value:list of IPv4 address, optional, default empty
+  #   netbiosNodeType - NetBIOS node type
+  #                       Value:  B - Broadcast
+  #                               P - Peer
+  #                               M - Mixed
+  #                               H - Hybrid
+  #                     This field is optional, default is B
+  #   maximumLease - number in seconds, expired time for addresses allocated
+  #                   Value: positive integer, range between 1-2147483647, optional, default:172800
+  #   defaultLease - number in seconds, default expired time
+  #                   Value: positive integer, range between 1-2147483647, optional, default:86400
+  #   options     - dhcp configuration options
+  #                 which is an integer between 0 to 255
+  #                 Value: top 10 examples
+  #                        1 - subnet-mask
+  #                        4 - time-servers
+  #                        7 - log-servers
+  #                        8 - cookie-servers
+  #                        12 - host-name
+  #                        15 - domain-name
+  #                        16 - swap-server
+  #                        33 - static-routes
+  #                        69 - smtp-server
+  #                        72 - www-server
+  #                 this subsection is optional
+  #       option  -  option type, option type should be unique
+  #                   Value: 0-255, required
+  #       value   -   value of option
+  #                    Value: any string consistent with the option
+  #                         (eg, IPv4 address)
+  #                    this field is required
+  #   staticIpAssignments - static IP addresses for specific devices
+  #                          Value: list items of assignment
+  #                          this subsection is optional
+  #     hostname   -   host name
+  #                    Value: any string represented host
+  #                    This field is required
+  #     macAddress -   mac address
+  #                    Value: any string represented MAC
+  #                    This field is required
+  #     ipAddress  -   IP address
+  #                    Value: IPv4 address, required
+  #
+
+  # raInfo -  array of Router Advertisement
+  #           only available to interfaces with side set to "lan"
+  #           This section is optional.
+  #           Remove this section if RA feature is not needed
+  #
+  ##==========Below are options for Router Advertisement Configuration ===============##
+  #
+  #   raInterfaceName - interface you want to be applied with this
+  #                       RA config append VLAN number to interface name.
+  #                       For example, lan0.100, or wan1.22
+  #                       Value:[wan0, wan1, wan2, lan0, lan1, lan2, tlan0,
+  #                       tlan1, twan0, twlan0, blan0, blan1, bwan0, bwan1]
+  #                       this field is required
+  #   hoplimit      -   hop limit
+  #                     Value: [0-255], required
+  #                     default would be 255 if not provided
+  #   linkmtu      -    link mtu
+  #                     Value: [1280-9000], required
+  #                     default would be 1500 if not provided
+  #   managedflag  -    managed flag
+  #                     Value:[true, false], default false, required
+  #                    
+  #   maxinterval  -    max interval
+  #                     Value: [4-1800], required
+  #                     default would be 600 if not provided
+  #   mininterval  -    min interval
+  #                     Value: [3-1350], required
+  #                     default would be 200 if not provided
+  #   otherconfigflag  -    other config flag
+  #                         Value: [true, false], default true, required
+  #                   
+  #   reachabletime      -  reachable time
+  #                         Value: [0-3600000], required
+  #                         default would be 30000 if not provided
+  #   retranstimer      -   retranstimer
+  #                         Value: [0-4294967295], required
+  #                         default would be 1000 if not provided
+  #   routerdeflifetime -   router defined life time
+  #                         Value: [0-9000], required
+  #                         default would be 0 if not provided
+  #   routerpreference  -   router preference
+  #                         Value: [medium, high, low], required
+  #                         default would be medium if not provided
+  #   sendadv           -   Enable router advertisement
+  #                         Value:[true, false], required, default false
+  #   prefix_id         -   List of prefix id
+  #
+  #         id            -             prefix id,
+  #                                     Value: [1-64], required
+  #         autonomous    -             autonomous flag
+  #                                     Value: [true, false], default true, required
+  #         onlink        -             onlink flag
+  #                                     Value: [true, false], default true, required
+  #         prefix        -             the IPv6 prefix to advertise
+  #                                     Value: IPv6 prefix in x::/n format, required
+  #         prefixvalidlifetime     -   prefix valid lifetime
+  #                                     Value: [0-4294967295], required
+  #                                     default would be 86400 if not provided
+  #         prfrdlifetime           -   preferred valid lifetime
+  #                                     Value: [0-4294967295], required
+  #                                     default would be 14400 if not provided
+
+  # dhcpHA - configure the following settings to apply to your
+  #               DHCP failover server (applicable for EdgeHA deployments)
+  #               DHCP server settings must match on both ECs.
+  #               Failover settings options only need to be configured
+  #               once per physical interface.
+  #               Failover Settings are shared by all VLANs on a physical interface
+  #               NOTE: If multiple LAN interfaces are defined with the same
+  #               dhcpFailoverRole specified, only the last one will apply.
+  #   dhcpFailoverRole   - config as either Primary or Secondary server.
+  #                     Value:["primary", "secondary"], required
+  #   ipAddress       - the IP address of the LAN interface
+  #                     supporting the Primary role
+  #                     Value:IPv4 address, required
+  #   ipAddressPort   - the port number of the LAN interface
+  #                     supporting the Primary role
+  #                     Value: [1-65535], required
+  #   peerIpAddress   - the IP address of the DHCP peer
+  #                     supporting the Secondary role
+  #                     Value:IPv4 address, required
+  #   peerIpAddressPort   - the port number of the DCHP peer
+  #                       supporting the Secondary role
+  #                       Value: [1-65535], required
+  #   maxResponseDelay   - seconds the DHCP server may pass without receiving
+  #                       a message from its failover peer before it assumes
+  #                       the connection has failed.
+  #                       Value: [0-4294967295], optional, default: 10
+  #   maxUnackedUpdates   - the maximum BNDUPD messages that can be sent
+  #                         before it receives a BNDACK from the local system
+  #                         Value: [0-4294967295], optional, default: 10
+  #   loadBalanceMaxSeconds   -  allows you to configure a cutoff after which
+  #                           load balancing is disabled. The cutoff is based
+  #                           on the number of seconds since the client sent
+  #                           its first DHCPDISCOVER or DHCPREQUEST message.
+  #                           Value: [0-4294967295], optional, default:5
+  #   mclt   -            maximum lease time in seconds allowed
+  #                       while out of contact with peer
+  #                       Value: [1-4294967295], optional, default:3600
+  #   split   -           a way to determine which peer (primary/secondary)
+  #                       should process the DHCP requests.
+  #                       A value of 128 puts both Primary and Secondary into
+  #                       load balancing mode ( 50%/50%).
+  #                       A value of 256 makes Primary take 100% of the load.
+  #                       A value of 0 makes Secondary take 100% of the load.
+  #                       Value: [0-256], optional, default:128
+  #  foRelationshipName -    failover relationship name
+
+  ##==========Below are options for DHCP relay settings ===============##
+  #
+  #   dhcpInterfaceName - interface you want to be applied with this
+  #                       DHCP config append VLAN number to interface name
+  #                       For example, lan0.100, or wan1.22
+  #                       Value:[wan0, wan1, wan2, lan0, lan1, lan2, tlan0,
+  #                       tlan1, twan0, twlan0, blan0, blan1, bwan0, bwan1]
+  #                       this field is required
+  #
+  #   dhcpType      -   dhcp type
+  #                     Value:[relay], required
+  #   dhcpProxyServers - array of DHCP IP address
+  #                       Value: IPv4 address
+  #                       this field is required
+  #   enableOptions82  - policy, only valid when dhcpType="relay"
+  #                      Value:[true, false], optional, default false
+  #                      Note: If set to true, at least any one of the
+  #                      option82SubOptions must also be true.
+  #                      These option82SubOptions will not be pushed to appliances
+  #                      running below version 9.5.1.0, but at least one must
+  #                      still be set to true in order to pass preconfig validation.
+  #   options82Policy  - policy, only valid type="relay"
+  #                       Values: [append,replace,forward,discard]
+  #                       this field is optional, default append
+  #   option82SubOptions1  - Determine whether option 82 sub-option 1 enabled
+  #                      Value:[true, false], optional, default false
+  #   option82SubOptions5  - Determine whether option 82 sub-option 5 enabled
+  #                      Value:[true, false], optional, default false
+  #   option82SubOptions10  - Determine whether option 82 sub-option 10 enabled
+  #                      Value:[true, false], optional, default false
+  #   option82SubOptions11  - Determine whether option 82 sub-option 11 enabled
+  #                      Value:[true, false], optional, default false
+  #   option82SubOptions150  - Determine whether option 82 sub-option 150 enabled
+  #                      Value:[true, false], optional, default false
+  #   option82SubOptions151  - Determine whether option 82 sub-option 151 enabled
+  #                      Value:[true, false], optional, default false
+  #   option82SubOptions152  - Determine whether option 82 sub-option 152 enabled
+  #                      Value:[true, false], optional, default false
+  #                      Note: These option82SubOptions are not explicitly configurable for 
+  #                      appliances running below version 9.5.1.0
+  #
+  # Post-approval behavior: replace
+deploymentInfo:
+  deploymentMode: inline-router
+  serverPerSegment: false
+  totalOutboundBandwidth: 200000
+  totalInboundBandwidth: 200000
+  ipsecUdpPort: 12000
+  passThroughShapedTraffic:
+    outboundMaxBandwidth: 10000000
+
+  deploymentInterfaces:
+    - interfaceName: lan0.100
+      interfaceLabel: Voice
+      interfaceType: lan
+      interfaceComment: lan interface
+      ipAddressMask: 198.168.0.1/24
+      nextHop: 198.168.0.11
+      segment: Default
+      zone:
+      role:
+
+    - interfaceName: lan0.71
+      interfaceLabel: Data
+      interfaceType: lan
+      ipAddressMask: 198.168.10.1/24
+      nextHop: 198.168.10.9
+
+    - interfaceName: lan1
+      interfaceLabel: Data
+      interfaceType: lan
+      ipAddressMask: 2000::01/64
+      nextHop: 
+
+    - interfaceName: wan0
+      interfaceLabel: MPLS1
+      interfaceType: wan
+      interfaceComment: wan interface
+      ipAddressMask: 198.168.0.2/24
+      nextHop: 198.168.0.3
+      outboundMaxBandwidth: 5000
+      inboundMaxBandwidth: 5000
+      firewallMode: statefulSNAT
+      behindNat: auto
+
+    - interfaceName: wan0.100
+      interfaceLabel: INET1
+      interfaceType: wan
+      ipAddressMask: 198.168.10.2/24
+      nextHop: 198.168.10.3
+      outboundMaxBandwidth: 5000
+      inboundMaxBandwidth: 5000
+      firewallMode: statefulSNAT
+      behindNat: 198.168.10.11
+
+  haConfig:
+    haPeerSerial: 001BBC094846
+    haPeerHostname: ApplianceB
+    haIpPool: 169.254.1.0/24
+    haSubnetMask: 30
+    hav6IpPool: fd00::a9fe:0000/112
+    hav6SubnetMask: 126
+    haVlanStart: 100
+    haInterface: wan2
+    haInterfaceOrder: MPLS2,INET2,MPLS1,INET1
+    haPeerInterfaceInfo:
+    - interfaceLabel: MPLS2
+      outbound: 7001
+      inbound: 7000
+      segment: Default
+      zone:
+      ipVersion: 4
+    - interfaceLabel: INET2
+      outbound: 5001
+      inbound: 5000
+      segment: Default
+      zone:
+      ipVersion: 4
+
+  dhcpInfo:
+    - dhcpInterfaceName: lan0.100
+      dhcpType: server
+      dhcpAddressMask: 198.168.0.0/24
+      startIpAddress: 198.168.0.10
+      endIpAddress: 198.168.0.100
+      iPRanges:
+        - startIp: 198.168.0.101
+          endIp: 198.168.0.110
+        - startIp: 198.168.0.111
+          endIp: 198.168.0.120
+      gatewayIpAddress: 198.168.0.1
+      dnsServers:
+        - 1.1.1.1
+        - 8.8.8.8
+      ntpServers:
+        - 192.168.0.90
+      netbiosNameServers:
+        - 192.168.0.0
+      netbiosNodeType: B
+      maximumLease: 7200
+      defaultLease: 600
+      options:
+        - option: 1
+          value: 255.255.255.0
+      staticIpAssignments:
+        - hostname: google
+          macAddress: 00:25:96:FF:FE:12
+          ipAddress: 198.168.0.7
+      dhcpHA:
+        dhcpFailoverRole: primary
+        ipAddress: 198.168.0.0
+        ipAddressPort: 647
+        peerIpAddress: 198.168.10.0
+        peerIpAddressPort: 647
+        mclt: 3600
+        split: 128
+        maxResponseDelay: 10
+        maxUnackedUpdates: 10
+        loadBalanceMaxSeconds: 5
+        foRelationshipName: dhcp-failover-lan0
+
+    - dhcpInterfaceName: lan0.71
+      dhcpType: relay
+      dhcpProxyServers:
+        - 192.168.4.11
+        - 192.168.4.11
+      enableOptions82: true
+      options82Policy: forward
+      option82SubOptions1: true
+      option82SubOptions5: true
+      option82SubOptions10: true
+      option82SubOptions11: true
+      option82SubOptions150: false
+      option82SubOptions151: true
+      option82SubOptions152: true
+  raInfo:
+    - raInterfaceName: lan1
+      hoplimit: '255'
+      linkmtu: '1500'
+      managedflag: false
+      maxinterval: '600'
+      mininterval: '200'
+      otherconfigflag: true
+      reachabletime: '30000'
+      retranstimer: '1000'
+      routerdeflifetime: '1800'
+      routerpreference: medium
+      sendadv: false
+      prefix_id:
+      - id: 1
+        autonomous: true
+        onlink: true
+        prefix: 3001::/64
+        prefixvalidlifetime: 86400
+        prfrdlifetime: 14400
+      - id: 3
+        autonomous: false
+        onlink: true
+        prefix: 3002::/64
+        prefixvalidlifetime: 0
+        prfrdlifetime: 0
+# end of deployment info
+
+# Preconfiguration Template for DHCP Manager - Address pool
+##==========Below are options for DHCP address pool settings ===============##
+#
+#   dhcpAddressMask - IPv4 dhcp address with mask
+#                     Value:IPv4 address with mask, required
+#   scopeName -       Socpe name of the address pool
+#                     Value: default empty
+#                     default would be empty if not provided
+#   iPRange -         Additional list of IP address pool ranges, each with a starting and ending IP address.
+#                     Value: list of IP address ranges.
+#                       - ipStart: IPv4 address,
+#                         ipEnd: IPv4 address
+#                       - ipStart: IPv4 address,
+#                         ipEnd: IPv4 address
+#                     This field is optional.
+#   gatewayIp  -      This is the default gateway IP address
+#                      Value:IPv4 address, optional, default empty
+#   dnsServers -      List of DNS server IP addresses
+#                     Value: list of IPv4 address, optional, default empty
+#   ntpServers -      List of NTP server IP addresses
+#                     Value: list of IPv4 address, optional, default empty
+#   netbiosNameServers - List of NetBIOS name server IP addresses
+#                        Value:list of IPv4 address, optional, default empty
+#   netbiosNodeType - NetBIOS node type
+#                       Value:  B - Broadcast
+#                               P - Peer
+#                               M - Mixed
+#                               H - Hybrid
+#                     This field is optional, default is B
+#   maxLeaseTime - Number in seconds, expired time for addresses allocated
+#                   Value: positive integer, range between 1-2147483647,  optional, default:172800
+#   defaultLeaseTime - Number in seconds, default expired time
+#                   Value: positive integer, range between 1-2147483647, optional, default:86400
+#   options     - DHCP configuration options
+#                 which is an integer between 0 to 255
+#                 Value: top 10 examples
+#                        1 - subnet-mask
+#                        4 - time-servers
+#                        7 - log-servers
+#                        8 - cookie-servers
+#                        12 - host-name
+#                        15 - domain-name
+#                        16 - swap-server
+#                        33 - static-routes
+#                        69 - smtp-server
+#                        72 - www-server
+#                  This subsection is optional
+#       option  -  Option type, option type should be unique
+#                   Value: 0-255, required
+#       value   -   Value of option
+#                    Value: any string consistent with the option
+#                         (eg, IPv4 address)
+#                    This field is required
+dhcpRemoteAddressPoolConfig:
+  dhcpAddressMask: 50.1.1.0/24
+  scopeName: ""
+  ipRange:
+    - ipStart: 50.1.1.1
+      ipEnd: 50.1.1.10
+  gatewayIp: 50.1.1.255
+  dnsServers:
+    - 1.1.1.1
+    - 8.8.8.8
+  ntpServers:
+    - 50.1.1.90
+  netbiosNameServers:
+    - 50.1.1.0
+  netbiosNodeType: B
+  maxLeaseTime: 172800
+  defaultLeaseTime: 86400
+  options:
+    - option: 1
+      value: 255.255.255.0
+# end of DHCP address pool
+
+# Preconfiguration Template for ecLicensing
+ecLicensing:
+  # this ecLicensing section is mandatory for enterprise EC licensed models.
+  # For VX/NX appliances, please remove the
+  # whole section as this is not needed.
+  # To configure appliance EC license account name/key,
+  # either set useDefaultAccount to true to use
+  # the default EC account that is configured on the Orchestrator,
+  # or set useDefaultAccount to false
+  # and specify the accountName and accountKey.
+  useDefaultAccount: true
+
+  # uncomment the following and provide a valid account name/key
+  # if above useDefaultAccount is set to false
+  # accountName: <name>
+  # accountKey: <key>
+
+  # There are three types of EC licenses, each of which employs
+  # a different license configuration schema.
+  # Note: bandwidth value for bandwidthLevel and Boost
+  # are represent bidirectional
+  # bandwidth, and applies to both inbound and outbound directions
+
+  # for EC-Enterprise licensing, bandwidth Level and boost both
+  # need to be configured
+  #
+  # NOTE that the allowed total outbound bandwidth will be limited by the
+  # bandwidth license currently in effect. Simultaneous changes to total
+  # outbound bandwidth and licensed bandwidth is not supported.
+  # Changing the licensed bandwidth to a new value should be done first,
+  # before changing the total outbound bandwidth
+  #
+  # bandwidthLevel: valid values are mini, base or plus or,
+  #    a bandwidth tier level (mini, base, plus)
+  #    license types represent (<50Mbps, <200Mbps, and <1Tbps) respectively.
+  #    plus licensing enables bandwidth configuration >200Mbps and up to 10Gbps,
+  #    subject to hardware or VM limitations.
+  #    bandwidthLevel can also be used to specify enterprise bandwidth tiers.
+  #    Valid values include
+  #    {50000, 200000, 500000, 1000000, 2000000, unlimited} (kbps)
+  #    which represent 50M, 200M, 500M, 1G, 2G, and 1T,
+  #    subject to hardware or VM limitations.
+  #    Optional, default is base
+  #
+  # boost: valid value is between 0 to 10000000 (kbps)
+  #        Optional, default is 0
+  # Example - Enterprise with 'Base' bandwidthLevel and 100000Kbps Boost
+  #           bandwidth
+  # bandwidthLevel: base
+  # boost: 100000
+
+  # for service provider EC-Term licensing, the serial number of the license
+  # needs to be configured
+  #     licenseSerial: <serial number for license asset>
+  # Example - Term license serial number assignment
+  # licenseSerial: <to-be-added-with-real-serial??>
+
+  # for service provider EC-Metered licensing, the max system bandwidth
+  # needs to be configured, representing the metered bandwidth level.
+  # Boost bandwidth can be configured here via the 'boost' keyword
+  #    boost: valid value is between 0 to 50000000 (Kbps)
+  # Example - Metered with 50000Kbps boost bandwidth
+  # boost: 50000
+
+  #  the following is an uncommented example of EC-Enterprise licensing
+  bandwidthLevel: base
+  boost: 100000
+  #
+
+  # EC-Enterprise Feature License - A list of feature licenses where each feature comprises the following key/value:
+  #      featureKey - required feature key from given list below. Only one selection from each feature bracket group is allowed.
+  #                   2 types of feature licenses are supported
+  #                     - counter type: a feature license that is characterized by a specific discrete quantity of licenses,
+  #                       generally assigned to a specific appliance in order to enable the feature.
+  #                     - quantity type: a feature license that is characterized by a pooled quantity of some resource, such as bandwidth.
+  #
+  #                   The list below identifies what featureKeys are supported in which release:
+  #                       Release        Feature Group              Feature Key            License Type            License Model
+  #                       9.1.0.0        Advanced Security          "adv_sec_standard"     counter type            Traditional
+  #                       9.1.0.0        Advanced Security          "adv_sec_unlimited"    counter type            Traditional
+  #                       9.1.0.0        Dynamic Threat Defense     "adv_sec_dtd"          counter type            AAS Tiered (Foundation/Advanced/On-Prem)
+  #
+  #                   Note: for each appliance, only 1 feature key can be assigned from a specific Feature Group.
+  #                   Do not create multiple entries for the same Feature Group.
+  #                   Example: for the feature group Advanced Security, only 1 license can be configured, either with "adv_sec_standard" or "adv_sec_unlimited" as the value.
+  #
+  #      featureEnable - required for counter type features
+  #                      Accepted values: "true" (enable) or "false" (disable)
+  #      featureQuantity - required for quantity type features
+  #                        Value must be greater than 0. Anything less than zero will be considered disabled
+  #
+  # Example of two feature licenses:
+  # ecFeatureLicenses:
+  #   - featureKey: 'adv_sec_standard'
+  #     featureEnable: true
+  #   - featureKey: 'zfw_bandwidth'
+  #     featureQuantity: 100000
+  #
+  # NOTE: Currently we only have counter type features available.
+
+  ecFeatureLicenses:
+
+  #(perform "replace" operation whenever applied), Any missing optional fields
+  #will have their default value applied to the existing config.
+# end of ecLicensing
+
+
+# Preconfiguration Template for Local Routes
+  # This section is optional, if this section is missing, appliance will
+  # have the following defaults:
+  #   useSharedSubnetInfo - Use SD-WAN Fabric Learned Routes
+  #                         among Silver Peak appliances
+  #                         Value: [true, false], optional, default true
+  #   advertiseLocalLanSubnets  - advertise local lan side subnets
+  #                               Value: [true, false], optional, default false
+  #   advertiseLocalWanSubnets  - advertise local wan side subnets
+  #                               Value: [true, false], optional, default false
+  #   localMetric - Routing metric for automatically added routes. This value can
+  #                 be between 0 and 100 and is the metric assigned to subnets of
+  #                 interfaces on this appliance. The lower the metric, the high-
+  #                 er the priority.
+  #                 Value: range between 0-100, required, default: 50
+  #   localCommunities - as-number:community-value, where each value is a
+  #                      decimal number. The AS values of 0 and 65,535 are
+  #                      reserved, as are all of the community values within
+  #                      those AS numbers. Max of 3, comma separated.
+  #                      Value: string, optional, default empty
+  #   redistOspfToSubnetShare - Redistribute OSPF routes to SD-WAN Fabric.
+  #                             Value: [true, false](enable/disable), optional,
+  #                             default: false
+  #   ospfRedistMetric - Metric for redistributing OSPF routes to SD-WAN Fabric.
+  #                      Metric is distributed when enableRedistOspfToSubnetShare
+  #                      is enabled.
+  #                      Value: integer [0, 4294967295], optional, default: 0
+  #   ospfRedistTag - Filter Tag for redistributing OSPF routes to SD-WAN Fabric.
+  #                   Tag is distributed when enableRedistOspfToSubnetShare
+  #                   is enabled
+  #                   Value: integer [0, 4294967295], optional, default: 0
+  #   filterRoutesWithLocalASN  - a flag to filter routes from SD-WAN Fabric
+  #                               with matching local ASN
+  #                               Value: [true, false], optional, default false
+  #                           this field only available for EdgeOS releases >=8.3.1
+  #   redistToSDwanFabricRouteMap - name of route map redistribute to SD-WAN fabric
+  #                   Value:route map, optional, default: default_rtmap_to_subsh
+  #                   (supported for SW version >= 8.2.1)
+  #
+  #   routes - A list of routes, each route comprises the following key/value
+  #      routeIpSubnet - Subnet/mask for this route entry, support IPv4 and IPv6.
+  #                      SubnetMask and nextHop should be of same IP version.
+  #                      Value: Valid IPv4/IPv6 address and mask,required
+  #
+  #      nextHop - Next-hop IP address, support IPv4 and IPv6.
+  #                SubnetMask and nextHop should be of same IP version.
+  #                Value: Valid IPv4/IPv6 address, optional
+  #
+  #     interfaceName - The interface for outgoing traffic.
+  #                     Values: Valid datapath interface name for eg lan0, wan0
+  #                             This field is optional, default empty
+  #
+  #      metric  -  A value between 0 and 100. When an appliance finds more than
+  #                 one peer appliance advertising the longest matching subnet
+  #                 (for example, in a high availability deployment), it chooses
+  #                 the peer that advertises the subnet with the lowest metric
+  #                 value - that is, lower metric values have priority.
+  #                 Value: range between 0-100, optional, default: 50
+  #
+  #      advertise - Whether to share this subnet information with peers.
+  #                  Value: [true,false], optional, default: false
+  #      advertiseToBgp - Advertise to BGP peers.
+  #                       Value: [true,false], optional, default: false
+  #      advertiseToOspf - Advertise to OSPF peers.
+  #                       Value: [true,false], optional, default: false
+  #      tag - Tag
+  #            Value: [ANY, FROM_LAN,FROM_WAN], optional, default empty
+  #
+  #      zone - Firewall zone associated with the route
+  #             Value: a valid zone string, optional, default empty means none.
+  #             Compatibility: ECOS 9.1.0 and above
+  #
+  #      comment - Comment
+  #                Value: any string, optional, default empty
+  #
+  #      routeLabel  -  Specify the Route Label name for this static route.
+  #                 The same Route Label name can be used in an IPSLA
+  #                 rule to mark the route DOWN when the IPSLA rule is down.
+  #                 value: string, optional
+  #
+  # Post-approval behavior: replace
+
+localRoutes:
+  useSharedSubnetInfo: true
+  advertiseLocalLanSubnets: false
+  advertiseLocalWanSubnets: false
+  localMetric: 50
+  localCommunities: 100:101,102:103
+  redistOspfToSubnetShare: false
+  ospfRedistMetric: 0
+  ospfRedistTag: 0
+  filterRoutesWithLocalASN: false
+  redistToSDwanFabricRouteMap: "default_rtmap_to_subsh"
+
+  routes:
+    - routeIpSubnet: 10.1.10.0/24
+      nextHop: 192.168.1.1
+      interfaceName: lan0
+      metric: 50
+      advertise: true
+      advertiseToBgp: false
+      advertiseToOspf: false
+      tag: ANY
+      zone:
+      comment: local routes 1
+      routeLabel: Internet
+    - routeIpSubnet: 10.1.20.0/24
+      nextHop: 192.168.1.1
+      interfaceName:
+      metric: 50
+      advertise: false
+      advertiseToBgp: true
+      advertiseToOspf: false
+      tag: ANY
+      zone:
+      comment: local routes 2
+      routeLabel: Internet
+# end of Local Routes section
+
+# Preconfiguration Template for segment Local Routes
+# this module is similar to the localRoutes module.
+# but utilizes an array to configure local routes settings for each segment
+# if segmentLocalRoutes and localRoutes are present in the same YAML file,
+# then segmentLocalRoutes takes precedence and the localRoutes module is ignored.
+#
+#  segmentBgpSystems: a list to config local routes for segments
+##  segment    -  name of virtual routing and forwarding
+##                Value: valid segment name, optional, default: Default
+##                this field only available for EdgeOS releases >= 9.0.0.0
+#
+segmentLocalRoutes:
+  - segment: Default
+    useSharedSubnetInfo: true
+    advertiseLocalLanSubnets: false
+    advertiseLocalWanSubnets: false
+    localMetric: 50
+    localCommunities: 100:101,102:103
+    redistOspfToSubnetShare: false
+    ospfRedistMetric: 0
+    ospfRedistTag: 0
+    filterRoutesWithLocalASN: false
+    redistToSDwanFabricRouteMap: "default_rtmap_to_subsh"
+
+    routes:
+      - routeIpSubnet: 10.1.10.0/24
+        nextHop: 192.168.1.1
+        interfaceName: lan0
+        metric: 50
+        advertise: true
+        advertiseToBgp: false
+        advertiseToOspf: false
+        tag: ANY
+        zone:
+        comment: local routes 1
+        routeLabel: Internet
+      - routeIpSubnet: 10.1.20.0/24
+        nextHop: 192.168.1.1
+        interfaceName:
+        metric: 50
+        advertise: false
+        advertiseToBgp: true
+        advertiseToOspf: false
+        tag: ANY
+        zone:
+        comment: local routes 2
+        routeLabel: Internet
+  # end of segment Local Routes section
+
+
+# Preconfiguration Template for Management Routes
+  # This section is to configure the next-hop for management interfaces.
+  # Management routes specify the default gateways and local IP subnets for
+  # the management interfaces.
+  # This is supported on appliance running version 8.1.7 or greater
+  #
+  # routes - A list of routes, each route comprises the following key/value
+  # pairs:
+  #   - routeIpSubnet - Subnet/mask for this route entry, only support IPv4
+  #                  Value: Valid IPv4 address and mask, valid mask is 0-32
+  #                  This field is required
+  #     nextHop -    Next-hop IP address, only support IPv4
+  #                  Value: IPv4 address, required
+  #
+  #     interfaceName - Which interface you want to be applied with this
+  #                     management routes config.
+  #                     Value: Valid management interface name(eg mgmt0)
+  #                     This field is required
+  #     sourceIp - This field is optional, only support IPv4.
+  #                If the Source IP is listed as 0.0.0.0 or not specified, then
+  #                packets sent using this route use the Interface's IP address
+  #                as the Source IP address. If the Source IP lists a specific
+  #                IP address, then that IP address is used instead.
+  #                Value: IPv4 address, optional, default empty
+  #
+  #     metric - Value is positive integer, max route metric 2^24 - 1=16,777,215
+  #              Value: integer 0-16777215, optional, default: 1
+  #
+  # Post-approval behavior: merge
+managementRoutes:
+  routes:
+    - routeIpSubnet: 10.1.30.0/24
+      nextHop: 10.1.30.1
+      interfaceName: mgmt0
+      sourceIp: 0.0.0.0
+      metric: 1
+    - routeIpSubnet: 10.1.40.0/24
+      nextHop: 10.1.40.1
+      interfaceName: mgmt0
+      metric: 1
+# end of Management Routes section
+
+
+
+# Preconfiguration Template for bgp System Config
+  # Border Gateway Protocol configuration
+  #
+  # enable - Flag to enable/disable bgp
+  #         Value:[true, false](enables/disables), optional, default:true
+  # asn    - number used to identify autonomous system
+  #         Value: integer:1-4294967295, optional, default:1
+  #
+  # routerId -  IPv4 address of router id
+  #         Value:IPv4 address (eg:198.162.0.1), required
+  #
+  # enableGracefulRestart - Flag to enable/disable BGP graceful restart
+  #                         capability to Silver Peak
+  #         Value:[true, false](enables/disables), optional, default:false
+  #         Compatibility: ECOS 8.1.9.3 and above
+  #
+  # maxRestartTime -  The maximum time (in seconds)to wait for
+  #                   a graceful restart capable peer to come back
+  #                   after a peer restart or peer session failure.
+  #         Values:integer:1-3600, optional, default:120
+  #         Compatibility: ECOS 8.1.9.3 and above
+  #
+  # maxStalePathTime -  The maximum time (in seconds) following
+  #                     a peer restart that SP waits before removing stale routes
+  #                     associated with that peer.
+  #         Values:integer:1-3600(should greater than or equal to maxRestartTime),
+  #                        optional, default:150
+  #         Compatibility: ECOS 8.1.9.3 and above
+  #
+  #
+  # redistToSilverPeak - Flag to enable redistribution of  routes learned
+  #                      from BGP peers to Silver Peak peers
+  #         Value:[true, false](enables/disables), optional, default:true
+  #         Compatibility: ECOS 8.2.0.x and below
+  #
+  # propagateAsPath - Flag to allow propagating AS path learned at remote
+  #                   site to local BGP peers
+  #         Value:[true, false](enables/disables), optional, default:false
+  #         Compatibility: ECOS 8.1.9.4 and above
+  #
+  # redistOspfToBgp - Flag to control redistribution of routes from OSPF to BGP
+  #         Value:[true, false](enables/disables), optional, default:true
+  #         Compatibility: ECOS 8.1.7.3 through 8.2.0.x
+  #
+  # filterTag -  number used to filter redistributed routes to OSPF
+  #         Values:integer:0-4294967295, optional, default:0
+  #         Compatibility: ECOS 8.1.7.3 and above
+  #
+  # importRouteTarget - Import route target. Route target must be in the format ASN:ID, where either:
+  #                       1. ASN is represented with a 16 bit integer and ID is represented with a 32 bit integer, or
+  #                       2. ASN is represented with 4 32 bit integer and ID is represented with 16 bit integer
+  #                     Value: string, optional, ASN:integer:1-65535 or 1-4294967295, ID:integer:0-4294967295 or 0-65535
+  #                     Example: 65535:4294967295 or 65536:65535
+  #                     Compatibility: ECOS 9.4.1.0 and above
+  #
+  # exportRouteTarget - Export route target. Route target must be in the format of ASN:ID, where either:
+  #                       1. ASN is represented with a 16 bit integer and ID is represented with a 32 bit integer, or
+  #                       2. ASN is represented with 4 32 bit integer and ID is represented with 16 bit integer
+  #                     Value: string, optional, ASN:integer:1-65535 or 1-4294967295, ID:integer:0-4294967295 or 0-65535
+  #                     Example: 65535:4294967295 or 65536:65535
+  #                     Compatibility: ECOS 9.4.1.0 and above
+  #
+  # neighbors :  a list of neighbors
+  #   peerIpAddress - IPv4 address of the neighbor.
+  #                  Value: IPv4 address (eg:198.162.0.1), required
+  #                  Compatibility: IPV6 BGP peers are supported from ECOS 9.3.0 and above
+  #
+  #   peerAsn       - Remote Autonomous System Number(ASN) of the neighbor.
+  #                   Value:  integer:0-4294967295, required
+  #
+  #   enableImports - Flag to enable/disable importing routes of the neighbor.
+  #                   Value:[true, false](enables/disables), optional,
+  #                   default:true
+  #                   Compatibility: ECOS 8.1.3.0 through 8.2.0.x
+  #
+  #   peerType      - Peer Type of the neighbor.
+  #                   Value: [Branch,Branch-transit,PE-router]
+  #                   This field is required
+  #   peerAdjacency  - Indicates whether the peer is single-hop or multi-hop away.
+  #                    Value: [SINGLE_HOP, MULTI_HOP]
+  #                    default: SINGLE_HOP
+  #                    Compatibility: ECOS 9.2.0.0 and above
+  #
+  #   enableEVPN     - Flag to enable/disable EVPN for this peer.
+  #                    Enabling EVPN disables IPv4/IPv6 unicast routing for this peer. Only one address family is supported per BGP peer.
+  #                    Value: [true, false], optional, default: false(disable)
+  #                    Compatibility: ECOS 9.4.1.0 and above
+  #
+  #   enableNeighbor - flag to enable/disable neighbor BGP session.
+  #                     Value: [true, false], optional, default: true(enable)
+  #
+  #   localPreference - Local preference for advertised routes to the neighbor.
+  #                     Value: integer:0-4294967295, optional, default:100
+  #                     Compatibility: ECOS 8.1.6.0 through 8.2.0.x
+  #
+  #   med - Multi-Exit Discriminator to use for advertised routes to the
+  #         neighbor.
+  #                   Value: integer:0-4294967295, optional, default:0
+  #                   Compatibility: ECOS 8.1.6.0 through 8.2.0.x
+  #
+  #   asPrependCount - additional times to prepend the local AS in the AS path
+  #                     Value: integer:0-4294967295, optional, default:0
+  #                     Compatibility: ECOS 8.1.6.0 through 8.2.0.x
+  #
+  #   nextHopSelf -   Flag to decide whether appliance should advertise a PE route
+  #                   to CE using appliance as next-hop or not
+  #                   Value:[true, false], optional, default:false
+  #                   Compatibility: ECOS 8.1.9.and above
+  #
+  #  softReconfiguration - Flag to enable / disable soft-reconfiguration. Enabling
+  #                        this flag will stores received routes from peers to local bgp table.
+  #                        Value:[true, false], optional, default:false
+  #                        Compatibility: ECOS 9.1.2.and above
+  #
+  #
+  #   sourceIpInterface - interface whose IP address is used as source IP
+  #                       for this BGP neighbor
+  #                    Value: normal,loopback, virtual tunnel interface name
+  #                           (eg: lan0, 1an0.100 / lo123 / vti123),
+  #                   This field is optional, default is "any"
+  #                   Compatibility: ECOS 8.2.0.0 and above
+  #
+  #   inputMetric   - input metric of routes received from the neighbor.
+  #                   Value: integer:0-4294967295, optional, default:0
+  #                   Compatibility: ECOS 8.1.6.0 through 8.2.0.x
+  #
+  #   keepAlive -  Time in seconds to specify how frequently the device will send
+  #                 KEEP ALIVE messages to its BGP neighbors
+  #                 Value: positive integer, optional, default:30
+  #                 Compatibility: ECOS 8.1.6.0 and above
+  #
+  #   holdTime      - Time in seconds to specify how long the device will
+  #                   wait for a KEEP ALIVE or UPDATE message from a neighbor
+  #                   before concluding that the neighbor is dead
+  #                   Value:  integer:0-65535, optional, default:90
+  #                   Compatibility: ECOS 8.1.6.0 and above
+  #
+  #   password      - Password of the neighbor
+  #                   Value: any string, optional
+  #   inboundRouteMap  - name of inbound route map
+  #                   Value:route map, optional, default: default_rtmap_bgp_inbound_br
+  #                   Compatibility: ECOS 8.2.1.0 and above
+  #   outboundRouteMap - name of outbound route map
+  #                   Value:route map, optional, default: default_rtmap_bgp_outbound_br
+  #                   Compatibility: ECOS 8.2.1.0 and above
+  #
+  #   bfdEnabled       - flag to decide whether BFD should be enabled/disabled for the peer.
+  #                      If this flag is set to true, BFD should be included in this yml file.
+  #                      Value: [true, false], optional, default: false(disable)
+  #                      Compatibility: ECOS 9.2.0.0 and above
+  #
+  #   EC supports nine Route Export policies for each Peer Type.
+  #   Each policy keyword is optional, and takes a Boolean value:
+  #           - Value: (true/false, optional, default:false)
+  #    1. localConfigured       - Locally configured
+  #                               Compatibility: ECOS 8.1.3.0 through 8.2.0.x
+  #    2. learnViaSubnetSharing -  Learned via subnet sharing
+  #                               Compatibility: ECOS 8.1.3.0 through 8.2.0.x
+  #    3. learnFromBgpBranch    -  Learned from a local BGP branch peer
+  #                               Compatibility: ECOS 8.1.3.0 through 8.2.0.x
+  #    4. learnFromBgpBranchTransit - Learned from a local BGP branch-transit
+  #                                   peer
+  #                               Compatibility: ECOS 8.1.3.0 through 8.2.0.x
+  #    5. learnFromBgpPeRouter  - learned from a local BGP PE router
+  #                               Compatibility: ECOS 8.1.3.0 through 8.2.0.x
+  #    6. remoteBgp    - learned via subnet sharing, but originally from a BGP
+  #                      peer
+  #                               Compatibility: ECOS 8.1.3.0 through 8.2.0.x
+  #    7. remoteBgpBranchTransit - learned via subnet sharing,
+  #                                 but originally a BGP-transit peer
+  #                               Compatibility: ECOS 8.1.3.0 through 8.2.0.x
+  #
+  #    8. learnFromLocalOspf    - learned from a local OSPF peer
+  #                               Compatibility: ECOS 8.1.7.3 through 8.2.0.x
+  #
+  #    9. learnFromRemoteOspf   - learned from a Remote OSPF peer
+  #                               Compatibility: ECOS 8.1.7.3 through 8.2.0.x
+  #
+  # Post-approval behavior: replace
+bgpSystemConfig:
+  enable: true
+  asn: 1
+  routerId: 198.168.0.1
+  enableGracefulRestart: false
+  maxRestartTime: 120
+  maxStalePathTime: 150
+  redistToSilverPeak: false
+  propagateAsPath: false
+  redistOspfToBgp: true
+  filterTag: 0
+  importRouteTarget: 1:1
+  exportRouteTarget: 1:1
+
+  neighbors:
+    # example < rel8.2.1
+    - peerIpAddress: 198.168.0.1
+      enableImports: true
+      peerAsn: 11
+      peerType: Branch
+      enableNeighbor: true
+      localPreference: 0
+      med: 0
+      asPrependCount: 0
+      nextHopSelf: false
+      sourceIpInterface: wan1
+      inputMetric: 0
+      keepAlive: 30
+      holdTime: 90
+      password:
+      localConfigured: true
+      learnViaSubnetSharing: true
+      learnFromBgpBranch: true
+      learnFromBgpBranchTransit: true
+      learnFromBgpPeRouter: true
+      remoteBgp: true
+      remoteBgpBranchTransit: true
+      learnFromLocalOspf: true
+      learnFromRemoteOspf: true
+
+    # example with route map config >= 8.2.1
+    # IPV6 BGP peers are only supported from ECOS 9.3.0 and above
+    - peerIpAddress: 198.168.10.10
+      sourceIpInterface: wan0
+      peerAsn: 11
+      peerType: Branch-transit
+      enableNeighbor: true
+      softReconfiguration: false
+      nextHopSelf: false
+      inboundRouteMap : default_rtmap_bgp_inbound_br
+      outboundRouteMap : default_rtmap_bgp_outbound_br
+      keepAlive: 30
+      holdTime: 90
+      password:
+      enableEVPN: false
+# end of bgp System Config
+
+
+
+
+# Preconfiguration Template for segment BGP
+# this module is similar to the bgpSystemConfig module.
+# but utilizes an array to configure  bgp settings for each segment
+# if segmentBgpSystems and bgpSystemConfig are present in the same YAML file,
+# then segmentBgpSystemConfig takes precedence and the bgpSystemConfig module is ignored.
+#
+#  segmentBgpSystems: a list to config BGP settings for segments
+##  segment    -  name of virtual routing and forwarding
+##                Value: valid segment name, optional, default: Default
+##                this field only available for EdgeOS releases >= 9.0.0.0
+#
+segmentBgpSystems:
+  - segment: Default
+    enable: true
+    asn: 1
+    routerId: 198.168.0.1
+    enableGracefulRestart: false
+    maxRestartTime: 120
+    maxStalePathTime: 150
+    redistToSilverPeak: false
+    propagateAsPath: false
+    redistOspfToBgp: true
+    filterTag: 0
+    importRouteTarget: 1:1
+    exportRouteTarget: 1:1
+
+    neighbors:
+      # IPV6 BGP peers are only supported from ECOS 9.3.0 and above
+      - peerIpAddress: 198.168.0.1
+        sourceIpInterface: wan0
+        peerAsn: 10
+        peerType: Branch
+        enableNeighbor: true
+        softReconfiguration: false
+        nextHopSelf: true
+        inboundRouteMap : default_rtmap_bgp_inbound_br
+        outboundRouteMap : default_rtmap_bgp_outbound_br
+        keepAlive: 30
+        holdTime: 90
+        password:
+        enableEVPN: false
+
+      - peerIpAddress: 198.168.10.10
+        sourceIpInterface: wan1
+        peerAsn: 11
+        peerType: Branch-transit
+        enableNeighbor: true
+        softReconfiguration: false
+        nextHopSelf: false
+        inboundRouteMap : default_rtmap_bgp_inbound_br
+        outboundRouteMap : default_rtmap_bgp_outbound_br
+        keepAlive: 30
+        holdTime: 90
+        password:
+  # end of segment bgp System Config
+
+
+# Preconfiguration Template for Peer Priority
+  # When an appliance receives a Subnet with the same Metric from multiple
+  # remote or peer appliances, it uses the Peer Priority list as a tie-breaker.
+  # If a Peer Priority is not configured, then the appliance randomly distributes
+  # flows among multiple peers. The lower the number, the higher the peer's
+  # priority.
+  # peerPriorities - a list of peer priority, each peer priority comprises the
+  # following key/value pairs:
+  #   - peerName - Appliance host name
+  #                value: Cannot be empty, cannot start with -, cannot be
+  #                        duplicate with other peerPriority. Maximum 60
+  #                        characters, and contain the following items:
+  #                        lower case letter , upper case letter, a number,
+  #                        special character -
+  #                       This field is required
+  #
+  #     priority -  priority
+  #                 Value: Valid range is 1-1023, optional, default: 1
+  #
+  # Post-approval behavior: replace
+peerPriority:
+  peerPriorities:
+    - peerName: hostName1
+      priority: 1
+    - peerName: hostName2
+      priority: 2
+# end of Peer Priority section
+
+
+
+# Preconfiguration Template for Virtual Router Redundancy Protocol(VRRP)
+# In an out-of-path deployment, one method for redirecting traffic to the
+# Silver Peak appliance is to configure VRRP on a common virtual interface.
+# The possible scenarios are:
+# 1. When no spare router port is available, a single appliance uses VRRP
+#    to peer with a router (or Layer 3 switch). This is appropriate for an
+#    out-of-path deployment where no redundancy is needed.
+# 2. A pair of active, redundant appliances use VRRP to share a common, virtual
+#    IP address at their site. This deployment assigns one appliance a higher
+#    priority than the other, thereby making it the Master appliance, and the
+#    other, the Backup.
+#
+# vrrpEntries - A list of VRRP, maximum number of VRRP instances is 4 for each
+#               interface. Each VRRP comprises the following key/value pairs:
+#   - groupId - An identifier assigned to the two peers. Depending on the
+#               deployment, the group can consist of an appliance and a router
+#               (or L3 switch), or two appliances.
+#               Values: Valid range is 1-255 , optional, default: 1
+#
+#     interfaceName - The interface that VRRP is using for peering.
+#                     Values: Valid datapath interface name for eg wan0, wan0.1
+#                             This field is optional, default: wan0
+#     admin -         The options are Up (enable) and Down (disable).
+#                     Values: Up or Down, optional, default: Up
+#
+#     virtualIpAddress - The IP address of the VRRP instance. VRRP instances
+#                        may run between two or more appliances, or an
+#                        appliance and a router.
+#                        Values: IPv4 address in Version 2 and either IPv4 or IPv6 address in Version 3.
+#                        Default Values: For IPv4 address Version 2, for IPv6 address Version 3.
+#
+#     advertisementTimer - Time interval between advertisements
+#                          Value: Valid range is 1-255, optional, default: 1
+#                          For value 2, the Advertisement Timer will be in seconds, valid range is 1-255.
+#                          For value 3, the Advertisement Timer will be in centiseconds, valid range is 1-25500.
+#
+#     priority - The greater the number, the higher the priority. The appliance
+#                with the higher priority is the VRRP Master.
+#                Value: Valid range is 1-254, optional, default: 128
+#
+#     tracker - Default is false. Only one 'Tracker' can be enabled per VRRP config per appliance.
+#               Value: [true, false], optional, default: false
+#
+#     version - The options are 2 and 3.
+#               For value 2, the Advertisement Timer will be in seconds and Virtual IP will be only in IPv4 format.
+#               For value 3, the Advertisement Timer will be in centiseconds and Virtual IP will be either in IPv4 or IPv6 format.
+#
+#     preemption - Default is true. Leave this selected/enabled so that after a
+#                  failure, the appliance with the highest priority comes back
+#                  online and again assumes primary responsibility.
+#                  Value: [true, false], optional, default: true
+#
+#     authenticationString - Authentication string. This field is optional.
+#                            Value: maximum 8 characters, optional, default empty
+#                            Not supported in version 3.
+#
+#     description -   Description string. This field is optional.
+#                     Values: Maximum 64 characters, optional, default empty
+#
+#     packetTrace -   Packet Trace Enabled, default is false.
+#                     NOTE: This field is not configurable through UI
+#                     Value: true or false, optional, default: false
+#
+#     holddownTimer - Holddown Timer, default is 60sec.
+#                     NOTE: This field is not configurable through UI
+#                     Value: integer: 1-255, optional, default: 60 seconds
+#
+# Post-approval behavior: replace
+vrrp:
+  vrrpEntries:
+    - groupId: 1
+      interfaceName: lan0.100
+      admin: Up
+      virtualIpAddress: 10.1.50.10
+      advertisementTimer: 1
+      priority: 128
+      tracker: false
+      version: 2
+      preemption: true
+      authenticationString: authkey
+      description: vrrp ipv4
+      packetTrace: false
+      holddownTimer: 60
+    - groupId: 2
+      interfaceName: lan1
+      admin: Up
+      virtualIpAddress: fddd:1e1a:7f98:a045::261
+      advertisementTimer: 1
+      priority: 128
+      tracker: false
+      version: 3
+      preemption: true
+      description: vrrp ipv6
+      packetTrace: false
+      holddownTimer: 60
+# end of Virtual Router Redundancy Protocol(VRRP) section
+
+
+
+# PreConfiguration Template for  IP SLA
+# Usage: configure IP SLA rules for monitoring and taking appropriate actions
+# Syntax: array of IP SLA monitor records. Structure:
+# ipSlaRule:
+#   ruleEntries:
+#     - <entry>
+#
+# enable - flag to enable and disable the rule.
+#                 Value:[true, false] (enables/disables the rule),
+#                       This field is optional, default:true
+# comment     -  description about the rule. string value
+#                 Value: any string optional
+# samplingInterval - monitor's sampling interval. number in seconds
+#                     Value: a positive integer, optional, default:30
+# routeLabel  -  specifies the Route Label name for this IPSLA rule.
+#                 When all IPSLAs associated with a specific Route Label
+#                 are down, Static Routes associated with that Route Label
+#                 are withdrawn.
+#                 value: string, optional
+#
+# ipslaMonitor - Monitor configuration:
+#  There are four monitors available:
+#  1. interface  monitor: the operational status of a specific local interface
+#  2. ping       monitor: the reachability of a specific IPv4 address
+#  3. http/https monitor: the reachability of a specific domain/address
+#                         Compatibility: only available for version >= 8.1.8.0
+#  4. vrrp       monitor: the VRRP router state for a VRRP instance(s)
+#  monitorType   - The type of monitor
+#                  Value: [interface, ping, http/https, vrrp]
+#
+#  The key/value pairs are specific to each monitor type.
+#
+#  <interface IPSLA monitor>
+#  interfaceName    -  name of interface or interface label to be monitored.
+#                      Value: interface name (eg,lan0) or interface label
+#                             (eg,MPLS)
+#                      This field is required.
+#  <ping IPSLA monitor>
+#  ipAddress       -   IPv4/IPv6 address to be monitored.
+#                      Value: IPv4/IPv6 address (e.g., 198.162.0.1 or 9::9), required
+#
+#  interfaceName   -   name of interface or interface label to be monitored.
+#                       Value: interface(ex:lan0) or interface label(ex:MPLS)
+#                       This field is required.
+#
+#  tunnelName      -   name of passthrough tunnel. Above given interfaceName or this tunnelName fields are required fields.
+#
+#  sourceInterfaceName - name of interface. if tunnelName is specified, then this field is required field.
+#
+#  keepAlive       -   Keep alive time in seconds.
+#                      Value: positive integer, optional, default:1)
+#
+#  monitorUpThreshold -  threshold for declaring http/https server as 'up'
+#                        after X (consecutive?) successful pings.
+#                         Value: positive integer, optional, default: 3
+#
+#  monitorDownThreshold - threshold for declaring interface as 'down'
+#                         after X (consecutive?) failed pings.
+#                         Value: positive integer, optional, default: 30
+#
+#  samplingWindow   -   time duration in seconds for which the samples needs to be stored. Added in Orch 8.10.0
+#                       Value:  positive number less than equal to 900, default:  300
+#
+#  monitorUpLossThreshold - %Loss  threshold for declaring monitor Up. Interface is declared up if loss % is lower than this value.
+#                           Value: positive value less than equal to 100, default: 0
+#
+#  monitorDownLossThreshold - %Loss  threshold for declaring monitor Down. Interface is declared down if loss % is greater than this value.
+#                             Value: positive value less than equal to 100, default: 0
+#
+#  monitorUpLatencyThreshold - Latency threshold in microseconds for declaring monitor Up. Interface is declared up if measured average latency is lower than this value.
+#                              Value: positive value less than equal to 9999, default: 0
+#
+#  monitorDownLatencyThreshold - Latency threshold in microseconds for declaring monitor Down. Interface is declared down if measured average latency is greater than this value.
+#                               Value: positive value less than equal to 9999, default: 0
+#
+#  metricCombination        -  Combination logic for Sequential Ping metric, Ping Loss metric and Ping latency metric.
+#                              If the value "metric-or" is specified, the monitor is declared Down if one of  reachability, loss and latency thresholds are exceeded.
+#                              If the value "metric-and" is specified, the monitor is declared Down if all of reachability, loss and latency thresholds are exceeded.
+#                              Value: metric-or OR metric-and, default: metric-or
+#  forceDnsThroughProbePath -  If true, Forces DNS on Probe path instead of the default DNS. default: false
+#
+#  <http/https IPSLA monitor>
+#  urls             -   list of http/https address to be monitored.
+#                       Value: IP Address/domain, required
+#
+#  proxyAddress     -   IPv4/IPv6 proxy server address.
+#                       Value: IPv4/IPv6 address (e.g., 198.162.0.1 or 9::9), optional
+#                       default value is empty
+#
+#  proxyPort        -   port of proxy server.
+#                       Value: 0-65535, required if proxyAddress is set
+#
+#  userAgent        -   user agent to be added to the request header.
+#                       for example. user-agent: Mozilla/5.0
+#                       Value: (eg, Mozilla/5.0), optional
+#                       default value is empty
+#
+#  httpRequestTimeout - request time out in seconds.
+#                       Value: positive integer, optional, default:60
+#
+#  interfaceName    -   name of interface or interface label to be monitored.
+#                       Value: interface(ex:lan0) or interface label(ex:MPLS)
+#                       This field is required.
+#
+#  tunnelName      -   name of passthrough tunnel. Above given interfaceName or this tunnelName fields are required fields.
+#
+#  sourceInterfaceName - name of interface. if tunnelName is specified, then this field is required field.
+#
+#  keepAlive        -   Keep alive time in seconds.
+#                       Value: consecutive, required, default:90
+#
+#  samplingWindow   -   time duration in seconds for which the samples needs to be stored. Added in Orch 9.0.0
+#                       Value:  positive number less than equal to 900, default:  300
+#
+#  monitorUpThreshold  -  threshold for declaring http/https server as 'up'
+#                         after X (consecutive?) successful pings.
+#                         Value: positive integer, optional, default:2
+#
+#  monitorDownThreshold -   threshold for declaring interface as 'down'
+#                           after X (consecutive?) failed pings.
+#                           Value: positive integer, optional, default:3
+#
+#  monitorUpLossThreshold - %Loss  threshold for declaring monitor Up. Interface is declared up if loss % is lower than this value.
+#                           Value: positive value less than equal to 100, default: 0
+#
+#  monitorDownLossThreshold - %Loss  threshold for declaring monitor Down. Interface is declared down if loss % is greater than this value.
+#                             Value: positive value less than equal to 100, default: 0
+#
+#  monitorUpLatencyThreshold - Latency threshold in microseconds for declaring monitor Up. Interface is declared up if measured average latency is lower than this value.
+#                              Value: positive value less than equal to 9999, default: 0
+#
+#  monitorDownLatencyThreshold - Latency threshold in microseconds for declaring monitor Down. Interface is declared down if measured average latency is greater than this value.
+#                               Value: positive value less than equal to 9999, default: 0
+#
+#  metricCombination        -  Combination logic for Sequential Ping metric, Ping Loss metric and Ping latency metric.
+#                              If the value "metric-or" is specified, the monitor is declared Down if one of  reachability, loss and latency thresholds are exceeded.
+#                              If the value "metric-and" is specified, the monitor is declared Down if all of reachability, loss and latency thresholds are exceeded.
+#                              Value: metric-or OR metric-and, default: metric-or
+#  forceDnsThroughProbePath -  If true, Forces DNS on Probe path instead of the default DNS. default: false
+#  
+#  <vrrp IPSLA monitor>
+#  interfaceName    -   name of interface or interface label to be monitored.
+#                       Value: valid interface name (eg, lan0)
+#                              or interface label(eg,MPLS)
+#                       This field is required.
+# downAction:
+# There are nine available Down Actions:
+# 1.removeAutoSubnet      remove from the subnet table
+#                         an auto subnet for a port
+# 2.increaseVRRPPriority  increase the configured VRRP router priority
+#                         by a delta amount
+# 3.decreaseVRRPPriority  decrease the configured VRRP router priority
+#                         by a delta amount
+# 4.enableTunnel          enable a pass through tunnel for IP
+#                         Tracking (SLA) purposes
+# 5.disableTunnel         disable a pass through tunnel for IP
+#                         Tracking (SLA) purposes
+# 6.disableSubnetSharing  Disable subnet sharing of this appliance's subnets
+#                         with other Edge Connect peers
+# 7.modifySubnetMetric    add a metric delta to the metric of all
+#                         subnets shared with Edge Connect peers
+# 8.advertiseSubnet       advertise subnets to Edge Connect peers
+# 9.raiseAlarm            raise an alarm
+#
+#   downActionType    -   type of down action
+#                       Value: string (one of valid down actions listed above)
+#                              this field is required
+#
+#   tunnelName      -   valid pass through tunnel name
+#                       Value: valid tunnel name, required
+#                       Usage : supported for downAction types:
+#                               - enableTunnel
+#                               - disableTunnel
+#
+#   interfaceName   -   name of interface or interface label to be monitored.
+#                       Value: interface name(eg,lan0) or interface label
+#                              (eg,MPLS)
+#                       Usage : supported for downAction types:
+#                               - decreaseVRRPPriority
+#                               - increaseVRRPPriority
+#                               - advertiseSubnet
+#                               - removeAutoSubnet
+#   priority        -   priority in number
+#                       Value: positive integer, required
+#                       Usage :  supported for downAction types:
+#                                - decreaseVRRPPriority
+#                                - increaseVRRPPriority
+#
+#   subnetMetricDelta - Add a metric delta to the metric of all subnets
+#                       shared with Silver Peak peers
+#                       Value: positive integer, required
+#                       Usage:  supported for downAction types:
+#                               - modifySubnetMetric
+#
+#  There are seven available Up Actions:
+#  1.enableTunnel          enable a pass through  tunnel
+#                          for IP Tracking (SLA) purposes
+#  2.disableTunnel         disable a pass through tunnel
+#                          for IP Tracking (SLA) purposes
+#  3.decreaseVRRPPriority  decrease the configured VRRP router priority
+#                          by a delta amount
+#  4.increaseVRRPPriority  increase the configured VRRP router priority
+#                          by a delta amount
+#  5.defaultSubnetAction   this reverts whatever was the Down Action
+#                          back to the default state
+#  6.defaultVRRP           reverts the VRRP priority
+#                          back to the configured value
+#  7.clearAlarm            clear the alarm
+# upAction:
+#   upActionType     -  type of up action
+#                       Value: string (one of valid up actions listed above)
+#                              this field is required
+#
+#   tunnelName       -  valid pass through tunnel name
+#                       Value: valid tunnel name, required
+#                       Usage : supported for upAction types:
+#                               - enableTunnel
+#                               - disableTunnel
+#   interfaceName    -  interface name
+#                       Value: interface(ex:lan0) or interface label(ex:MPLS)
+#                       Usage :  supported for upAction types:
+#                                - decreaseVRRPPriority
+#                                - increaseVRRPPriority
+#   priority         -  priority in number
+#                       Value: positive integer, required
+#                       Usage : supported for upAction types:
+#                               - decreaseVRRPPriority
+#                               - increaseVRRPPriority
+#
+# Post-approval behavior: replace
+
+ipSlaRule:
+  ruleEntries:
+  - enable: true
+    samplingInterval: 30
+    comment: http/https monitor
+    routeLabel: Internet
+    ipslaMonitor:
+      monitorType: http/https
+      urls:
+      - www.google.com
+      - www.yahoo.com
+      proxyAddress: 198.162.0.1
+      proxyPort:    667
+      userAgent:    Mozilla/5.0
+      httpRequestTimeout: 60
+      interfaceName: mgmt0
+      keepAlive:    1
+      samplingWindow: 300
+      monitorUpThreshold: 3
+      monitorDownThreshold:  30
+      monitorUpLossThreshold: 0
+      monitorDownLossThreshold: 0
+      monitorUpLatencyThreshold:  0
+      monitorDownLatencyThreshold:  0
+      metricCombination:  metric-or
+    downAction:
+      downActionType: disableTunnel
+      tunnelName: t1
+    upAction:
+      upActionType: enableTunnel
+      tunnelName: t1
+
+  - enable: true
+    samplingInterval: 30
+    comment: ping monitor
+    routeLabel: Internet
+    ipslaMonitor:
+      monitorType: ping
+      ipAddress: 198.162.0.1
+      interfaceName: mgmt0
+      keepAlive:    1
+      samplingWindow: 300
+      monitorUpThreshold: 3
+      monitorDownThreshold:  30
+      monitorUpLossThreshold: 0
+      monitorDownLossThreshold: 0
+      monitorUpLatencyThreshold:  0
+      monitorDownLatencyThreshold:  0
+      metricCombination:  metric-or
+    downAction:
+      downActionType: raiseAlarm
+    upAction:
+      upActionType: clearAlarm
+
+  - enable: true
+    samplingInterval: 30
+    comment: interface monitor
+    routeLabel: Internet
+    ipslaMonitor:
+      monitorType: interface
+      interfaceName: mgmt0
+    downAction:
+      downActionType: advertiseSubnet
+      interfaceName: mgmt0
+      priority: 1
+    upAction:
+      upActionType: defaultSubnetAction
+
+  - enable: true
+    samplingInterval: 30
+    comment: vrrp monitor
+    routeLabel: Internet
+    ipslaMonitor:
+      monitorType: vrrp
+      interfaceName: Voice
+    downAction:
+      downActionType: decreaseVRRPPriority
+      interfaceName: mgmt0
+      priority: 1
+    upAction:
+      upActionType: increaseVRRPPriority
+      interfaceName: mgmt0
+      priority: 1
+# end of IP SLA Rules
+
+
+# Preconfiguration Template for Inbound Port Forwarding
+# Inbound port forwarding allows traffic from the WAN to reach a specific
+# computer or service within a private LAN when you have a stateful firewall.
+# This section is to define the desired inbound traffic and remap its
+# destination IP address and port number to an internal host.
+# This support appliance version is greater than or equal to 8.1.7
+# portForwardingRules - A list of port forwarding rules. Each rule comprises
+#                       the following key/value pairs:
+#   -sourceIpSubnet - Source IP/Subnet
+#                     Value: IPv4/IPv6 address/subnet, required
+#
+#    destinationIpSubnet - Destination IP/Subnet
+#                          Value: IPv4/IPv6 address/subnet, required
+#    translate -  Translate
+#                 Value: true or false, optional, default: false
+#                        If set to true, destinationPortRange/translateIp/
+#                        translatePortRange/destinationProtocol need set,
+#                        and destinationProtocol should be udp, tcp or icmp
+#                        If set to false, destinationProtocol must be none,
+#                        and destinationPortRange/translateIp/translatePort-
+#                        Range should be empty
+#
+#
+#    destinationPortRange - Destination Port/Range, destinationPortRange and
+#                           translatePortRange must have same format
+#                           Value:integer 1 to 65535, or range format
+#                                 eg:123-124
+#                                 This field is optional, default is empty
+#
+#    destinationProtocol - Protocol
+#                          Value: [udp, tcp, icmp, any],
+#                                 optional, default empty
+#    translateIp - Translated IP
+#                  Value: Must be an IPv4/IPv6 address, optional, default empty
+#    translatePortRange - Translated Port/Range, destinationPortRange and
+#                         translatePortRange must have same format
+#                         Value: integer:1 to 65535, or range format eg:123-124
+#                                optional, default empty
+#
+#  sourceInterface   - name of source interface
+#                      Value: valid interface name or WAN side label
+#                      this is optional field, default: any
+#                     this field only available for EdgeOS releases >= 9.0.0.0
+#  segment       -    name of virtual routing and forwarding
+#                     Value: valid segment name, optional, default: Default
+#                     this field only available for EdgeOS releases >= 9.0.0.0
+#
+#    comment - Comment
+#              Value: maximum 64 characters, optional, default empty
+#
+# Post-approval behavior: replace
+inboundPortForwarding:
+  portForwardingRules:
+    - sourceIpSubnet: 10.0.193.6/32
+      destinationIpSubnet: 192.168.10.3/32
+      translate: true
+      destinationPortRange: 123-124
+      destinationProtocol: udp
+      translateIp: 192.168.20.1
+      translatePortRange: 125-126
+      sourceInterface: any
+      segment: Default
+      comment: portForwardingRules 1
+    - sourceIpSubnet: 10.0.194.6/32
+      destinationIpSubnet: 192.168.20.3/32
+      translate: false
+      destinationProtocol:
+      sourceInterface: any
+      segment: Default
+      comment: portForwardingRules 2
+# end of Inbound Port Forwarding
+
+# Preconfiguration Template for OSPF System Config
+# Use this section to configure OSPF (Open Shortest Path First) on LAN
+# interfaces. This protocol learns routes from routing peers, and then subnet
+# shares them with Silver Peak peers and/or BGP neighbors.
+# This support appliance version is greater than or equal to 8.1.7.3
+#
+# enable - Enable OSPF. Flag to enable/disable ospf. When enabled, the
+#          appliance has access to use the OSPF protocol.
+#          Value: [true, false](enable/disable), optional, default:false
+#
+# routerId - Router ID. This router identifier is the IPv4 address by which the
+#            remote peer can identify this appliance for purposes of OSPF.
+#            Router ID is common for BGP and OSPF, changing it here will update
+#            it for BGP. BgpSystemConfig section has Router ID also, if change
+#            it in any section of these two, the Router ID in other section
+#            will have the same value.
+#            Value: IPv4 address(eg, 198.168.0.1), required.
+#redistMapToOspf - name of redistribution map to OSPF
+#                  value: name of route map, optional, default: default_rtmap_to_ospf
+#                  (supported for SW version >= 8.2.1)
+# opaqueEnable - Enable opaque link-state advertisements enhancement for OSPF protocol.
+#                Value: [true, false](enable/disable), required, default: true
+#
+#<--------------------------------------------------------------------------->
+#Begin - Below ospf config attributes only available for release < 8.2.1
+#<--------------------------------------------------------------------------->
+# redistBgpToOspf  - Flag to redistribute BGP routes to OSPF
+#                    Value: [true, false](enable/disable), optional,
+#                           default:false
+#
+# bgpRedistMetricType - Metric Type for redistributing BGP routes to OSPF
+#                       Value: [E1, E2], optional, default: E2
+#                              E1 and E2 are two categories of external routes.
+#                              The difference between the two is in the way the
+#                              cost (metric) of the route is being calculated.
+#                              E1 - Sum of the external cost and the internal
+#                              cost used to reach a route.
+#                              E2 - The external cost to reach a route, irresp-
+#                              ective of the interior cost. Unless otherwise
+#                              specified, the default external type given to
+#                              external routes is E2.
+#
+# bgpRedistMetric - Metric for redistributing BGP routes to OSPF.
+#                  [Route Metric] The cost associated with a route. The higher
+#                  the value, the less preferred.
+#                  Value: integer: 0-4294967295, optional, default: 0
+#
+# bgpRedistTag - Tag for redistributing BGP routes to OSPF. A route tag is
+#                applied to a route to better identify the source of the
+#                network it originated from. It is primarily used to filter
+#                routes from being redistributed in a routing loop.
+#                Value: integer: 0-4294967295, optional, default: 0
+#
+# redistSubnetShareToOspf - Flag to redistribute Silver Peak peers routes to
+#                           OSPF
+#                           Value: [true, false](enable/disable), optional,
+#                                  default:true
+#
+# subnetShareRedistMetricType - Metric Type for redistributing Silver Peak
+#                               peers routes to OSPF. Same to bgpRedist-
+#                               MetricType.
+#                               Value: [E1, E2], optional, default: E2
+#
+# subnetShareRedistMetric - Metric for redistributing Silver Peak peers
+#                           routes to OSPF. Analogous to bgpRedistMetric.
+#                           Value: integer: 0-4294967295, optional, default: 0
+#
+# subnetShareRedistTag - Tag for redistributing Silver Peak peers routes to
+#                        OSPF. Analogous to bgpRedistTag.
+#                        Value: integer: 0-4294967295, optional, default: 0
+#
+# redistLocalToOspf - Flag to redistribute local routes to OSPF
+#                     Value: [true, false](enable/disable), optional,
+#                            default:false
+#
+# localRedistMetricType - Metric Type for redistributing local routes to OSPF.
+#                         Same to bgpRedistMetricType.
+#                         Value: [E1, E2], optional, default: E2
+#
+# localRedistMetric - Metric for redistributing local routes to OSPF.
+#                     Value: integer: 0-4294967295, optional, default: 0
+#
+# localRedistTag - Tag for redistributing local routes to OSPF.
+#                  Value: integer: 0-4294967295, optional, default: 0
+#<--------------------------------------------------------------------------->
+#End
+#<--------------------------------------------------------------------------->
+#
+##---------------------------------------------------------------------------#
+# Example < rel8.2.1
+#ospfSystemConfig:
+#  redistBgpToOspf: false
+#  bgpRedistMetricType: E2
+#  bgpRedistMetric: 0
+#  bgpRedistTag: 0
+#  redistSubnetShareToOspf: false
+#  subnetShareRedistMetricType: E2
+#  subnetShareRedistMetric: 0
+#  subnetShareRedistTag: 0
+#  redistLocalToOspf: false
+#  localRedistMetricType: E2
+#  localRedistMetric: 0
+#  localRedistTag: 0
+#
+# Example >= rel8.2.1
+# ospfSystemConfig:
+#  enable: true
+#  routerId: 198.168.0.1
+#  redistMapToOspf: default_rtmap_to_ospf
+#  opaqueEnable: true
+#
+#
+#<-------------- Start of OSPF Areas Configuration ------------------------->
+# This section is only available from EdgeOS releases >= 9.0.3
+#
+# Areas -  An array of areas. Each area comprises the following
+#          key/value pairs.
+#
+# - areaId -  areaId can be an integer between 0 and 4294967295,
+#             or it can take a form similar to an IP address, A.B.C.D.
+#             Value: integer: 0-4294967295, required.
+#
+#   areaType - An OSPF areaType can be set to 0 for Standard or 1 for NSSA.
+#              Value: [0, 1], required, default: 0
+#
+#     <------------------Start of NSSA Properties ------------------------>
+#
+#   The following properties are only applicable when areaType is 1 (NSSA)
+#
+#
+#   redist  - Is a boolean flag to indicates if this router should
+#             originate NSSA LSAs into the area for external routes.
+#             If set to false, then the router will suppress NSSA LSAs.
+#             Value: [true, false], required, default: true
+#
+#   summary - Is a boolean flag to Controls import of summary LSAs
+#             into NSSA areas. If you set this to false the router will
+#             neither originate nor propagate summary LSAs into the NSSA areas.
+#             Value: [true, false], required, default: true
+#
+#   translatorRole - You can configure the translation role for an NSSA to ensure
+#                    that Type-7 LSAs are always translated into Type-5 LSAs.
+#                    Alternatively, the default setting simply identifies an
+#                    NSSA border router as a candidate that can participate in
+#                    the translator election process. 0 is for 'candidate' role
+#                    and 1 is for 'Always Translate'.
+#                    Value: integer: [0 or 1], required, default: 0
+#
+#       <---------------------END of NSSA Properties ----------------->
+#
+#<----------------------End Of OSPF Areas configuration---------------------->
+#
+#
+#<----------------------Start of Interfaces Configuration-------------------->
+#
+# interfaces - A list of interfaces. Each rule comprises the following
+#              key/value pairs:
+#   - interfaceName - Interface. The interface on which OSPF is configured.
+#                     Value: e.g., lan0, required
+#
+#     areaId - Area ID. The number of the area to which interface belongs.
+#              From  EdgeOS releases >= 9.0.3 you can have different
+#              areaIds for different interfaces otherwise
+#              the Area ID is the same for all interfaces.
+#              areaId can be an integer
+#              between 0 and 4294967295, or it can take a form similar to an IP
+#              address, A.B.C.D.
+#              Value: integer: 0-4294967295, required, default: 0.0.0.0
+#
+#     cost - Cost metric. The cost of an interface in OSPF is an indication of
+#            the relative cost or overhead required to send packets across a
+#            certain interface. It's used in the OSPF path calculation to
+#            determine link preference.
+#            Value: integer: 1-65535, required, default: 1
+#
+#     priority - Priority level. Router priority [If two or more best routes
+#                are subnet shared, then peer priority is used as the tie-brea-
+#                ker.]
+#                Value: integer: 0-255, required, default: 1
+#
+#     adminStatus - Admin Status. Indicates whether the interface is set to
+#                   admin Up or Down
+#                   Value: [Up, Down], required, default: Up
+#
+#     helloInterval - Hello Interval. Specifies the length of time, in seconds,
+#                     between the hello packets that a router sends on an OSPF
+#                     interface.
+#                     Value: integer:1-65535, required, default: 10
+#
+#     deadInterval - Dead Interval. Number of seconds that a router's Hello
+#                    packets have not been seen before its neighbors declare
+#                    the OSPF router down.
+#                    Value: integer:1-65535, required, default: 40
+#
+#     transmitDelay - Transmit Delay. Number of seconds required to transmit a
+#                    link state update packet.
+#                    Value: integer:1-450, required, default: 1
+#
+#     retransmitInterval - Retransmit Interval. When OSPF sends an advertise
+#                          -ment to an adjacent router, it expects to receive
+#                          an acknowledgment from that neighbor. If no acknow
+#                          -ledgment is received, the router will retransmit
+#                          the advertisement to its neighbor. The retransmit
+#                          -interval timer controls the number of seconds
+#                          between retransmissions.
+#                          Value: integer:1-65535, required, default: 4
+#
+#     authentication - Authentication.
+#                      Value:[None, Text, MD5], required, default: None
+#                            None - No authentication;
+#                            Text - Simple password authentication allows a
+#                                   password (key) to be configured per area.
+#                                   Routers in the same area that want to parti
+#                                   -cipate in the routing domain will have to
+#                                   be configured with the same key. The draw
+#                                   -back of this method is that it is vulnerab
+#                                   -le to passive attacks.
+#                            MD5 -  Message Digest authentication is a crypto
+#                                   -graphic authentication. A key (password)
+#                                   and key-id are configured on each router.
+#                                   The router uses an algorithm based on the
+#                                   OSPF packet, the key, and the key-id to
+#                                   generate a "message digest" that gets
+#                                   appended to the packet. Unlike the simple
+#                                   authentication, the key is not exchanged
+#                                   over the wire. A non-decreasing sequence
+#                                   number is also included in each OSPF packet
+#                                   to protect against replay attacks. This
+#                                   method also allows for uninterrupted transi
+#                                   -tions between keys. This is helpful for
+#                                   administrators who wish to change the OSPF
+#                                   password without disrupting communication.
+#
+#     authenticationKey - Key input while set authentication to Text
+#                         Value: string, required if set authentication to Text
+#
+#     md5Key - Key input while set authentication to MD5
+#              Value: integer:0-255, required if set authentication to MD5,
+#                     default: 0
+#
+#     md5Password - Password input while set authentication to MD5
+#                   Value:string, required if set authentication to MD5
+#
+#     bfdEnabled  - flag to decide whether BFD should be enabled/disabled for the peer.
+#                      If this flag is set to true, BFD should be included in this yml file.
+#                      Value: [true, false], optional, default: false(disable)
+#                      Compatibility: ECOS 9.2.0.0 and above
+#
+
+#    comment - Comment. Any information you want to include for your own use.
+#              Value:string, optional, default empty
+#
+# Post-approval behavior: replace
+ospfSystemConfig:
+  enable: true
+  routerId: 198.168.0.1
+  redistMapToOspf: default_rtmap_to_ospf
+  opaqueEnable: true
+  areas:
+    - areaId: 0.0.0.26
+      areaType: 0
+    - areaId: 0.0.0.2
+      areaType: 1
+      redist: true
+      summary: true
+      translatorRole: 0
+  interfaces:
+    - interfaceName: lan0.71
+      areaId: 0.0.0.26
+      cost: 1
+      priority: 1
+      adminStatus: Up
+      helloInterval: 10
+      deadInterval: 40
+      transmitDelay: 1
+      retransmitInterval: 4
+      authentication: None
+      authenticationKey:
+      md5Key: 0
+      md5Password:
+      comment: ospf config 1
+    - interfaceName: lan0.100
+      areaId: 10.0.0.28
+      cost: 10
+      priority: 10
+      adminStatus: Down
+      helloInterval: 10
+      deadInterval: 40
+      transmitDelay: 1
+      retransmitInterval: 4
+      authentication: Text
+      authenticationKey: authenticationKey
+      md5Key: 0
+      md5Password:
+      comment: ospf config 2
+# end of OSPF System Config
+
+
+# Preconfiguration Template for segment OSPF
+# this module is similar to the ospfSystemConfig module.
+# but utilizes an array to configure  ospf settings for each segment
+# if segmentOspfConfig and ospfSystemConfig are present in the same YAML file,
+# then segmentOspfConfig takes precedence and the ospfSystemConfig module is ignored.
+#
+#  segmentOspfConfig: a list to config OSPF settings for segments
+##  segment    -  name of virtual routing and forwarding
+##                Value: valid segment name, optional, default: Default
+#                this field only available for EdgeOS releases >= 9.0.3.0
+#
+#  Note: You must define an area before using it in interface section
+
+segmentOspfConfig:
+  - segment: Default
+    enable: true
+    routerId: 198.168.0.1
+    redistMapToOspf: default_rtmap_to_ospf
+    opaqueEnable: true
+    areas:
+      - areaId: 0.0.0.3
+        areaType: 0
+      - areaId: 0.0.0.4
+        areaType: 1
+        redist: true
+        summary: true
+        translatorRole: 0
+    interfaces:
+      - interfaceName: lan0
+        areaId: 0.0.0.3
+        cost: 1
+        priority: 1
+        adminStatus: Up
+        helloInterval: 10
+        deadInterval: 40
+        transmitDelay: 1
+        retransmitInterval: 4
+        authentication: None
+        authenticationKey:
+        md5Key: 0
+        md5Password:
+        comment: ospf interface config with standard area type
+      - interfaceName: lan1
+        areaId: 0.0.0.4
+        cost: 10
+        priority: 10
+        adminStatus: Up
+        helloInterval: 10
+        deadInterval: 40
+        transmitDelay: 1
+        retransmitInterval: 4
+        authentication: Text
+        authenticationKey: authenticationKey
+        md5Key: 0
+        md5Password:
+        comment: ospf interface config with NSSA
+
+
+
+# Preconfiguration Template for Flow redirection
+# This section is to enable Flow redirection. Optimizing TCP flows requires
+# that a client request and its server response use the same path through the
+# network. If not, then the network is asymmetric. Flow redirection removes the
+# asymmetry locally by merging the traffic of an asymmetric flow into a single
+# appliance. Flow redirection moves packet traffic between appliances that you
+# assign to a cluster:
+# 1.A cluster can contain just one appliance (in which no redirection occurs)
+#   or several appliances (in which redirection may occur between different
+#   pairs).
+# 2.All the appliances in a cluster are equal peers.
+# 3.You can have up to 32 peers in a cluster.
+# 4.The Silver Peak Communication Protocol (SPCP) formalizes peer-to-peer
+#   communications in an appliance cluster. SPCP is both a discovery and
+#   control protocol. By default, SPCP uses mgmt1 to communicate between
+#   appliances.
+# 5.This must be a Layer 2 connection. In other words, you want a switch
+#   - not a router - between any two peers.
+# For each peer appliance in a cluster, flow redirection requires configuration
+# 1.Interfaces -- For configuring the mgmt1/lan0/wan0/wan1 IP address. There is
+#   no yaml section to config it.
+# 2.IP Route -- For configuring the necessary static route(s). Go to yaml
+#   section named managementRoutes to config it.
+# 3.Flow redirection -- For enabling flow redirection, selecting the management
+#   interface, and identifying the peers in the cluster.
+# IMPORTANT - When configuring for flow redirection, the mgmt1 interfaces must
+# be in a separate subnet from the mgmt0 interfaces.
+#
+# enable - Enable. Enables/disables flow redirection.
+#          Value: [true, false](enable/disable), optional, default:false
+# waitTime - Wait time. Allowable timeout between peers when negotiating which
+#            appliance should take the flow. This default value rarely requires
+#            change -- possibly in environments with longer latencies or when
+#            using a datapath interface instead of mgmt1.
+#            Value: integer:0-500, unit is ms, required, default:50
+# interfaceName - Interface. The interface on which flow redirection occurs.
+#                 Value: Interface name(eg:mgmt1, lan0, wan0, wan1), required,
+#                        default:mgmt1
+# peers - Peers. A list of Flow redirection which lists  all Peer IPs.
+#         Each entry comprises the following key/value pairs:
+#   peerIp - PeerIp. It is a IPv4 address.
+#            Value: IPv4 address (eg:10.0.195.6), required
+#
+# Post-approval behavior: replace
+flowRedirection:
+  enable: false
+  waitTime: 50
+  interfaceName: mgmt1
+  peers:
+    - peerIp: 10.0.195.6
+    - peerIp: 10.0.196.6
+# end of Flow redirection
+
+
+# Preconfiguration  for pass through tunnel
+  # tunnelConfiguration : tunnel general configuration information
+  #   tunnelName - tunnel name
+  #                 Value: any string, required
+  #   tunnelType - tunnel type, currently only support "passthrough"
+  #                Value: "passthrough", required
+  #   tunnelEncap  - tunnel encapsulation method
+  #                 Value:[gre,no_encap, ipsec], required
+  #   admin       - Admin state of the tunnel
+  #                 Values: [Up, Down], required
+  #   localIp     - source IP address of the tunnel
+  #                 Value: IPv4, "a.b.c.d" format, required
+  #   nat         - nat
+  #                 Value: [none, snat] optional, default:none
+  #   remoteIp    - destination IP address of the tunnel
+  #                  Value: IPv4, "a.b.c.d" format,
+  #                  This field is optional for "no_encap" tunnel mode
+  #   peerName    - Peer name of remote end of tunnel
+  #                 Value: any string, optional
+  #   enableAutoMaxBandwidth - enable auto configuration of
+  #                            tunnel max bandwidth
+  #                            Value: [true, false], required
+  #   maxBandwidth    - tunnel max bandwidth in Kbps.
+  #                     if the tunnel max bandwidth is manually
+  #                     configured, use this field and set
+  #                     enableAutoMaxBandWidth to false.
+  #                     Value: integer[1-10000000](Kbps), up to 10Gbps
+  #                       This field is required
+  #                       if enableAutoMaxBandWidth is set to false
+  #   segment      - name of virtual routing and forwarding
+  #                  Value: valid segment name, optional, default: Default
+  #                  this field only available for EdgeOS releases >= 9.0.0.0
+  #
+  # ikeConfig And ipsecConfig section are required to be configured
+  # when tunnelEncap is set to "ipsec"
+  #
+  # ikeConfig :    IKE configuration
+  #   presharedKey      - a shared, secret string of Unicode
+  #                       characters used for authentication of
+  #                       an IPSec connection between two parties
+  #                       Value: any string,
+  #                       This field is optional, default:silverpeak
+  # 
+  #   ikeAuthAlgorithm -  IKE authentication algorithm
+  #                        Value: [sha1, sha256, sha384, sha512, "null"], required
+  #   ikeEncryptAlgorithm -  IKE encryption algorithm
+  #                          Value: [aes256, aes128, auto]
+  #                          Release >= 9.2.1 and IKEv2
+  #                          Value: [aes256, aes128, aes256gcm16, aes128gcm16, "null", auto]
+  #                          This field is optional, default:auto
+  #   diffHellManGroup - IKE Diffie-Hellman Group.
+  #                      Value:[1, 2, 5, 14, 15, 16, 17, 18]
+  #                      Release >= 9.2.1
+  #                      Value:[1, 2, 5, 14, 15, 16, 17, 18, 19, 20, 21, 26, 31]
+  #                      This field is optional, default: 2
+  #   ikeLifetime        - IKE lifetime in minutes
+  #                        Value: integer range 30-65535 or 0
+  #                        This field is optional, default: 360
+  #   deadPeerDelayTime  - IKE dead peer delay time in seconds
+  #                        Value: integer [0, 65535]
+  #                        This field is optional, default: 300
+  #   deadPeerRetryCount - IKE dead peer delay time retry count
+  #                        Value: integer [0, 65535]
+  #                        This field is optional, default: 5
+  #   identifierType   -   IKE identifier
+  #                        Value: [address, fqdn, ufqdn],
+  #                        required if ikeVersion is 1
+  #   identifierValue  -   IKE identifier string
+  #                        value: non empty string
+  #                               when identifierType is "fqdn" or "ufqdn"
+  #                        value: IPv4 or IPv6 address or empty
+  #                               when identifierType is "address"
+  #   exchangeMode     -   IKE phase 1 mode
+  #                        Value: [main,aggressive], required
+  #   ikeVersion       -   ike version used to exchange secure key between
+  #                        connected tunnels.
+  #                        this field only available for EdgeOS releases >=8.2
+  #                        Value: [1,2], optional, default:1
+  #   localIkeIdentifier  -   local ike identifier string
+  #                        Value: characters <= 63, optional, default empty
+  #                        only available when ikeVersion is 2
+  #   remoteIkeIdentifier  -  remote ike identifier string
+  #                        Value: characters <= 63, optional, default empty
+  #                        only available when ikeVersion is 2
+  #
+  #   ikePrf               -  ike pseudo random function value
+  #                        Release >= 9.2.1 and value required if ikeEncryption = aes256gcm16 or aes128gcm16 
+  #                           Values: [auto, prfsha256, prfsha384, prfsha512]
+  #                           Note: auto is valid only is ipsecSuiteB is none
+  #                           Note: prfsha256 available in selection only if ikeEncryption = aes128gcm16 
+  #   ikePqcgroup          -  IKE post-quantum cryptography group, applicable only when tunnelEncap is set to ipsec
+  #                        Release >= 10.0.0
+  #                        Values: [0, 35, 36, 37]
+  #                        default value: 0
+  #                        This field is optional. if "PQC Key Exchange" is enabled, then ipsecPqcgroup should be set to 35, 36 or 37 based on Key-Exchange group" options selected . If PQC Key Exchange is disabled, then ipsecPqcgroup should be set to 0.
+  #
+
+  #
+  # ipsecConfig :    IP security (IPsec) configuration
+  #   ipsecAuthAlgorithm      - IPSec authentication algorithm
+  #                             Value: [sha1, sha256, sha384, sha512]
+  #                             Release >= 9.2.1 
+  #                             Value: [sha1, sha256, sha384, sha512, aes128gmac, aes256gmac, "null"] 
+  #                             If selecting aes128gmac or aes256gmac: ipsecEncryptAlgorithm should be made none
+  #                             This field is required
+  #   ipsecEncryptAlgorithm   - IPSec encryption algorithm
+  #                             Value: [aes256, aes128, auto,none]
+  #                             Release >= 9.2.1
+  #                             Value: [aes256, aes128, aes256gcm16, aes128gcm16, auto, none, "null"]
+  #                             If selecting aes256gcm16 or aes128gcm16: ipsecAuthAlgorithm should be made NA
+  #                             This field is optional, default:auto
+  #   ipsecLifetime           - IPSec lifetime in minutes
+  #                             Value:  integer range 30-65535 or 0
+  #                             This field optional, default: 360
+  #   ipsecLifetimeBytes  - IPSec lifetime measured in megabytes
+  #                         Value: integer [0,4294967295]
+  #                         This field is optional, default: 0
+  #
+  #   enableIpSecArcWindow - enable/disable IP security (IPsec)
+  #                          authentication provide anti-replay
+  #                          protection against an attacker duplicating
+  #                          encrypted packets by assigning a unique
+  #                          sequence number to each encrypted packet.
+  #                          Disable Value: 0 - for disable IP security
+  #                          Enable Value: [0,1024,8192,65536], optional, default:1024
+  #
+  #   secrecyGroup    -  IPsec perfect forward secrecy group
+  #                       Value: [1,2,5,14,15,16,17,18,disable]
+  #                      Release >= 9.2.1
+  #                       Value: [1,2,5,14,15,16,17,18,19,20,21,26,31, disable]
+  #                       This field is optional, default:2
+  #
+  #   ipsecSuiteB     -  Ipsec Suite B preset type
+  #                       Release >= 9.2.1
+  #                       Values: [none, gcm128, gcm256, gmac128, gmac256]
+  #                       default value: none
+  #                       When IPSec Suite B presets are set to gcm128, gcm256, gmac128, gmac256, other fields should be set as in the table below. 
+  #                       Read the column for each ipsecSuiteB type.
+  #   -------------------------------------------------------------------------------
+  #   | ipsecSuiteB type->   | gcm128     | gcm256     | gmac128     | gmac256      |
+  #   -------------------------------------------------------------------------------
+  #   | ipsecEncryptAlgorithm| aes128gcm16| aes256gcm16| "null"      | "null"       |
+  #   | ipsecAuthAlgorithm   | "null"     | "null"     | aes128gmac  | aes256gmac   |
+  #   | ikeEncryptAlgorithm  | aes128     | aes256     | aes128      | aes256       |
+  #   | ikePrf               | auto       | auto       | auto        | auto         |
+  #   | secrecyGroup         | 19         | 20         | 19          | 20           |
+  #   | ikeAuthAlgorithm     | sha256     | sha384     | sha256      | sha384       |
+  #   | diffHellManGroup     | 19         | 20         | 19          | 20           |
+  #   -------------------------------------------------------------------------------
+  #  ipsecPqcgroup -  IPsec post-quantum cryptography group, applicable only when tunnelEncap is set to ipsec
+  #                   Release >= 10.0.0
+  #                   Values: [0, 35, 36, 37]
+  #                   default value: 0
+  #                   This field is optional. if value is not zero then ipsecPqcgroup should be set to 35, 36 or 37 based on "Perfect forward secrecy" options selected.
+  #
+  # 
+  #   Note: When auth / encrypt algorithm is gcm / gmac then the corresponding encrypt / auth algorithms should be specified as "null" <- null with quotes                      
+  #
+  # Post-approval behavior: merge
+tunnelConfiguration:
+  tunnels:
+    - tunnelName: passthrough_tunnel_ipsec
+      tunnelType: passthrough
+      tunnelEncap: ipsec
+      admin: Up
+      localIp: 192.168.0.2
+      remoteIp: 192.168.0.12
+      natMode: none
+      peerName: internet
+      enableAutoMaxBandwidth: false
+      maxBandwidth: 1000
+      #segment: Default
+      ikeConfig:
+        presharedKey: silverpeak
+        ikeAuthAlgorithm: sha256
+        ikeEncryptAlgorithm: aes128
+        diffHellManGroup: 2
+        ikeLifetime: 360
+        deadPeerDelayTime: 300
+        deadPeerRetryCount: 5
+        identifierType: address
+        identifierValue: 198.168.0.1
+        exchangeMode: main
+        ikeVersion: 1
+        localIkeIdentifier : sp_ike_local
+        remoteIkeIdentifier: sp_ike_remote
+        ikePrf: auto
+        ikePqcgroup: 0
+
+      ipsecConfig:
+        ipsecAuthAlgorithm: sha1
+        ipsecEncryptAlgorithm: aes256
+        enableIpSecArcWindow: 1024
+        ipsecLifetime: 360
+        ipsecLifetimeBytes: 0
+        secrecyGroup: 2
+        ipsecSuiteB: none
+        ipsecPqcgroup: 0
+
+    - tunnelName: passthrough_tunnel_gre
+      tunnelType: passthrough
+      tunnelEncap: gre
+      admin: Down
+      localIp: 192.168.0.1
+      remoteIp: 192.168.0.2
+      natMode: none
+      peerName: internet_gre
+      enableAutoMaxBandwidth: true
+      #segment: Default
+
+    - tunnelName: passthrough_tunnel_no_encap
+      tunnelType: passthrough
+      tunnelEncap: no_encap
+      admin: Up
+      localIp: 192.168.0.1
+      natMode: snat
+      peerName: internet_encap
+      enableAutoMaxBandwidth: true
+      #segment: Default
+# end of pass through tunnel
+
+
+
+# Preconfiguration Template for loopback interfaces
+# Compatibility: only available for appliance version >=  8.1.9.5
+#
+# loopbacks -  a list of loopback interface configurations,
+#
+#  interfaceId - unique interface id to identify loopback
+#                 Syntax: "lo" followed by a numerical suffix
+#                 Value: "lo" + [0-99999], required
+#
+#  adminStatus - Admin Status. Indicates whether the interface is set to
+#                   admin Up or Down
+#                   Value: [Up, Down], optional, default: Up
+#
+#  ipAddressMask  - IP/mask to be used by loopback interface,
+#                   with x.x.x.x/x format or x:y::z/w format
+#                   Value: IPv4/IPv6, required
+#
+#  interfaceLabel -  interface label name on lan side
+#                   Value: valid name with string, optional
+#                   default without label
+#
+#  zone       -  firewall zone
+#                 Value: a valid zone string, optional
+#                 default without zone
+#
+#  role       -  firewall role
+#                 Value: a valid role string, optional
+#                 default value - default
+#
+#  segment       - name of virtual routing and forwarding
+#                 Value: valid segment name, optional, default: Default
+#                 this field only available for EdgeOS releases >= 9.0.0.0
+#
+# Post-approval behavior: replace
+loopbackInterface:
+  loopbacks:
+    - interfaceId: lo1
+      adminStatus: Up
+      ipAddressMask: 192.168.0.1/24
+      interfaceLabel: Voice
+      zone:
+      role:
+      segment:
+
+    - interfaceId: lo2
+      adminStatus: Down
+      ipAddressMask: 192.168.0.2/24
+      interfaceLabel: Data
+      zone:
+      role:
+      segment: Default
+# end of Loopback
+
+
+
+
+# Preconfiguration Template for virtual tunnel interfaces
+# Compatibility: only available for appliance version >=  8.1.9.5
+
+# vtis - a list of virtual tunnel interface configurations,
+#
+#  interfaceId  - interface id to identify virtual tunnel interface
+#                  Syntax: "vti" followed by a numerical suffix
+#                  Value: "vti" + [0-99999], required
+#
+#  ipAddressMask  - IP/mask to be used by virtual tunnel interface,
+#                   with x.x.x.x/x format or x:y::z/w format
+#                   Value: IPv4/IPv6, required
+#
+#  ipAddressAliasMask  - IP/mask alias to be used by virtual tunnel interface,
+#                   with x.x.x.x/x format or x:y::z/w format
+#                   Value: IPv4/IPv6, optional / required if interfaceLabelAlias is configured
+#
+#  adminStatus - Admin Status. Indicates whether the interface is set to
+#                   admin Up or Down
+#                   Value: [Up, Down], optional, default: Up
+#
+#  passthroughTunnel  - alias name of pass through tunnel,
+#                   Value: string, required
+#
+#  interfaceType    - the side of network this interface is on.
+#                   Value: [lan, wan], required
+
+#  interfaceLabel -  interface label name 
+#                   Value: valid name with strin, optional
+#                          none - same as empty value
+#
+#  interfaceLabelAlias -  interface alias label name
+#                   Value: valid name with string, optional 
+#                          none - same as empty value
+#
+#  zone       -  firewall zone
+#                 Value: a valid zone string, optional
+#                 default without zone
+#
+#  role       -  firewall role
+#                 Value: a valid role string, optional
+#                 default value - default
+#
+#  segment       - name of virtual routing and forwarding
+#                 Value: valid segment name, optional, default: Default
+#                 this field only available for EdgeOS releases >= 9.0.0.0
+#
+#  autoDistribute - Announce this to BGP & OSPF regardless of other filters
+#                 within the EdgeConnect. If IP Alias is configured, announce
+#                 the Alias IP instead
+#
+#  behindNat   -  field to config NAT settings
+#                 Value: "auto" (behind a NAT),
+#                        "none" (not behind a NAT)
+#                        Ipv4/Ipv6 address (use ip for behindNat)
+#
+# Post-approval behavior: replace
+virtualTunnelInterface:
+  vtis:
+    - interfaceId: vti1
+      ipAddressMask: 192.168.0.1/24
+      ipAddressAliasMask:
+      adminStatus: Up
+      passthroughTunnel: passthrough_tunnel_alias_1
+      interfaceType: lan
+      interfaceLabel: Voice
+      interfaceLabelAlias:
+      zone:
+      role:
+      segment: Default
+      autoDistribute: false
+      behindNat: 198.168.10.11
+
+    - interfaceId: vti2
+      ipAddressMask: 192.168.0.2/24
+      ipAddressAliasMask: 169.131.0.2/24
+      adminStatus: Down
+      passthroughTunnel: passthrough_tunnel_alias_2
+      interfaceType: wan
+      interfaceLabel: None
+      interfaceLabelAlias: INET1
+      zone:
+      role:
+      segment: Default
+      autoDistribute: false
+      behindNat: auto
+# end of virtual tunnel interface
+
+
+# Preconfiguration Template for Point-to-Point Protocol over Ethernet (PPPoE)
+#
+# pppoeInterfaces - A list of pppoe configuration.
+#
+#    interfaceId - The unique id of pppoe interface.
+#                Syntax:"ppp" followed by a numerical suffix ranging from 0 to 9
+#                Value: ppp[0-9], required
+#
+#    userName - user name used for authentication (provided by the ISP)
+#                Value: string, required
+#
+#    password -  password used for authentication with the ISP.
+#                this would be sent in cleartext
+#                Value: string, required
+#
+#    interfaceName - the Ethernet interface connected to the DSL modem.
+#                    generally, it should be wan side interface
+#                    Value:[wan0, wan1, wan2, lan0, lan1, lan2, tlan0,
+#                    tlan1, twan0, twlan0, blan0, blan1, bwan0, bwan1]
+#                   This field is required.
+#
+#    lcpFailCount -  a number to count how many unanswered LCP echo requests
+#                    occur before pppd concludes the link is dead
+#                    Value: positive integer, optional, Default 3
+#
+#    lcpInterval - how often (in seconds) pppd sends out LCP echo-request packets
+#                  Value: positive integer, optional, Default 20
+#
+#    dnsType      - resolver type to resolve domain names. Value:
+#                   [nochange]- Use Orchestrator DNS configured setting
+#                   [server]  - Use ISP dns resolver
+#                   [specify] - Use dnsDomain1 and dnsDomain2
+#                   This field is optional. Default: nochange
+#
+#    dnsDomain1 - DNS server 1 when manually setting DNS
+#                 Value: IPv4, optional, Default: 0.0.0.0
+#
+#    dnsDomain2 - DNS server 2 when manually setting DNS
+#                 Value: IPv4, optional, Default: 0.0.0.0
+#
+#    connectTimeout - how long (in seconds) pppoe-start should wait for
+#                    a new PPP interface to come up before concluding
+#                    that pppoe-connect has failed and killing the session
+#                    Value: positive integer, optional, Default 30
+#
+#    connectPoll - how often (in seconds) pppoe-start should check to see
+#                  if a new PPP interface has come up. If this is set to 0,
+#                  the pppoe-start simply initiates the PPP session,
+#                  but does not wait to see if it comes up successfully.
+#                  Value: positive integer, optional, Default 2
+#
+#    serviceName -  name of the service provided by the ISP
+#                  Value: string, optional. Default: none.
+#
+#    acName -      access concentrator name provided by ISP
+#                  Value: string, optional. Default: none.
+#
+#    defaultRoute - set default route via this interface
+#                  Value: true/false, optional, Default: false
+# Post-approval behavior: merge
+pppoe:
+  pppoeInterfaces:
+    - interfaceId: ppp0
+      userName: user
+      password: password
+      interfaceName: wan0
+      lcpFailCount: 3
+      lcpInterval: 20
+      dnsType: specify
+      dnsDomain1: 0.0.0.0
+      dnsDomain2: 0.0.0.0
+      connectTimeout: 30
+      connectPoll: 2
+      serviceName: service name
+      acName: ac name
+      defaultRoute: false
+    - interfaceId: ppp1
+      userName: user
+      password: password
+      interfaceName: wan1
+      lcpFailCount: 3
+      lcpInterval: 20
+      dnsType: nochange
+      connectTimeout: 30
+      connectPoll: 2
+      serviceName: service name
+      acName: ac name
+      defaultRoute: true
+# end of PPPoE
+
+# Preconfiguration Template for LTE over USB (USB LTE)
+#
+# lteInterfaces - A list of USB LTE configuration.
+#
+#    interfaceId - The unique id of USB LTE interface.
+#                Syntax:"cell" followed by a numerical suffix ranging from 0 to 3
+#                Value: cell[0-3], required
+#
+#    admin       - The admin state of the interface.
+#                Value: String, [up, down], required
+#
+#    generation  - The LTE generation to be used by the interface.
+#                Value: String, [auto, 4g, 3g], Optional, Default:auto
+#
+#    apn         - The Access Point name to be used by the LTE interface.
+#                Value: String, Optional, Default: default
+#
+#    apnType    - The APN type to be used by the LTE interface.
+#                Value: String, [Default, MultiAPN, Specific], Optional, Default: Default
+#
+#    authMode   - The authentication mode to be used by the LTE interface. This is None in-case the apnType is Default or MultiAPN.
+#                Value: String, [None, PAP, CHAP], Optional, Default: None
+#
+#    authUsername - The authentication username to be used by the LTE interface. This is only to be filled in-case authMode is CHAP or PAP.
+#                    Value: String, Optional, Default: empty
+#
+#   authPassword - The authentication password to be used by the LTE interface. This is only to be filled in-case authMode us CHAP or PAP.
+#                   Value: String, Optional, Default: empty
+
+usblte:
+  lteInterfaces:
+    - interfaceId: cell0
+      admin: up
+      generation: auto
+      apn: default
+      apnType: Default
+      authMode: None
+      authUsername:
+      authPassword:
+    - interfaceId: cell1
+      admin: down
+      generation: auto
+      apn: default
+      apnType: Default
+      authMode: None
+      authUsername:
+      authPassword:
+    - interfaceId: cell2
+      admin: down
+      generation: auto
+      apn: default
+      apnType: Default
+      authMode: None
+      authUsername:
+      authPassword:
+    - interfaceId: cell3
+      admin: down
+      generation: auto
+      apn: default
+      apnType: Default
+      authMode: None
+      authUsername:
+      authPassword:
+# end of USB LTE
+
+
+# Preconfiguration of a LAN IP address for management traffic.
+# Providing an IP address configures a LAN IP address
+# for management traffic.
+# Providing no IP address removes the LAN IP address configuration
+#  for management traffic.
+#
+#   ipAddress - IP address with x.x.x.x format
+#               Value:IPv4 address, optional, default empty
+#
+# Post-approval behavior: replace
+
+managementIp:
+  ipAddress: 10.0.0.0
+
+
+# Preconfiguration Template for interfaceConfig
+# supports configuration of the EC interface speed and duplex mode
+#
+#
+# interfaces - a list of interfaces modification
+#  interfaceName - interface name, If interface is a VLAN interface,
+#                   append VLAN number to interface name.
+#                   For example, lan0.100, or wan1.22
+#                    Value:[wan0, wan1, wan2, lan0, lan1, lan2, tlan0,
+#                    tlan1, twan0, twlan0, blan0, blan1, bwan0, bwan1]
+#                   This field is required
+#  interfaceSpeed - speed of interface
+#                   value:[10, 100, 1000, 10000,auto], optional
+#  interfaceDuplex - duplex mode of interface
+#                    value:[half, full, auto], optional
+#  admin          - admin status of the interface (up or down)
+#                    value:[up, down], optional
+#  comboPortMode - for gateways supporting a combo port, the
+#                   comboPortMode specifies the mode the port should
+#                   operate in - RJ45 mode (value: 0, default mode)
+#                   or SFP mode (value: 3).
+#	                 value: [0,3], optional. For EC-10106/10108 models,
+#                    only lan2 and wan2 support comboPortMode
+# Post-approval behavior: replace
+
+interfaceConfig:
+  interfaces:
+    - interfaceName: lan0
+      interfaceSpeed: 1000
+      interfaceDuplex: full
+      admin: up
+    - interfaceName: lan2
+      interfaceSpeed: 1000
+      interfaceDuplex: full
+      admin: up
+      comboPortMode: 0
+    - interfaceName: wan0
+      interfaceSpeed: 1000
+      interfaceDuplex: full
+      admin: up
+    - interfaceName: wan2
+      interfaceSpeed: 1000
+      interfaceDuplex: full
+      admin: up
+      comboPortMode: 0
+
+# Preconfiguration Template for Custom Appliance Tags
+#
+# customApplianceTagsInterfaces - A list of custom appliance tags configuration. Not defined tags will remain the same. Maximum 8 tags.
+#
+#    tagId - The unique id of custom appliance tags.
+#                Value: [1-8], required
+#
+#    key - A user defined tag name
+#                Value: string with maximum 255 characters, required
+#
+#    value - A user defined tag value
+#                Value: string with maximum 1023 characters, optional
+# Post-approval behavior: replace
+
+customApplianceTags:
+  customApplianceTagsInterfaces:
+    - tagId: 1
+      key: key1
+      value: value1
+# end of CustomApplianceTags
+
+# Preconfiguration Template for Link Aggregation
+#
+# This is supported on appliance running version 9.0.3.0_0000 or greater
+# linkAggregationGroups - Required wrapper list of bonded interfaces configuration.
+#
+#    channelGroup - The unique id of channel group.
+#                Value: blan#/bwan#, # is 0-1, required
+#
+#    interfaces - The list of interfaces will be bonded,
+#                  can be a mix of lan & wan interfaces,
+#                  up to four interfaces in one channel group,
+#                  orders doesn't matter
+#                Value: [lan2, lan3, lan4, lan5], required
+#
+#    mtu - The MTU for this channel group, min value is 700
+#                Value: string, required
+#
+#    mode - The mode for this channel group, to enable LACP mode set this value to 4
+#                Default is 2 for balance-rr(static aggregation mode) Value: string, required
+#                this field only available for EdgeOS releases 9.2.0 or greater
+#
+#    lacpRate - The LACP rate for this channel group,
+#                Value: [slow, fast], This field is required only when mode = 4, default slow
+#                this field only available for EdgeOS releases 9.2.0 or greater
+#
+#    lacpSystemPriority - The LACP system priority for this channel group, min value is 1,
+#                max value is 65535, Value: string, This field is required only when mode = 4 , default 65535
+#                this field only available for EdgeOS releases 9.2.0 or greater
+#
+#    lacpComment - The comment for this channel group,
+#                Value: string, optional
+#                this field only available for EdgeOS releases 9.2.0 or greater
+#
+#  isForceDelete - Free up deployed interfaces to make them available
+#                   for bonding
+#                  Value: [true, false], required, default true
+# Post-approval behavior: replace
+
+linkAggregation:
+  linkAggregationGroups:
+    - channelGroup: blan0
+      interfaces: lan0, wan0, lan1, wan1
+      mtu: 1500
+      mode: 4
+      lacpRate: slow
+      lacpSystemPriority: 65535
+      lacpComment: Bonded interface with LACP mode
+
+  isForceDelete: true
+# end of linkAggregation
+
+# Preconfiguration Template for Bridge Groups
+#
+# This is supported on EdgeConnect gateways running version 9.5.1.0_0000 or greater
+# bridgeGroups - A list of grouped interfaces configuration.
+#
+#   bridgeGroup - The unique id of bridge group.
+#                 Value: slan#, where # is between 0-3, string, required.
+#                 Up to 4 bridgeGroup instances can be created
+#
+#   interfaces - The list of interfaces to be grouped,
+#                  can be a mix of lan# & wan# interfaces that are comma delimited, where # is between 0-15,
+#                  up to 16 interfaces in one bridge group allowed,
+#                  orders doesn't matter
+#                Value: "lan0, lan1, wan2, wan3", string, required
+#
+#   mtu - The MTU for this bridge group,
+#         Value: integer, valid range is 700 - 9000, required, default: 1500
+#
+#   adminStatus - Indicates whether this bridge group is set to admin Up or Down
+#                 Value: [Up, Down], optional, default: Up, string
+#
+#   comment - The comment for this bridge group,
+#             Value: string, optional
+bridgeGroups:
+  - bridgeGroup: slan0
+    interfaces: lan2, wan2
+    mtu: 1500
+    adminStatus: Up
+    comment: No comment
+# end of bridgeGroups
+
+# Preconfiguration Template for BFD
+#
+# segmentBfdConfigs - A list of bfd configurations. This config is only available for EdgeOS releases >= 9.2.0.0
+#
+#  segment          -  name of virtual routing and forwarding
+#                      Value: valid segment name, optional, default: Default
+#  enable           -  Flag to enable/disable BFD
+#                      Value:[true, false](enables/disables), required
+#  minTxInterval    -  Min Tx Interval in milliseconds
+#                      Value: Should be in range 300 - 5000
+#  minRxInterval    -  Min Rx Interval in milliseconds
+#                      Value: Should be in range 300 - 5000
+#  detectMultiplier -  Number of consecutive times failed to establish BFD session. If the failure time reaches this count,
+#                      both BGP and BFD sessions will be brought down.
+#                      Value: Should be in range 3 - 10
+#
+# Recommended values for Interval: 900 ms and Detection Multiplier: 5
+# Post-approval behavior: replace
+segmentBfdConfigs:
+  - segment: Default
+    enable: true
+    minRxInterval: 900
+    minTxInterval: 900
+    detectMultiplier: 5
+# end of segmentBfdConfigs
+
+# Preconfiguration Template for Third Party Services Association
+#
+# thirdPartyServicesAssociation - Third Party Services association for appliance
+#
+#    zscalerAssociation - boolean value to set zscaler association
+#                         Value: [true, false], optional
+#                         if not specified, will leave current association unchanged
+#
+#    netskopeAssociation - boolean value to set netskope association
+#                         Value: [true, false], optional
+#                         if not specified, will leave current association unchanged
+#
+#    axisAssociation - boolean value to set axis association
+#                         Value: [true, false], optional
+#                         if not specified, will leave current association unchanged
+#    connectorService - Connector management service configuration
+#         create: boolean value to create install connector. By default it is false, no connector will be created.
+#                 If it is defined as true, a connector will be created automatically mapped to the image which was certified for the appliance version.
+#
+#    serviceProviderAssociation - A list of service provider to remote endpoint association
+#
+#         serviceName - The name of service provider.
+#                       Service provider should be pre-configured using
+#                       Orchestrator UI -> Configuration -> Cloud Services -> Service Orchestration.
+#                       Value: name_of_service, optional
+#                       if not specified, will leave current association unchanged
+#
+#         remoteEndpoints - The list of remote endpoints for a service.
+#                              Service provider and remote endpoints should be pre-configured using
+#                              Orchestrator UI -> Configuration -> Cloud Services -> Service Orchestration.
+#                              order doesn't matter
+#                              Value: [remote1, remote2, remote3], optional
+#
+# Post-approval behavior: replace
+thirdPartyServicesAssociation:
+  zscalerAssociation:
+  netskopeAssociation:
+  axisAssociation:
+  connectorService:
+    create: false
+  serviceProviderAssociation:
+    - serviceName:
+      remoteEndpoints:
+    - serviceName:
+      remoteEndpoints:
+# end of ThirdPartyServicesAssociation
+
+# Preconfiguration Template for Availability Time Settings
+#
+# This is supported on appliance running version 9.3.0.0_0000 or greater
+#
+#    timezone - The is the timezone used for availability stats. It is can be any timezone present in
+#                Default is UTC Value: String, required
+#
+#    isCustomBusinessHours - This indicates if the appliance needs to have custom business hours or 24 hours. To enable custom business hours set this value to true
+#                Default is false Value: boolean, required
+#
+#    businessHoursStart - The start time of business hours.
+#                Value: 1-12, This field is required only when isCustomBusinessHours= true
+#
+#
+#    businessHoursStartFormat - The time format of businesshour start
+#                Value: am or pm, This field is required only when isCustomBusinessHours= true
+#
+#
+#    businessHoursEnd - The end time of business hours.
+#                Value: 1-12, This field is required only when isCustomBusinessHours= true
+#
+#    businessHoursEndFormat - The time format of businesshour start
+#                Value: am or pm, This field is required only when isCustomBusinessHours= true
+# Post-approval behavior: replace
+
+availabilityTimeSettings:
+  timezone: UTC
+  isCustomBusinessHours: false
+
+# To configure custom business hours use the following
+#
+# availabilityTimeSettings:
+#   timezone: UTC
+#   isCustomBusinessHours: true
+#   businessHoursStart: 9
+#   businessHoursStartFormat: am
+#   businessHoursEnd: 6
+#   businessHoursEndFormat: pm
+
+# end of availabilityTimeSettings
+
+# Preconfiguration Template for NAT pools
+#
+# NatPools: A list of NAT pools. The NAT pool ID is generated by the pool sequence of NatPools. The first pool will have id 0, the second pool will have id 1, and so on.
+#          The maximum number of NAT pools supported is 200.
+#
+#   name -           Name of the NAT pool
+#                    Value: string, required
+#   segment -        Segment associated with the interface.
+#                    Value: string, valid values are ['Default', ...] as defined in Routing Segmentation (VRF) tab, String, optional, default: Default
+#   direction -      Traffic direction to perform NAT on.
+#                    Value: ['outbound', 'inbound'], string, required
+#
+#   poolIpSubnet -   IP address of the pool. Must be a valid subnet.
+#                    Value: string, in IPv4(x.x.x.x/x) format, required
+#
+#   translatePorts - Enable source port address translation if the NAT pool is too small to accommodate multiple, flows simultaneously with 1:1 IP address translation.
+#                    False disables source port address translation, true enables source port address translation.
+#                    Value: ['true', 'false'], optional, default: true
+#
+#   comment -        Any comment you want to add pertaining to your branch NAT rule.
+#                    Value: maximum 128 characters, optional, default is empty
+
+natPools:
+  - name: SAMPLE-1
+    segment: Default
+    direction: outbound
+    poolIpSubnet: 1.1.1.0/24
+    translatePorts: true
+    comment: No comment
+  - name: SAMPLE-2-inbound
+    segment: Default
+    direction: inbound
+    poolIpSubnet: 2.2.2.0/24
+    translatePorts: false
+    comment: The current translate ports is disabled
+
+# end of NAT pools
+
+# Preconfiguration Template for Branch NAT Maps
+#
+# branchNatRules - A list of branch NAT rules with different priorities.
+#
+#     priorityLevel -                Order in which the rules are executed; the lower the priority, the higher the chance your NAT will be applied.
+#                                    Value: integer, valid range is 1-65534, required
+#
+#     segment -                      Segment associated with the interface.
+#                                    Value: string, valid values are ['Default', ...] as defined in Routing Segmentation (VRF) tab, String, optional, default: Default
+#
+#     direction -                    Traffic direction to perform NAT on; Outbound: LAN to Fabric; Inbound: Fabric to LAN.
+#                                    Value: ['outbound', 'inbound'], string, required
+#
+#     enable -                       Enable or disable your customized NAT rule.
+#                                    Value: ['true', 'false'], optional, default: true
+#
+#     comment -                      Any comment you want to add pertaining to your branch NAT rule.
+#                                    Value: maximum 128 characters, optional, default is empty
+#
+#     interfaceName -                Name of the LAN interface to which this NAT rule applies. For inbound NAT rules, interface name can only be set to 'any'.
+#                                    Value: valid interface names such as "lan0", "wan1.103", use "any" to match any interface name, string, required
+#
+#     protocol -                     Type of protocol being used for this NAT rule.
+#                                    Value: ['udp', 'tcp', 'any'], string, optional, default: 'any'
+#
+#     sourceIpSubnet -               Source IP address to be translated. Must be a valid subnet. At least sourceIpSubnet or destinationIpSubnet is required.
+#                                    Value: string, in IPv4(x.x.x.x/x) format, or use 'any' to represent '0.0.0.0/0'
+#
+#     destinationIpSubnet -          Destination IP address to be translated. Must be a valid subnet. At least sourceIpSubnet or destinationIpSubnet is required.
+#                                    Value: string, in IPv4(x.x.x.x/x) format, or use 'any' to represent '0.0.0.0/0'
+#
+#     destinationPort -              Destination port/range to be translated. Must have the same format as translateDestinationPort.
+#                                    Value: integer, from 1 to 65535, or range format eg: 123-124.
+#
+#     translateSourceIpSubnet -      Translated source IP subnet. Must be a valid subnet. If this field is provided, translateNatPoolName cannot be specified.
+#                                    Value: string, in IPv4(x.x.x.x/x) format
+#
+#     translateNatPoolID -           The NAT pool Id is generated by the pool sequence of NatPools. The first pool will have id 0, the second pool will have id 1, and so on.
+#                                    The NAT pool direction must be same as NAT rule direction.
+#                                    If this field is provided, translateSourceIpSubnet cannot be specified.
+#                                    Value: valid values are ["0", "1", ...], integer
+#
+#     translateDestinationIpSubnet - Translated destination Ip address. Must be a valid subnet.
+#                                    Value: string, in IPv4(x.x.x.x/x) format
+#
+#     translateDestinationPort -     Translated destination port/range. Must have the same format as destinationPort.
+#                                    Value: integer, from 1 to 65535, or range format eg: 123-124
+
+branchNatMapsConfig:
+  branchNatRules:
+    - priorityLevel: 10
+      segment: Default
+      direction: outbound
+      enable: true
+      comment: this is rule 10
+      interfaceName: any
+      protocol: any
+      sourceIpSubnet: 10.20.30.0/24
+      destinationIpSubnet: 10.20.30.0/24
+      destinationPort: 1-10
+      translateSourceIpSubnet: 10.20.30.0/24
+      translateDestinationIpSubnet: 10.20.30.0/24
+      translateDestinationPort: 11-20
+    - priorityLevel: 20
+      segment: Default
+      direction: outbound
+      enable: true
+      comment: this is rule 20
+      interfaceName: any
+      protocol: any
+      sourceIpSubnet: 10.20.40.0/24
+      destinationIpSubnet: 10.20.40.0/24
+      destinationPort: 1-10
+      translateNatPoolID: 0
+      translateDestinationIpSubnet: 10.20.40.0/24
+      translateDestinationPort: 11-20
+
+# end of Branch NAT Maps
+
+# Preconfiguration template for VXLAN
+#
+# Enable Aruba EdgeConnect devices to learn user roles from Group Policy ID (GPID)
+# in Virtual Extensible LAN (VXLAN) packets received from AOS-CX switches,
+# advertise the routes, and carry roles across the SD-WAN fabric.
+#
+# This is supported on appliances running version 9.4.1.0_0000 or higher
+#
+#  destinationUdpPort -  Destination UDP port, can be customized.
+#                        Value: Integer, valid range is 1 - 65535,
+#                        default: 4789, required
+#  vtepSrcInterface   -  VXLAN Tunnel End Point (VTEP) source interface.
+#                        Value: String, only loopback interfaces from default
+#                        segment are valid.
+#                        default: "lo1", required
+#  vniVrfMaps         -  A list of VNI-VRF mappings to associate the VNI to segment.
+#    vni              -  VXLAN Network Identifier (VNI)
+#                        A part of VXLAN header and uniquely identifies a layer-2 segment.
+#                        Value: Integer, valid range is 1 - 16777215,
+#                        default: 100, required
+#    segment          -  Name of virtual routing and forwarding.
+#                        Value: String, a valid segment name,
+#                        default: "Default", required
+#    zone             -  Firewall zone associated to the VNI.
+#                        Value: String, a valid zone name,
+#                        default: "Default", required
+#    role             -  Fallback role associated to the VNI.
+#                        It enforces endpoint policy inside the fabric.
+#                        Value: String, a valid role name,
+#                        default: "default", optional
+
+vxlan:
+  destinationUdpPort: 4789
+  vtepSrcInterface: lo1
+  vniVrfMaps:
+    - vni: 100
+      segment: Default
+      zone: Default
+      role: default
+
+# end of VXLAN
+
+# Preconfiguration Template for IDS/IPS Settings
+#
+#     mode -       mode for IDS/IPS
+#                  Value: ['Off', 'IDS Only', 'IPS-Performant', 'IPS-Inline'], string, required
+#                  Default: "Off"
+#
+#     profile -    Signature Profiles for IDS/IPS
+#                  Value: string, required
+#                  Default: "Default"
+idsIpsConfig:
+  mode: Off
+  profile: Default
+
+# end of IDS/IPS config
+
+# Preconfiguration Template for associating AppExpress groups
+  # appExpressGroups - list of AppExpress groups to be applied to appliance,
+  #             AppExpress groups must be already defined in Orchestrator.
+  #             Value: list of AppExpress group names
+  # Example:
+  # appExpressGroups:
+  #   - Group1
+  #   - Group2
+  # Post-approval behavior: merge
+appExpressGroups:
+
+# end of AppExpress groups section
+
+# Preconfiguration Template for NAC
+# nac - Network Access Control
+# nacEnable                      - Enable/Disable NAC service
+#                                  Value: boolean
+# dot1x -
+# - id                           - Index number,
+#                                  Value: integer, 1-10 range
+#   eapol_logoff                 - Handle EAPOL-Logoff
+#                                  Value: boolean
+#   idrequest_period             - Interval Between Identity Requests
+#                                  Value: integer, 1-65535 range
+#   ignore_eapolstart_after_auth - Ignore EAPOL-START After Authentication
+#                                  Value: boolean
+#   max_auth_fails               - Max Authentication Failure
+#                                  Value: integer, 1-5 range
+#   max_req                      - Max Number of Requests Sent During an Auth Attempt
+#                                  Value: integer, 0-3 range
+#   name                         - dot1x Profile name
+#                                  Value: string
+#   quiet_period                 - Quiet Period After Failed Authentication
+#                                  Value: integer, 1-65535 range
+#   reauth                       - Reauthentication
+#                                  Value: boolean
+#   reauth_max                   - Max Number of Reauthentication Attempts
+#                                  Value: integer, 1-10 range
+#   reauth_period                - Reauthentication Interval
+#                                  Value: integer, 60-864000 range
+#   server_retry_period          - Authentication Server Retry Period
+#                                  Value: integer, 60-65535 range
+#   server_retry                 - Authentication Server Retry Count
+#                                  Value: integer, 1-5 range
+#
+# macAuthProfile:
+# - id                           - Index number
+#                                  Value: integer, 1-10 range
+#   max_auth_fails               - Max Authentication Failure
+#                                  Value: integer, 1-5 range
+#   name                         - macAuthProfile Profile name
+#                                  Value: string
+#   quiet_period                 - Quiet Period After Failed Authentication
+#                                  Value: integer, 1-65535 range
+#   reauth                       - Reauthentication
+#                                  Value: boolean
+#   reauth_period                - Reauthentication Interval
+#                                  Value: integer, 60-864000 range
+#   reauth_max                   - Max Number of Reauthentication Attempts
+#                                  Value: integer, 1-10 range
+#   server_retry_period          - Authentication Server Retry Period
+#                                  Value: integer, 60-65535 range
+#   server_retry                 - Authentication Server Retry Count
+#                                  Value: integer, 1-5 range
+#   message_auth_attribute       - Message Authentication
+#                                  Value: boolean
+#
+# server:
+# - id                           - Index number
+#                                  Value: integer, 1-10 range
+#   host                         - IP Address or Hostname
+#                                  Value: string, IPv4 address
+#                                  Release >= 9.7.0
+#                                  Value: string, IPv4 address or hostname
+#   authport                     - Authentication Port
+#                                  Value: integer, 1-65535
+#   key                          - Authentication key
+#                                  Value: string
+#   name                         - Server name
+#                                  Value: string
+#   source_ip_interface          - Interface for Source IP Address
+#                                  Value: string, takes lan labels like Voice and Data and sets the interfaces with that label
+# serverGroup:
+#  - id                          - Index number
+#                                  Value: integer, 1-10 range
+#    name                        - Server Group Name
+#                                  Value: string
+#    server                      - Server names to be attached to the server group
+#                                  Value: string, takes comma separated values
+#
+# aaaProfile:
+#  - id                          - Index number
+#                                  Value: integer, 1-10 range
+#    da_enable                   - Dynamic Authorization Enable
+#                                  Value: boolean
+#    da_server                   - Dynamic Authorization Server
+#                                  Value: string, single server name defined in server
+#    dot1x_default_role          - Dot1x Default Role
+#                                  Value: string, rbac role
+#    dot1x_profile               - Dot1x Profile to be attached
+#                                  Value: string, single dot1x profile name defined in dot1x
+#    dot1x_server_group          - Server group to be attached for Dot1x
+#                                  Value: string, single server group name defined in serverGroup
+#    mac_default_role            - Mac Default Role
+#                                  Value: string, rbac role
+#    mac_profile                 - MacAuthProfile name to be attached
+#                                  Value: string, single macAuthProfile name defined in macAuthProfile
+#    mac_server_group            - Server group to be attached for macAuthProfile
+#                                  Value: string, single server group name defined in serverGroup
+#    name:                       - AAA Profile Name
+#                                  Value: string
+#    srvl                        - Simultaneous RADIUS and Local Authentication
+#                                  Value: boolean
+#    srvl_period                 - SRVL Period
+#                                  Value: integer, 3600 to 604800 (1 to 168 hours) range, default 86400
+#    deny_enable                 - NAC Deny Enable
+#                                  Value: boolean
+#    deny_period                 - NAC Deny Period
+#                                  Value: integer, 60 to 68400 (1 to 1440 minutes), default 900
+#    deny_threshold              - NAC Deny Threshold
+#                                  Value: integer, 1-50 range, default 3
+#
+# applyPolicies:
+#  - id                          - Index number
+#                                  Value: integer, 1-10 range
+#    auth_interface              - Authentication Interface
+#                                  Value: string, takes lan labels like Voice and Data and sets the policy at the interfaces with that label
+#    profile                     - AAA Profile name to be atached for authentication
+#                                  Value: string
+#    auth_type                   - Authentication Type
+#                                  Value: string, takes trusted, both, 802.1x and mac Authentication types
+#
+# Post-approval behavior: replace
+nac:
+  nacEnable: false
+  dot1x:
+  - id: 1
+    eapol_logoff: false
+    idrequest_period: 5
+    ignore_eapolstart_after_auth: false
+    max_auth_fails: 1
+    max_req: 0
+    name: default
+    quiet_period: 30
+    reauth: false
+    reauth_max: 1
+    reauth_period: 86400
+    server_retry_period: 60
+    server_retry: 3
+  macAuthProfile:
+  - id: 1
+    max_auth_fails: 1
+    name: default
+    quiet_period: 30
+    reauth: false
+    reauth_period: 86400
+    reauth_max: 3
+    server_retry_period: 60
+    server_retry: 3
+    message_auth_attribute: false
+  server:
+  - id: 1
+    host: 0.0.0.0
+    authport: 1812
+    key: authKey
+    name: default
+    source_ip_interface: any
+  serverGroup:
+  - id: 1
+    name: default
+    server: default
+  aaaProfile:
+  - id: 1
+    da_enable: false
+    da_server: default
+    dot1x_default_role: default
+    dot1x_profile: default
+    dot1x_server_group: default
+    mac_default_role: default
+    mac_profile: default
+    mac_server_group: default
+    name: default
+    srvl: false
+    srvl_period: 86400
+    deny_enable: false
+    deny_period: 900
+    deny_threshold: 3
+  applyPolicies:
+  - id: 1
+    auth_interface: Voice
+    profile: default
+    auth_type: both
+
+# end of NAC section
+
+# Preconfiguration Template for PoE.
+# Allow users to set the PoE power mode on a selected appliance as well as the priority and enable status
+# per PoE interface. Required ECOS release version has to be at least 9.3.2.0.
+#   powerMode - power mode for PoE, default value is 2 (Dynamic with No Priority). Other modes are:
+#               Static with no priority -> 0
+#               Dynamic with pre-allocation and no priority -> 1
+#               Dynamic with pre-allocation and priority -> 3
+#               Static with priority -> 4
+#               Dynamic without pre-allocation and with priority -> 5
+#               Value: [0,1,2,3,4,5], optional
+#   interfaceName - name of the PoE interface to configure for. For EC-10106/10108 models,
+#               lan0 and lan1 are PoE interfaces, future models may have other interfaces that support PoE
+#               Value: [lan0, lan1], required if setting priority or enable for PoE interfaces
+#   priority -  priority determines the interfaces that will receive power when power is over-subscribed
+#               on the appliance. The default setting is 0, which denotes the highest priority.
+#               Value: [0, 1], optional
+#   enable -    enable this interface as a PoE interface.
+#               Value: [true, false], required
+# Post-approval behavior: replace
+
+poE:
+  powerMode: 2
+  interfaces:
+    - interfaceName: lan0
+      priority: 0
+      enable: true
+
+# end of PoE section
+
+# Preconfiguration Template for Secure WebServices config.
+# Wrapper objects: urlClassificationConfig and ipReputationConfig are required.
+#   hasURLClassification -    enable this Url Classification.
+#                               Value: [true, false], required
+#   incrementalUpdate -       enables incremental Update of Url Classification .
+#                               Value: [true, false], required
+#   queryOnMiss -             enables queryOnMiss of Url Classification.
+#                               Value: [true, false], required
+#   urlReputation -           Url Reputation, default value is 1 (High Risk). Other Options are:
+#                                Suspicious -> 2
+#                                Moderate Risk -> 3
+#                                Low Risk -> 4
+#                                Trustworthy -> 5
+#                                Value: [1,2,3,4,5], optional
+#    flowProcess -            Flag to enable WebCC treatment for All requests/First request
+#                               Value: ['true', 'false'], required, default: true
+#                               true-All Request
+#                               false-First request       
+#   hasIPReputation -         enables Ip Reputation.
+#                                Value: [true, false], required
+#   incrementalUpdate -       enables incremental Update of Ip Reputation.
+#                                Value: [true, false], required
+
+secureWebServicesConfig:
+  urlClassificationConfig:
+    hasURLClassification: false
+    incrementalUpdate: false
+    queryOnMiss: false
+    urlReputation: 1
+    flowProcess: true
+  ipReputationConfig:
+    hasIPReputation: false
+    incrementalUpdate: false
+
+# end of Secure WebServices config section
+
+# Preconfiguration Template for Ip Allow List.
+# Allow users to set the Ip Allow List for ssh, snmp and https
+# per Ip Allow List interface. Required ECOS release version has to be at least 9.6.0.0.
+#   enable -    enable Ip Allow List.
+#               Value: [true, false], required and default is false
+#   ips - List of Ips to allowed.
+#     ip           - Validate ip like 10.10.10.1
+#     prefixLength - Range of ips allowed
+#     comment      - Configuration comments
+#     protocol     - Allowed protocols ssh, snmp and https. Value is a list.
+# Post-approval behavior: replace
+
+ipAllowList:
+  enable: false
+  ips:
+    - ip: 0.0.0.0
+      prefixLength: 24
+      comment: Allow Ip from 0.0.0.1 to 0.0.0.255
+      protocol:
+        - snmp
+# end of Ip Allow List section
+
+# Preconfiguration Template for multicast.
+# Configure the multicast for each segment.
+# Required ECOS release version has to be at least 9.7.0.0.
+#   segment -    Name of virtual routing and forwarding.
+#                        Value: String (required), a valid segment name,
+#                        default: "Default"
+#   enable - Multicast enable possible values none, true, false.
+#               Value: [none, true, false], required and default is none
+#               none -  Don't apply multicast configuration
+#               true -  Enable multicast
+#               false - Disable multicast
+#   rpAddresses -  RP address for PIM-SM.
+#                   Value: IPv4 address, Validate ip like 10.10.10.1
+#                   Required when Multicast is enabled
+#                   Optional when Multicast is disabled or none
+#   filterName -  Name of the multicast filter to be applied.
+#                   Value: String (optional), a valid filter name,
+#                   default: empty
+#                   Maximum length is 64 characters
+#                   Filter name can contain only letters, numbers, dots, underscores and hyphens
+#   pim -  List of PIM interface configurations (optional).
+#     interfaceName -  Name of the interface to configure PIM (required).
+#                   Value: valid interface names such as "lan0", "wan1.103",
+#                   pattern: "^[a-z]+[0-9]+(\\.[0-9]+)?$"
+#     drPriority -  Designated Router priority for PIM.
+#                   Value: integer (optional), valid range is 1-4294967295, default is 1
+#     pimEnable -      Enable or disable PIM on the interface.
+#                   Value: [true, false], (required)
+#     igmpEnable -      Enable or disable IGMP on the interface.
+#                   Value: [true, false], (required)
+#     helloInterval -  Hello interval for PIM in seconds.
+#                       Value: integer (optional), valid range is 1-300, default is 30
+#     joinPruneInterval -  Join/Prune interval for PIM in seconds.
+#                           Value: integer (optional), valid range is 30-180, default is 30
+# Post-approval behavior: replace
+
+multicast:
+  - segment: Default
+    enable: none
+    rpAddresses: 1.1.1.1
+    filterName:
+    pim:
+      - interfaceName: lan0
+        pimEnable: false
+        igmpEnable: false
+        drPriority: 1
+        helloInterval: 30
+        joinPruneInterval: 30
+# end of multicast section

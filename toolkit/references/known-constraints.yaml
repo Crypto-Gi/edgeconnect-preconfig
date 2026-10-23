@@ -1,0 +1,202 @@
+# Cross-field, cross-section, and apply-time constraints enforced by Orchestrator (/validate) or ECOS (/apply).
+#
+# 1. `constraints`: Single-column mutation rules used by `tests/harnesses/suite.py` (when mutating `path` to `value`,
+#    either supply the sibling fields in `also` or expect `/validate` to reject with `seen`).
+# 2. `structural_and_apply_constraints`: Multi-field, cross-section, and appliance `/apply`-time rules learned across
+#    the real-appliance corpus and live apply-and-diff runs. Agents MUST check this list when adapting templates,
+#    editing CSVs, or diagnosing `/validate` and `/apply` errors.
+
+constraints:
+  - path: 'deploymentInfo\.deploymentInterfaces\[\d+\]\.interfaceType$'
+    value: wan
+    reason: interfaceType must match the side of its interfaceLabel (a LAN label with type wan is rejected)
+    seen: "deploymentInfo - Interface Label in wan Side is invalid: Voice"
+  - path: 'deploymentInfo\.dhcpInfo\[\d+\]\.option82SubOptions150$'
+    value: "true"
+    reason: DHCP option 82 suboptions 5 and 150 cannot both be enabled
+    seen: "Option 5 and Option 150 cannot be enabled together"
+  # --- constraints with a CSV companion: changing the column also needs these sibling columns (same parent path) ---
+  - {path: 'ospfSystemConfig\.interfaces\[\d+\]\.authentication$', value: Text, also: {authenticationKey: Test-Only-Secret-1}, reason: "Text authentication needs authenticationKey", seen: "authenticationKey cannot be empty if authentication is set to Text"}
+  - {path: 'ospfSystemConfig\.interfaces\[\d+\]\.authentication$', value: MD5, also: {md5Password: Test-Only-Secret-1}, reason: "MD5 authentication needs md5Password", seen: "md5Password cannot be empty if authentication is set to MD5"}
+  - {path: 'ikeConfig\.ikeEncryptAlgorithm$', value: aes128gcm16, also: {ikeAuthAlgorithm: "null", ikePrf: prfsha256, ikeVersion: "2"}, reason: "IKE gcm encryption needs authentication algorithm null and a sha2 PRF", seen: "Ike Authentication algorithm must be NA ('null') when Encryption algorithm is gcm/gmac"}
+  - {path: 'ikeConfig\.ikeEncryptAlgorithm$', value: aes256gcm16, also: {ikeAuthAlgorithm: "null", ikePrf: prfsha384, ikeVersion: "2"}, reason: "IKE gcm 256 needs authentication algorithm null and PRF prfsha384 or prfsha512", seen: "Ike Authentication algorithm must be NA ('null') when Encryption algorithm is gcm/gmac"}
+  - {path: 'ikeConfig\.ikeAuthAlgorithm$', value: "null", also: {ikeEncryptAlgorithm: aes128gcm16, ikePrf: prfsha256, ikeVersion: "2"}, reason: "IKE authentication null needs a gcm encryption algorithm and a sha2 PRF", seen: "Ike Authentication algorithm cannot be NA ('null') when Encryption algorithm is not gcm"}
+  - {path: 'ipsecConfig\.ipsecEncryptAlgorithm$', value: aes128gcm16, also: {ipsecAuthAlgorithm: "null"}, reason: "IPsec gcm encryption needs authentication algorithm null", seen: "Ipsec Authentication algorithm must be NA ('null') when Encryption algorithm is gcm/gmac"}
+  - {path: 'ipsecConfig\.ipsecEncryptAlgorithm$', value: aes256gcm16, also: {ipsecAuthAlgorithm: "null"}, reason: "IPsec gcm encryption needs authentication algorithm null", seen: "Ipsec Authentication algorithm must be NA ('null') when Encryption algorithm is gcm/gmac"}
+  - {path: 'ipsecConfig\.ipsecAuthAlgorithm$', value: aes128gmac, also: {ipsecEncryptAlgorithm: "null"}, reason: "IPsec gmac authentication needs encryption algorithm null", seen: "Ipsec Encryption algorithm must be NA ('null') when Authentication algorithm is gcm/gmac"}
+  - {path: 'ipsecConfig\.ipsecAuthAlgorithm$', value: aes256gmac, also: {ipsecEncryptAlgorithm: "null"}, reason: "IPsec gmac authentication needs encryption algorithm null", seen: "Ipsec Encryption algorithm must be NA ('null') when Authentication algorithm is gcm/gmac"}
+  - {path: 'ipsecConfig\.ipsecAuthAlgorithm$', value: "null", also: {ipsecEncryptAlgorithm: aes128gcm16}, reason: "IPsec authentication null needs a gcm encryption algorithm", seen: "Ipsec Authentication algorithm cannot be NA ('null') when Encryption algorithm is not gcm"}
+  - {path: 'portForwardingRules\[\d+\]\.destinationProtocol$', value: icmp, also: {destinationPortRange: "0", translatePortRange: "0"}, reason: "ICMP rules need destination and translated port 0", seen: "Destination port and translated port must be 0 for ICMP protocol"}
+  - {path: 'portForwardingRules\[\d+\]\.destinationProtocol$', value: any, also: {destinationPortRange: "0-65535", translatePortRange: "0-65535"}, reason: "protocol any needs both port ranges 0-65535", seen: "destinationPortRange and translatePortRange must be 0-65535 when destinationProtocol is any"}
+  - {path: 'lteInterfaces\[\d+\]\.apnType$', value: MultiAPN, also: {apn: test-apn, authMode: PAP, authUsername: test-user, authPassword: Test-Only-Secret-1}, reason: "a non-default apnType needs another apn name and an authMode other than None", seen: "If APN is 'default', APN Type needs to be 'Default'"}
+  - {path: 'lteInterfaces\[\d+\]\.apnType$', value: Specific, also: {apn: test-apn, authMode: PAP, authUsername: test-user, authPassword: Test-Only-Secret-1}, reason: "a non-default apnType needs another apn name and an authMode other than None", seen: "If APN is 'default', APN Type needs to be 'Default'"}
+  - {path: 'lteInterfaces\[\d+\]\.authMode$', value: PAP, also: {apnType: Specific, apn: test-apn, authUsername: test-user, authPassword: Test-Only-Secret-1}, reason: "authentication needs a non-default APN type, a username and a password", seen: "Auth Mode must be 'None', if APN Type is 'Default'"}
+  - {path: 'lteInterfaces\[\d+\]\.authMode$', value: CHAP, also: {apnType: Specific, apn: test-apn, authUsername: test-user, authPassword: Test-Only-Secret-1}, reason: "authentication needs a non-default APN type, a username and a password", seen: "Auth Mode must be 'None', if APN Type is 'Default'"}
+  - {path: 'virtualTunnelInterface\.vtis\[\d+\]\.interfaceType$', value: wan, also: {interfaceLabel: MPLS1}, reason: "interfaceType must match the side of interfaceLabel", seen: "Interface Label in wan Side is invalid: Voice"}
+  - {path: 'tunnels\[\d+\]\.natMode$', value: snat, also: {tunnelEncap: no_encap}, reason: "snat is only valid on a no_encap passthrough tunnel; the comment calls the key nat, which /validate rejects as an unrecognized field", seen: "Tunnel - snat is only supported for no_encap mode"}
+  - {path: 'multicast\[\d+\]\.pim\[\d+\]\.igmpEnable$', value: "true", also: {pimEnable: "true"}, reason: "IGMP needs PIM enabled on the same interface", seen: "PIM must be enabled before IGMP is enable"}
+  # --- rejections with no companion found yet ---
+  - {path: 'ikeConfig\.ikeEncryptAlgorithm$', value: "null", reason: "IKE encryption null is only valid with a gmac authentication algorithm, which the IKE list does not offer", seen: "Ike Encryption algorithm cannot be NA ('null') when Authentication algorithm is not gmac"}
+  - {path: 'ikeConfig\.ikeEncryptAlgorithm$', value: auto, reason: "the comment lists auto for IKE but the validator accepts only default, aes128, aes256, aes128gcm16, aes256gcm16, null", seen: "ikeEncryptAlgorithm is invalid: auto"}
+  - {path: 'ipsecConfig\.ipsecSuiteB$', value: gcm128, reason: "Suite-B needs every IKE and IPsec field set exactly as in the default template Suite-B table (verified 2026-10-18)", seen: "Ike DH group is not set as per selected suite"}
+  - {path: 'ipsecConfig\.ipsecSuiteB$', value: gmac128, reason: "Suite-B needs every IKE and IPsec field set exactly as in the default template Suite-B table (verified 2026-10-18)", seen: "Ike DH group is not set as per selected suite"}
+  - {path: 'ipsecConfig\.ipsecSuiteB$', value: gcm256, reason: "Suite-B needs every IKE and IPsec field set exactly as in the default template Suite-B table (verified 2026-10-18)", seen: "Ike Authentication algorithm is not set as per selected suite"}
+  - {path: 'ipsecConfig\.ipsecSuiteB$', value: gmac256, reason: "Suite-B needs every IKE and IPsec field set exactly as in the default template Suite-B table (verified 2026-10-18)", seen: "Ike Authentication algorithm is not set as per selected suite"}
+  - {path: 'deploymentInterfaces\[\d+\]\.role$', value: unknown, reason: "sysConfig.roles lists unknown, but /validate accepts only default (Orchestrator 9.7.1)", seen: "Valid roles are: [default]"}
+
+structural_and_apply_constraints:
+  - section: deploymentInfo
+    enforced_by: validate
+    rule: "raInfo[].raInterfaceName is only allowed on IPv6-only LAN interfaces; if any IPv4 entry in deploymentInterfaces uses that interfaceName, /validate rejects it."
+    seen: "Cannot apply router advertisement config to IPv4 interface"
+    fix: "Omit raInfo entries for IPv4 or dual-stack interfaces."
+
+  - section: deploymentInfo
+    enforced_by: apply
+    rule: "With VLAN tag > 0 (e.g. lan0.71), dual-stack IPv4 + IPv6 on the same subinterface is rejected/ignored by ECOS 9.6.x during /apply."
+    seen: "With vlan greater than zero, we cannot have dual stack configuration"
+    fix: "Use untagged interfaces for dual-stack or separate IPv4/IPv6 subinterfaces on 9.6.x."
+
+  - section: deploymentInfo
+    enforced_by: validate_and_apply
+    rule: "haConfig.haInterfaceOrder must list all local WAN interface labels plus all haPeerInterfaceInfo WAN interface labels."
+    seen: "HA interface order must include all local and peer WAN labels"
+    fix: "Build haInterfaceOrder from the union of local WAN labels and haPeerInterfaceInfo[].interfaceLabel ordered by VLAN offset."
+
+  - section: dhcpRemoteAddressPoolConfig
+    enforced_by: validate_and_apply
+    rule: "Must be a single mapping object (not a list), and requires a running local DHCP server in deploymentInfo.dhcpInfo on the target appliance (ECOS 9.7+ only)."
+    seen: "Cannot save remote address pool: DHCP server is not running"
+    fix: "Filter GET /dhcpConfig/remoteSubnets to `not p.get('interface')`, emit a single dict, and ensure the target runs a local DHCP server. Send the pool in a separate preconfig without deploymentInfo: the deployment step restarts the DHCP server just before the pool step."
+
+  - section: localRoutes_bgp_ospf
+    enforced_by: apply
+    rule: "If segmentLocalRoutes, segmentBgpSystems, or segmentOspfConfig is present in the same YAML as localRoutes, bgpSystemConfig, or ospfSystemConfig, Orchestrator silently ignores the single-segment section."
+    seen: "Single-segment BGP/routes/OSPF missing on appliance after apply when segment* section is also present"
+    fix: "Whenever any non-Default segment is active, omit the single-segment section and include Default inside segment*."
+
+  - section: bgpSystemConfig
+    enforced_by: validate_and_apply
+    rule: "importRouteTarget and exportRouteTarget cannot use ASN 0 ('0:0' is rejected by /validate). On neighbors, enableEVPN: true is reset to false by ECOS during /apply unless vxlan is also configured."
+    seen: "Route target ASN 0 is invalid"
+    fix: "Omit importRouteTarget/exportRouteTarget when '0:0'; set enableEVPN: false when vxlan is not configured."
+
+  - section: vrrp
+    enforced_by: apply
+    rule: "/validate accepts description: null and authenticationString: null on vrrpEntries, but ECOS /apply fails with HTTP 400."
+    seen: "Error applying vrrp changes.{\"rc\":400,\"value\":\"Binding is not of correct type. Check if it is null or not the supported types: /cn/redd/net/interface/vrrp/config/..., key: desc\"}"
+    fix: "Omit description and authenticationString keys from vrrpEntries when empty or null."
+
+  - section: inboundPortForwarding
+    enforced_by: validate
+    rule: "sourceInterface must be 'any', a WAN interface name (wan*), or a WAN interface label. Physical lan* combo ports configured as WAN (e.g. lan2 on EC-10106) are rejected by name."
+    seen: "Source interface in WAN side is invalid: lan2"
+    fix: "Resolve lan* WAN combo ports and numeric label IDs to their WAN interfaceLabel (e.g. INET1)."
+
+  - section: branchNatMapsConfig
+    enforced_by: validate_and_apply
+    rule: "(1) sourceIpSubnet and translateSourceIpSubnet must have identical prefix lengths; (2) destinationPort and translateDestinationPort cannot overlap; (3) interfaceName must be a LAN interface or 'any' (WAN interfaces pass /validate but fail at /apply); (4) inbound rules require interfaceName: 'any'."
+    seen: "LAN interface 'wan1' not found in deployment configuration / Inbound NAT rules are applied on all interfaces, so interfaceName should be 'any'"
+    fix: "Read branch NAT rules from GET /nat/maps (not /natMaps), enforce matching subnet masks and non-overlapping ports. validate.apply_time_error rejects a WAN interface or VLAN subinterface interfaceName before /validate."
+
+  - section: branchNatMapsConfig
+    enforced_by: apply
+    rule: "branchNatMapsConfig needs deploymentInfo in the same preconfig. NAT pools still referenced by the appliance's current branch NAT map cannot be removed in the same apply, because the natPools step runs before the branchNatMapsConfig step."
+    seen: "DeploymentInfo cannot be null when branchNatMapsConfig is configured / Cannot delete NAT pool: <name>, used in map: map1, priority: <n>"
+    fix: "validate.validate_text rejects branchNatMapsConfig without deploymentInfo. To retire pools, apply twice (the second apply deletes the now-unreferenced pools)."
+
+  - section: localRoutes_segmentLocalRoutes
+    enforced_by: apply
+    rule: "A localRoutes or segmentLocalRoutes entry without its subnet sharing settings resets them on the appliance (advertise local LAN off, local metric 0, local-ASN filter off)."
+    seen: "auto_subnet.vrf[0] went from add_local_lan true / add_local_metric 50 / local_asn_filter true to false / 0 / false after applying localRoutes with routes only (ECOS 9.7.1)"
+    fix: "Write advertiseLocalLanSubnets, advertiseLocalWanSubnets, localMetric, localCommunities, filterRoutesWithLocalASN and redistToSDwanFabricRouteMap (only when the source has a route map: omitted, null and \"\" all become default_rtmap_to_subsh) from /systemInfo/system auto_subnet.vrf[<segment id>] (mappers.subnet_sharing)."
+
+  - section: secrets
+    enforced_by: apply
+    rule: "A <SECRET:...> redaction placeholder passes /validate as a plain string, then fails or is stored as the literal secret."
+    seen: "Failed to apply tunnels: Request body contains illegal characters"
+    fix: "validate.validate_text rejects any document containing <SECRET:; secret values come only from the CSV."
+
+  - section: vxlan
+    enforced_by: validate
+    rule: "vtepSrcInterface must be a loopback interface ('lo' + 0..99999) present in loopbackInterface.loopbacks, and vniVrfMaps entries must have unique vni and unique segment values."
+    seen: "VXLAN - VTEP source interface is invalid: lan0.71. Only loopback interfaces are supported. Valid format: 'lo' with [0-99999]"
+    fix: "Ensure vtepSrcInterface references a configured lo* interface and deduplicate vniVrfMaps by (vni, segment)."
+
+  - section: linkAggregation_and_bridgeGroups
+    enforced_by: apply
+    rule: "A physical interface (e.g. lan1) cannot belong to both linkAggregation (blan*) and bridgeGroups (slan*), and must have an assigned MAC on the target appliance."
+    seen: "Failed to apply bridgeGroups to appliance: {\"error\":\"The following interfaces are used by link aggregation: lan1.\"}"
+    fix: "Ensure member interfaces are not shared between linkAggregation and bridgeGroups."
+
+  - section: customApplianceTags
+    enforced_by: validate
+    rule: "Tag keys and values must be alphanumeric only (underscores and hyphens are rejected)."
+    seen: "Custom appliance tag name/value is invalid"
+    fix: "Strip or replace underscores and hyphens in customApplianceTags keys and values."
+
+  - section: nac
+    enforced_by: validate
+    rule: "All 6 sub-lists (server, serverGroup, aaaProfile, dot1x, macAuthProfile, applyPolicies) must be non-empty or /validate returns HTTP 500. applyPolicies IDs must be sequential 1..N. server[].source_ip_interface and applyPolicies[].auth_interface must be distinct LAN interface labels."
+    seen: "HTTP 500 Internal Server Error on empty NAC sub-list / source_ip_interface and auth_interface collision"
+    fix: "Omit nac if any of the 6 sub-lists is empty; renumber active applyPolicies 1..N; resolve interface names to distinct LAN labels."
+
+  - section: multicast
+    enforced_by: validate
+    rule: "multicast[].pim[].interfaceName must match a configured interface name or label in deploymentInfo.deploymentInterfaces."
+    seen: "Multicast interface is invalid"
+    fix: "Filter multicast PIM entries to interfaces present in deploymentInfo.deploymentInterfaces."
+
+  # --- 2026-10-18 option sweep, Orchestrator 9.7.1 ---
+  - section: branchNatMapsConfig
+    enforced_by: apply
+    rule: "A branch NAT rule whose interfaceName is a VLAN subinterface (lan0.71) passes /validate, but apply fails the whole branchNatMapsConfig step although the same preconfig creates the subinterface; untagged lan0 and any apply (Orchestrator 9.7.1, ECOS 9.6.2.1, verified 2026-10-18)."
+    seen: "Failed to apply branchNatMapsConfig to appliance: {\"error\":\"LAN interface 'lan0.71' not found in deployment configuration for rule with priority 10\"}"
+    fix: "No preconfig form found; validate.py rejects the row. Configure such rules on the appliance or with a template after the preconfig."
+
+  - section: tunnelConfiguration
+    enforced_by: apply
+    rule: "The default template calls remoteIp optional for no_encap tunnels and /validate accepts it null, but ECOS 9.6.2.1 rejects the tunnel at apply and the whole tunnel batch fails, so no tunnel in the preconfig is created (verified 2026-10-18)."
+    seen: "Failed to apply tunnels: Error posting passthrough tunnels. {\"rc\":500,\"value\":\"Json to binary handler could not convert json to binary binding.\"}"
+    fix: "Give every no_encap tunnel a remoteIp; validate.py rejects the row otherwise."
+
+  - section: segmentLocalRoutes
+    enforced_by: validate
+    rule: "Route metric must be 0..100 (localRoutes and segmentLocalRoutes); the default template documents no range."
+    seen: "localRoute - metric must be between 0 and 100."
+    fix: "Keep metric within 0..100."
+
+  - section: branchNatMapsConfig
+    enforced_by: validate
+    rule: "translateNatPoolID is the 0-based index into natPools, and that pool's direction must equal the rule's direction."
+    seen: "BranchNatMapsConfig - Priority Level 20 - Direction of NAT rule and its associated translated NAT pool should be the same"
+    fix: "Point outbound rules at outbound pools and inbound rules at inbound pools."
+
+  - section: nac
+    enforced_by: validate
+    rule: "serverGroup[].server lists server names separated by a comma and a space; 'a,b' and 'a;b' are rejected as one unknown name."
+    seen: "NAC - default,radius2 defined in serverGroup with id - 1 and name default is not configured in server"
+    fix: "Write 'default, radius2' (translate.py does)."
+
+  - section: nac
+    enforced_by: validate
+    rule: "applyPolicies[].auth_type is one of trusted, both, 802.1x, mac."
+    seen: "NAC - Invalid auth_type dot1x in applyPolicies with id - 1"
+
+  - section: tunnelConfiguration
+    enforced_by: validate
+    rule: "An IKEv2 tunnel needs localIkeIdentifier and remoteIkeIdentifier; without them /validate answers HTTP 500 (any crypto, DH group or identifierValue). IKEv1 rejects GCM IKE encryption."
+    seen: "There was an internal server error. / Ike Encryption algorithm cannot be of GCM type when ike version is 1"
+    fix: "Set both identifiers (address or fqdn); validate.apply_time_error rejects the document before the call."
+
+  - section: tunnelConfiguration
+    enforced_by: apply
+    rule: "An ipsec tunnel's ikeConfig.presharedKey must be at least 8 characters; render and /validate accept an empty key."
+    seen: "Applying tunnels: Preshared Key must contain at least 8 characters"
+    fix: "Fill the CSV secret column; validate.apply_time_error rejects shorter keys before the call."
+
+  - section: vrrp
+    enforced_by: validate
+    rule: "authenticationString is at most 8 characters (Orchestrator 9.7.1, 2026-10-18 sweep)."
+    seen: "(exact message not recorded) /validate rejects a longer string"
+    fix: "Keep VRRP authentication strings to 8 characters or fewer; test values use an 8-character placeholder."

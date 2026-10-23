@@ -128,7 +128,7 @@ Every option, the messages a command can stop with and what to do, the stage scr
 
 ## Use it with an AI agent
 
-The skill in `skills/building-edgeconnect-preconfig-templates/` follows the open [Agent Skills](https://agentskills.io) format. `setup.sh` installs it for the agents you pick; to install the skill alone:
+The command line needs no agent; it runs from `toolkit/`. The skill in `skills/building-edgeconnect-preconfig-templates/` (its `SKILL.md` plus a copy of `toolkit/`) follows the open [Agent Skills](https://agentskills.io) format. `setup.sh` installs it for the agents you pick; to install the skill alone:
 
 ```bash
 npx skills add Crypto-Gi/edgeconnect-preconfig
