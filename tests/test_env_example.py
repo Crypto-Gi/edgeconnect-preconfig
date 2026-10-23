@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"
+SCRIPTS = ROOT / "toolkit" / "scripts"
 # env.get("key"), os.environ.get("KEY"), os.environ["KEY"], os.getenv("KEY"); "{}_suffix" is a per-nickname key.
 READ = re.compile(r"""(?:\benv\.get|\benviron\.get|\bgetenv)\(\s*["']([^"']+)["']|\benviron\[\s*["']([^"']+)["']\s*\]""")
 

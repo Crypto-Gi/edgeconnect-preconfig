@@ -15,7 +15,7 @@ They are used here only to describe what this software works with.
 
 Bundled Orchestrator default templates
 --------------------------------------
-skills/building-edgeconnect-preconfig-templates/references/default-templates/
+toolkit/references/default-templates/ (copied into the skill folder and dist/)
 holds the default preconfiguration templates that HPE Aruba EdgeConnect
 Orchestrator returns from GET /gms/appliance/preconfiguration/default, one
 file per Orchestrator release, exported from the authors' own lab. They are

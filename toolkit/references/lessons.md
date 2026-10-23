@@ -1,0 +1,156 @@
+# Empirical Preconfig Mapping, Validation & Diagnosis Guide
+
+Verified across HPE Aruba EdgeConnect Orchestrator releases `9.6.4`, `9.7.1`, and `10.0.0`, REST Swagger specifications, CLI running-config backups, option and mutation tests, real appliance captures, and closed-loop live apply-and-diff runs on `EC-V` (`9.6.x` and `9.7.x`) appliances. Lab names below (`lab`) are placeholders for the test Orchestrator.
+
+---
+
+## 1. Release & Schema Baseline Rules
+
+- **Identify Orchestrator release from `GET /gms/versions` (`current`):** Never trust Swagger `info.version`.
+- **Default preconfiguration template (`GET /gms/appliance/preconfiguration/default`):**
+  - Bundled baselines for `9.6.4.40046`, `9.7.1.42046`, and `10.0.0.40516` live in `references/default-templates/`.
+  - On first connection to any uncached Orchestrator release, `capture.py` automatically downloads `GET /gms/appliance/preconfiguration/default` into `references/default-templates/orchestrator-<release>.yml` (not with `--only`, and not when the API key may not read `GET /gms/versions`).
+- **Derive field names from YAML keys, never from template comments (known comment drifts include):**
+  - `inboundPortForwarding`: comments say `wanInterface`, `destIp`, `destPort`, `targetIp`, `targetPort`, while the actual YAML keys are `sourceInterface`, `destinationIpSubnet`, `destinationPortRange`, `translateIp`, `translatePortRange`.
+  - `nac.applyPolicies`: comments say `interface`, while the actual YAML key is `auth_interface`.
+  - `ipSlaRule`: comments say `enableRule`, while the actual YAML key is `enable`.
+  - `tunnelConfiguration.tunnels[]`: comments say `nat`, while the actual YAML key is `natMode` (`snat` only on `no_encap` tunnels).
+  - `multicast[].pim[]`: comments say `interface`, while the actual YAML key is `interfaceName`.
+  - `tunnelConfiguration.tunnels[].ikeConfig`: comments list `ikeEncryptAlgorithm: auto`, which `/validate` rejects (`default`, `aes128`, `aes256`, `aes128gcm16`, `aes256gcm16`, `null` only).
+- **Release differences (`gated_paths` in `translate.py`):**
+  - `10.0.0` adds `ikePqcgroup` and `ipsecPqcgroup` under `tunnelConfiguration.tunnels[].ipsecConfig`, and `flowProcess` under `flowRedirection`.
+  - `9.6.4` uses `nac.server[].address` instead of `nac.server[].host` and lacks `dhcpRemoteAddressPoolConfig` and `multicast`.
+  - Pre-`9.6` appliances (`9.3.x`, `9.5.x`) omit `sysConfig.roles`, `applianceIPs[].role`, and `sysConfig.maxInBW` in `GET /deployment`.
+
+---
+
+## 2. YAML 1.2, Jinja2 & CSV Pipeline Rules
+
+- **YAML 1.2 Core Schema (`common.parse_yaml`):**
+  - PyYAML's default `safe_load` (YAML 1.1) corrupts `importRouteTarget: 1:1` into integer `61` (base-60), turns `yes`/`no`/`on`/`off` into booleans, and crashes on leading-zero strings like `zipCode: 08034` (`ValueError: invalid literal for int() with base 8: '08034'`).
+  - Always use `common.parse_yaml`, which restricts booleans to `true`/`false` and integers to `^[-+]?(?:0|[1-9][0-9]*)$`.
+- **`pyedgeconnect` header compatibility (`render.py`):**
+  - `pyedgeconnect` extracts CSV column headers via `data\[['"](.*?)['"]\]`. Every Jinja placeholder in `<site>.jinja2` must use `data['<column>']`.
+- **Per-row output naming (`preconfig_name` / `filename`), `serial_number`, and immediate emission:**
+  - Every generated CSV includes runner columns `preconfig_name` (`filename` alias) and `serial_number`.
+  - `common.resolve_output_filename` resolves `<preconfig_name>.yml`, rejects path traversal (`/`, `\`, `..`), and rejects duplicate filenames within a CSV.
+  - `common.normalize_serial` strips hyphens, colons, and spaces (`00-1b-bc-46-2d-3d` -> `001BBC462D3D`) and validates `^[0-9A-F]{12}$`.
+  - `render.py` and `upload.py` validate each row in memory first and immediately write `rendered/<preconfig_name>.yml` as soon as a row passes validation. Invalid rows never produce a `.yml` file on disk, and validation continues to remaining rows.
+  - `upload.py` checks `GET /gms/appliance/preconfiguration`: if a row's `preconfig_name` or `serial_number` already exists on Orchestrator, only that conflicting row is skipped while all other valid rows upload after `--approve`.
+
+---
+
+## 3. Section-by-Section Mapping & Live-Apply Rules
+
+1. **`applianceInfo` & `deploymentInfo`:**
+   - **`firewallMode` (`harden` integer codes):** `0` = `All`, `1` = `harden`, `2` = `stateful`, `3` = `statefulSNAT`.
+   - **`networkRole`:** `0` = `non-hub`, `1` = `hub`.
+   - **Partial WAN `maxBW`:** If an appliance WAN interface has `maxBW: {"outbound": 50000}` without `inbound`, default `inboundMaxBandwidth` to `outboundMaxBandwidth`.
+   - **Router Advertisements (`raInfo`):** Only valid on IPv6-only LAN interfaces; `/validate` rejects `raInfo` on any IPv4 or dual-stack interface (`Cannot apply router advertisement config to IPv4 interface`).
+   - **Dual-stack on VLAN subinterfaces (`vlan > 0`):** On ECOS `9.6.x`, dual-stack IPv4 + IPv6 on a VLAN subinterface (`vlan > 0`) is ignored during `/apply`.
+   - **Canonical interface ordering:** `/deployment` orders `deploymentInterfaces` with `lan` interfaces before `wan` interfaces, then by base interface name and numeric VLAN ID (`lan0`, `lan0.55`, `lan0.71`, `wan0.4000`, `wan1`).
+2. **EdgeHA (`deploymentInfo.haConfig` & `applianceInfo.clusterProfile`):**
+   - Reconstructed from `GET /haGroups`, `GET /cluster/profileMapping`, `GET /appliance`, and the auto-generated subinterfaces on `sysConfig.haIf` (`lan1.100`..`lan1.103`).
+   - Exclude auto-generated `haIf` subinterfaces from `deploymentInterfaces`.
+   - Skip EdgeHA-generated `inboundPortForwarding` rules (`comment == "HA rule"`) and EdgeHA sync subinterfaces in `flowRedirection` (`cluster interface <haIf>.164`), ledgering both as `orchestrator-managed`.
+3. **DHCP (`deploymentInfo.dhcpInfo` & `dhcpRemoteAddressPoolConfig`):**
+   - `deployment.modeIfs[].applianceIPs[].dhcpd` holds both `type == "server"` (with `ip_range`, `options`, `host` static MAC reservations, and `failover` `dhcpHA`) and `type == "relay"` (with `dhcpserver` and Option 82 policy/suboptions).
+   - `GET /dhcpConfig/remoteSubnets` on ECOS `9.7+` returns **both** local interface DHCP pools (`p.get("interface")` non-empty) and remote address pools (`not p.get("interface")`). `m_dhcpRemoteAddressPoolConfig` filters to `not p.get("interface")`.
+   - Applying `dhcpRemoteAddressPoolConfig` requires a running local DHCP server on the appliance; otherwise `/apply` fails with `Cannot save remote address pool: DHCP server is not running`. The same error appears when the preconfig also carries `deploymentInfo`, and re-applying an existing pool fails with `overlaps with existing Remote Address Pool`: the section only adds new pools.
+   - **DHCP failover (`dhcpHA`):** read from `deployment.dhcpFailover[<physical ifName>]` (`role`, `my_ip`, `my_port`, `peer_ip`, `peer_port`, `mclt`, `split`, `max_resp_delay`, `max_unack_updates`, `load_bal_max`, `dhcp_fo_rel_name`) and written once per physical interface, on the first DHCP server entry whose `dhcpd.server.failover` is true. The appliance keeps `dhcpFailover` after failover is switched off; those stale blocks are ledgered as `runtime`.
+   - **`raInfo[].prefix_id`:** read from `ra.prefix_id` (keyed by prefix id) and written as a list sorted by `id`, lifetimes as integers.
+4. **Single-Segment vs. Multi-Segment Routing (`localRoutes`, `bgpSystemConfig`, `ospfSystemConfig` vs. `segment*`):**
+   - If a multi-segment section (`segmentBgpSystems`, `segmentLocalRoutes`, `segmentOspfConfig`) is present in the same YAML document as its single-segment counterpart (`bgpSystemConfig`, `localRoutes`, `ospfSystemConfig`), Orchestrator **silently ignores** the single-segment section during `/apply`.
+   - Whenever any non-Default segment uses routes, BGP, or OSPF, omit the single-segment section and emit **all** active segments (including `Default`) inside `segment*`.
+   - **Subnet sharing settings** live in `GET /systemInfo/system` `auto_subnet.vrf[<segment id>]`: `add_local_lan` -> `advertiseLocalLanSubnets`, `add_local_wan` -> `advertiseLocalWanSubnets`, `add_local_metric` -> `localMetric`, `local_communities` (only when `add_local_communities`) -> `localCommunities`, `local_asn_filter` -> `filterRoutesWithLocalASN`, `rtmap_to_subshare` -> `redistToSDwanFabricRouteMap`. They must be written: a `localRoutes` block without them resets them to off/`0` on apply. `localRoutes` is written even without routes when these settings exist. A non-Default segment in `auto_subnet.vrf` puts every segment that has routes or non-default settings in `segmentLocalRoutes`: `segmentLocalRoutes` merges, so a segment left out keeps the ECOS default on a new appliance (advertise LAN off, local-ASN filter off, no route map). Found 2026-10-19: segments without static routes were left out, losing their settings on 71 segments of 35 appliances; `/validate` accepts an entry with `routes: []`. A segment that is written always gets a route map: leaving `redistToSDwanFabricRouteMap` out, `null` and `""` all become `default_rtmap_to_subsh` (denies 0.0.0.0/0), and `none` stores a map that does not exist (lab, ECOS 9.6.2.1 and 9.7.1, 2026-10-19). So a non-Default segment with no routes and only ECOS default values (LAN and WAN off, metric 50, no communities, ASN filter off, no route map) is left out, also after template fields are removed (`mappers.own_sharing`); a written segment whose source has no route map leaves the field out and gets a ledger note to review it.
+   - The legacy redistribution fields (`bgpSystemConfig.redistToSilverPeak`, `redistOspfToBgp`, `filterTag`; `ospfSystemConfig.redist*` with metric/type/tag; `localRoutes.useSharedSubnetInfo`, `redistOspfToSubnetShare`, `ospfRedistMetric`, `ospfRedistTag`) apply without error but no read returns them on ECOS 9.6.2 or 9.7.1; they are ledgered as `unresolved`.
+   - In `/subnets`, a route with next hop `0.0.0.0` or `::` shows empty `nextHop` and `ifName` in its `state`; its `config` keeps `nextHop` and `ifName` (`default` means any interface). Take both, and the zone (`zone_id`, 65534 for none), from `config`: the state reports the interface in use and that interface's zone. Write an interface of `default` as no `interfaceName` (`/validate` accepts it). Skip routes whose `config` (or `state`) is `gms_marked`, whatever their next hop: Orchestrator creates them itself (third-party cloud integrations, for example an Azure load-balancer route with a real next hop, found on 2 lab hubs 2026-10-19). Also skip a route with no next hop or interface in its state and no `config`. Found 2026-10-19: the old rule took these user routes for auto-distributable VTI routes and dropped 31 routes on 21 appliances, and pinned 6 `default` routes to the interface in use.
+   - On BGP neighbors, `enableEVPN: true` is reset to `false` by the appliance during `/apply` unless `vxlan` is also configured on the appliance.
+5. **VRRP (`vrrp`):**
+   - Drop runtime fields (`mode`, `uptime`, `vmac`, `oper`).
+   - Omit `description` and `authenticationString` when empty/null; sending `description: null` passes `/validate` but fails on the appliance during `/apply` (`Binding is not of correct type... key: desc`).
+6. **IP SLA (`ipSlaRule`):**
+   - Skip Orchestrator-managed `System_Rule_*` entries (`gms_marked: true`).
+   - Map all 4 monitor types in `/ipsla/config/managers`:
+     - `ip-monitor` -> `monitorType: "ping"`
+     - `port-monitor` -> `monitorType: "interface"`
+     - `vrrp-monitor` -> `monitorType: "vrrp"`
+     - `http-monitor` -> `monitorType: "http/https"` (`urls` from `http-monitor-url`, `httpRequestTimeout` from `http-timeout`, plus `proxyAddress`/`proxyPort` when a proxy is set and `userAgent` from `user-agent`)
+   - Map action types. A plain-string action: `alarm` -> `raiseAlarm`, `no-sub-share` -> `disableSubnetSharing`, `def-alarm` -> `clearAlarm`, `def-subnet` -> `defaultSubnetAction`, `def-vrrp` -> `defaultVRRP`. A `{id: {type, ...}}` action: `tun-dn`/`tun-up` -> `disableTunnel`/`enableTunnel` (`tunnelName` from `tun-alias`), `subnet-metric` -> `modifySubnetMetric` (`subnetMetricDelta` from `delta`), `subnet-adv` -> `advertiseSubnet` (`interfaceName` from `port-name`; the appliance stores no priority for it), `vrrp-prio` -> `decreaseVRRPPriority`/`increaseVRRPPriority` (`priority` from `dec`/`inc`, `interfaceName` from `port-name`), `subnet-share` -> `disableSubnetSharing`, `subnet-rmv` -> `removeAutoSubnet` (`interfaceName` from `port-name`). Any other type is written as `raiseAlarm` (down) or `clearAlarm` (up) and ledgered `unresolved`. A ping monitor keeps `src-port-name` as `sourceInterfaceName` and `force-dns: "true"` as `forceDnsThroughProbePath`; the appliance stores no tunnel alias for a tunnel-sourced probe (ECOS 9.6.2.1), and the validator rejects a probe with neither `interfaceName` nor `tunnelName`, so `tunnelName` is inferred when exactly one user passthrough tunnel is sourced from that interface's address; otherwise the rule is ledgered and not written.
+   - Sort `ruleEntries` canonically by `(monitorType, interfaceName, ipAddress/urls)` because `/ipsla/config/managers` keys (`MGR_<UUID>_<id>`) re-index on apply.
+7. **Tunnels, VTI & Port Forwarding (`tunnelConfiguration`, `virtualTunnelInterface`, `inboundPortForwarding`):**
+   - Skip Orchestrator-managed tunnels (`gms_marked: true`; service tunnels such as SSE are marked this way).
+   - Applying `tunnelEncap: "gre"` stores `mode: "gre_ip"` in `/tunnels2/passThrough`.
+   - Applying `ipsecEncryptAlgorithm: "none"` stores `esp: "null"`, and `"auto"` stores `esp: ""` (CLI `crypto-algorithm default`) in `/tunnels2/passThrough`: map `"null"` to `"none"` and `""` to `"auto"`, except under `aes128gmac`/`aes256gmac` authentication, where the validator requires `"null"`. Writing `""` as `"none"` cloned an encrypted tunnel with no ESP encryption (ECOS 9.6.2.1, 2026-10-18).
+   - Applying `enableIpSecArcWindow: 0` stores `ipsecAntiReplayWindow: "disable"`; map it back to `0`. A tunnel whose values cannot be mapped is ledgered `unresolved` and skipped; the other tunnels are still written.
+   - Applying `ikeVersion: 2` copies `localIkeIdentifier` into `id_str`; set `identifierValue: None` when `ike_version == 2`, `id_type == "address"` and `id_str == ike_id_local`.
+   - A tunnel with PFS off is written with `secrecyGroup: disable`; `null` lets the appliance default (PFS on, group 2).
+   - `validate.apply_time_error` rejects, before `/validate`, rows that pass it but fail at apply or answer HTTP 500: a `presharedKey` under 8 characters, IKEv2 without both `localIkeIdentifier` and `remoteIkeIdentifier`, and a `no_encap` tunnel without `remoteIp` (ECOS 9.6.2.1).
+   - In `inboundPortForwarding`: when `sourceInterface` is set to a WAN label (`INET1`), the appliance stores the numeric label ID (`"2"`) in `srcIf`; resolve numeric `srcIf` via `ctx.label(srcIf)`. If a `lan*` combo port is configured as WAN, resolve `srcIf` to its WAN label (`sourceInterface` rejects `lan*` names).
+8. **NAT (`natPools` & `branchNatMapsConfig`):**
+   - `branchNatMapsConfig` is read from `GET /nat/maps` (`id: branch-nat-maps`), whereas `GET /natMaps` is the legacy WAN NAT policy map (`65535` catch-all).
+   - **A names-only `/nat/maps` answer means the map has no rules (root cause verified live on ECOS 9.6.2.1 and 9.7.1).** `/nat/maps` answers in three shapes: `{}` (branch NAT never configured: no map), `{"map1": {"prio": {...}}}` (rules), and `{"map1": "map1"}` (the map exists with no rules). Applying `branchNatMapsConfig: {branchNatRules: []}` (with `deploymentInfo`) deletes every rule but keeps `map1`, and ECOS then reports the empty map by its bare name: live and cached `/nat/maps` = `{"map1": "map1"}`, `/nat` maps the same, `/natMapsDynamic` = `{"map1": {}}`, the appliance's own `nat/maps/map1` = `{"value": "map1"}`, and `/natMaps` keeps only the `65535` catch-all. Re-adding a rule brings back the `prio` form. The behaviour was the same on both releases, both right after apply and 60 s later. The rule fields are the same on 9.6.2, 9.7.1 and 9.7.2, and the `branchNatMapsConfig` template section is the same in the 9.6.4, 9.7.1 and 10.0.0 defaults. `m_branchNatMapsConfig` writes no section for a names-only answer and records it as `default-omitted` ("no branch NAT rules configured"), naming the map (owner ruling 2026-10-21).
+   - **Read branch NAT live, never from the cache alone.** Right after an apply, Orchestrator's cached `/nat/maps` (`cached=true`) can still list the map by name only, or be `{}`, while the live read (`cached=false`) already has the rules. Out of 19 such lab captures, 18 were on ECOS 9.6.2.1 and 1 on 9.7.1. `translate.Capture.data` prefers `live`, so the rules come from the live copy (test `test_branch_nat_reads_live_rules_when_cached_lists_names_only`). When the live read is names-only too, the map has no rules (see above).
+   - In `branchNatMapsConfig`: `sourceIpSubnet` and `translateSourceIpSubnet` must have identical prefix lengths; `destinationPort` and `translateDestinationPort` cannot overlap; `interfaceName` must be a LAN interface or `any` (and `inbound` direction requires `interfaceName: "any"`). `/validate` accepts a WAN interface or a VLAN subinterface but apply fails the whole section (`LAN interface ... not found in deployment configuration`); `validate.apply_time_error` rejects both before `/validate`.
+9. **VXLAN & Flow Redirection (`vxlan` & `flowRedirection`):**
+   - `vxlan.vtepSrcInterface` must be a loopback interface (`lo0`..`lo99999`), and `vniVrfMaps` must be sorted canonically by `int(vni)`.
+   - `m_vxlan` reads live JSON from `GET /vxlan/config` (`vxlan`) + `GET /vxlan/segVniMap` (`vxlan-vni-map`) first, falling back to stored CLI running-config backups only for offline appliances.
+   - `m_flowRedirection` reads live JSON from `GET /cluster` (`cluster-state`, `siteApplianceInterfaceIps[nePk].state`) first, falling back to stored CLI running-config backups only for offline appliances. In that fallback a missing `flow-redirection wait-time` line means the default 50: ECOS omits the line at its default. The live state always carries `wait_time` (0 and 50 both seen).
+10. **Security, Custom Tags & Management (`nac`, `ipAllowList`, `customApplianceTags`, `managementIp`):**
+    - In `nac`: all 6 sub-lists must be non-empty (`server`, `serverGroup`, `aaaProfile`, `dot1x`, `macAuthProfile`, `applyPolicies`) or `/validate` throws HTTP 500; `applyPolicies` IDs must be sequential (`1..N`) over active interfaces; `server[].source_ip_interface` and `applyPolicies[].auth_interface` must be LAN interface labels and cannot be identical. A trusted interface (stored `profile: none`) is written with `auth_type: trusted` and no `profile` key: `/validate` rejects `profile: none` ("not configured in aaaProfile"). Dropping trusted interfaces left `applyPolicies` empty on an all-trusted appliance and lost the whole NAC section (2026-10-18). The appliance also keeps trusted entries for WAN interfaces: write LAN labels only. Two interfaces with one label give one entry; if their policies differ, the first is written and the other ledgered, because `/validate` rejects a label twice ("Duplicate lan label interfaces not allowed in applyPolicies"). The appliance keeps a trusted entry on every interface, including the RADIUS server's source (stored `auth_type: 0` with `profile: none`, or `profile: default` when it was applied without a profile); a trusted entry on the server's `source_ip_interface` label is left out, because `/validate` rejects one label in both places. An appliance whose only policies are trusted ones on that label cannot carry NAC (ledgered `unresolved`).
+    - In `ipAllowList`: entries pushed via preconfig have `gmsMarked: true` on the appliance and must be included by `m_ipAllowList`.
+    - An enabled `ipAllowList` limits direct SSH/HTTPS/SNMP to its subnets: it is copied as captured, but its subnets belong to the source site. Review it for every new site and never let address substitution rewrite it; a list that misses the management path locks out direct access (the Orchestrator connection, opened by the appliance, survives). Seen in the lab on 2026-10-18.
+    - In `customApplianceTags`: tag names and values must be alphanumeric only (no underscores or hyphens).
+    - In `managementIp`: when `mgmtIfData.mgmt0.dhcp` is `true`, omit `managementIp` even if the CLI running-config backup contains `ip mgmt-ip <leased-ip>` so DHCP on `mgmt0` is preserved.
+11. **Multicast (`multicast`):**
+    - On ECOS `9.7+`, `/multicast/config` is a list of VRF objects (`vrf_id`, `rp`, `pim`, `igmp`, `filter_name`).
+    - Even when `igmpEnable: false`, the interface key appears under `seg["igmp"]` with `{"enable": false}`; read `bool((seg.get("igmp") or {}).get(k, {}).get("enable"))`.
+12. **IDS/IPS (`idsIpsConfig`):**
+    - `mode` is required and the section is `replace`: never default it to `Off`, which switches IDS/IPS off. Read it from `GET /ids/state` (`disabled` -> `Off`, `ids` -> `IDS Only`, `ips_lookaside` -> `IPS-Performant`, `ips_inline` -> `IPS-Inline`, all four confirmed by live apply and re-read on ECOS 9.7.1); an appliance in no list has an unknown mode, so the section is not written.
+    - `profile` is the full stored name including its signature suffix (`Default_S5`, `Default_S7`), from `GET /ids/profilestate`; it must exist in the target's `GET /ids/signatures/profiles`.
+13. **Branch NAT pool references and NAC interface references:**
+    - In `/nat/maps`, `set.trans_src` can be a `natPools` key rather than a subnet: write `translateNatPoolID` (the pool's index in the emitted `natPools` list). Write `0.0.0.0/0` as `any`. Verified by live apply and re-capture on ECOS 9.7.1.
+    - `branchNatMapsConfig` must travel with `deploymentInfo` (apply fails otherwise), and pools that the appliance's current map still uses cannot be removed in the same apply (the `natPools` step runs first).
+    - The appliance keeps NAC references to interfaces that were deleted or never labelled; `/validate` rejects them. `source_ip_interface` falls back to `any`, and such `applyPolicies` entries are dropped and renumbered.
+14. **AppExpress groups (`appExpressGroups`):** a plain list of group names (not `{groups: [...]}`); every name must already exist on the target Orchestrator. The section merges: an empty list does not remove an association. Creating a group needs `sourceLoopbacks` naming a labelled loopback from Orchestrator loopback orchestration (`/loopbackOrch`).
+15. **Static route flags (`localRoutes`, `segmentLocalRoutes`):** `/subnets` reports `advertiseToBgp`/`advertiseToOspf` as `false` for every configured route and has no comment. Read them, with `advert`, `comment` and the route `tag` (`dir` in this table, `tag` in `/subnets/all`), from the configured table `GET /appliance/rest?url=subnets3/configured` (`static-routes-configured`, keyed prefix > `nhop` > interface). Found by the raw round trip of 2026-10-17: every cloned route lost both flags and its comment. That table holds the Default segment only and ignores segment parameters; for other segments the comment comes from the `config` object of each `/subnets/all` entry, and the flags from its `state`, which is unverified (ledgered `unresolved`).
+16. **What a preconfig cannot carry (found by the raw round trip, ECOS 9.6.2.1):**
+    - Hub membership: a hub's place in an overlay is `topology.hubs` (nePks) in `GET /gms/overlays/config`, an Orchestrator overlay setting. A clone of a hub joins its overlays as a spoke; add its nePk with `PUT /gms/overlays/config/regions` (the plain overlay PUT overwrites regional settings). `translate.py` ledgers this as `unresolved`.
+    - The per-segment add-local-ASN setting of BGP, and security-policy rules set on the appliance itself between segments: no preconfig section holds either. `translate.py` counts firewall rules in `GET /securityMaps` that Orchestrator did not push (`gms_marked` false) and ledgers them `unresolved`; a securityMaps template's rules may also show `gms_marked` false (unverified).
+    - Disabled BGP or OSPF instances on a non-Default segment with no neighbours or interfaces are not written; they are ledgered `default-omitted`.
+17. **Template groups own their sections:** a section that an associated template group provides is not written. The template `peerPriorityList` provides the section `peerPriority`. The `routes`, `bgp` and `vrrp` templates set only some fields, so only those fields are left out (`FIELD_TEMPLATES` in `translate.py`): routes sets the per-segment subnet-sharing flags of `localRoutes`/`segmentLocalRoutes`, bgp the per-segment graceful restart, stale path, AS-path and route-target fields, vrrp the shared admin, timer, priority, preemption and auth of every group. Static routes, ASN, router ID, neighbours and VRRP groups stay in the preconfig. The bgp template's neighbour settings (`ka`, `hold`, `next_hop_self`, `password`, `store_received_routes`, `evpn`) are still written per neighbour and ledgered `unresolved`: not verified whether the template pushes them to every neighbour. A blank or `none` template value is taken as not set (inferred); a field any associated group sets is left out. `/validate` accepts the sections without those fields, and after apply the appliance has the template's values (lab, ECOS 9.6.2.1, 2026-10-19). Two associated template groups that set the same thing (DNS, for example) with no priority between them: whichever Orchestrator applies last wins, so a clone can differ from its source with an identical preconfig.
+18. **Secure web services (`secureWebServicesConfig`):** `hasSecureWebServicesConfig: false` does not mean default: the URL reputation threshold (`urlReputation`) is kept with every feature off. Write the section whenever a value differs from the default template (all flags `false`, `urlReputation: 1`). Found on ECOS 9.6.2.1, 2026-10-18. An all-default section read back on ECOS 9.7.2 is harmless.
+19. **Read from the running config or not readable:**
+    - `managementRoutes`: `ip default-gateway` and `ip route ... mgmtN` lines of the newest stored backup, de-duplicated (the running config can list one route twice). Re-applying stacks identical copies on the appliance (see `validate-behaviour.md`).
+    - `deploymentInfo.passThroughShapedTraffic.outboundMaxBandwidth`: `interface pass-through max-bandwidth`, written only when it is not the default 10000000.
+    - `deploymentInfo.ipsecUdpPort`: written only when `extra-info.overlaySettings.isUserDefinedIPSecUDPPort` is true; otherwise Orchestrator assigns the port.
+    - `dhcpRemoteAddressPoolConfig`: one pool (the latest); the validator rejects a list, so further pools are ledgered `unresolved`.
+    - `availabilityTimeSettings` (business hours): Orchestrator returns them only through a POST, and capture is GET-only, so they are ledgered `unresolved`.
+    - Route admin distances (`GET /appliance/adminDistance`): no preconfig field; ledgered `template-group` when an `adminDistance` template is selected, else `unresolved`.
+    - SSE service interfaces (`GET /thirdPartyServices/sse/interfaces`, `veth*`): made by Orchestrator's SSE integration, ledgered `orchestrator-managed`.
+20. **Link aggregation (`linkAggregation`):** the converter writes it where the release's default template puts it, near the end, and that is fine: Orchestrator applies link aggregation before deployment whatever the order in the YAML, and stores the YAML unchanged (A/B live apply and stored read-back on ECOS 9.7.1, 2026-10-21). `isForceDelete` has no source on the appliance and is omitted. An empty `linkAggregationGroups` list, with or without `isForceDelete: true`, does not delete an existing bond: the bond is removed on the appliance (UI, or `no system bonding interface <blanN>` once no interface uses it).
+21. **ECOS readback quirks that are not converter gaps:** the IKEv2 `exchangeMode` of a cloned tunnel can read back differently from the source although the preconfig carries the source value unchanged (30-site round trip, 2026-10-19).
+
+---
+
+## 4. Diagnosis Playbook: investigate, then report
+
+Using the skill, you diagnose and report; you never edit the toolkit (`SKILL.md`, "You never edit the toolkit"). Changes to `scripts/` and `references/` are made by the toolkit's maintainers in its own repository, each with a test.
+
+### A. A gap, an `unmapped-source-key` or a `toolkit-error` in `summary.md`
+1. Open the capture file the item names (`<capture_dir>/capture/<id>.live.json`, else `.cached.json`; `capture-index.json` lists them). Prefer the live copy: Orchestrator's cache can lag behind the appliance.
+2. Find the target in `references/default-templates/orchestrator-<release>.yml`, reading the YAML keys, not the comments (section 1 lists where they differ).
+3. Decide which case it is, and report it that way:
+   - **Runtime state** (uptime, leases, counters, generated IDs): "the toolkit should ignore `<key>`".
+   - **A value the format can hold:** a gap. Give the captured value, the target field and the mapping you would expect, so the maintainer can add it with a test.
+   - **No place in the format:** "outside preconfig; the toolkit should classify `<item>` as `outside-preconfig`".
+   - **`toolkit-error`:** quote the error and the captured data shape that triggered it (for example, a string where an object was expected).
+4. Tell the user what they can do now without a toolkit change: set the value per site after apply, start the section from the default template with `include_from_default` and fill it through `variables.csv`, or provide it with a template group.
+
+### B. Resolving `/validate` Rejections (`check.py` or `upload.py`)
+- **`Business Intent Overlays / Template groups / Interface Label / Segment / Zone / Role is invalid`:**
+  - The YAML references an object name from the source Orchestrator that does not exist on the target Orchestrator. Query the target Orchestrator's inventory (or run `check.py --substitute` for lab testing) and put valid target names in the site CSV (if the field is fixed, make it a column in `variables.csv` first), then re-run; never edit `reference.yaml`.
+- **`Unrecognized field: "<name>"`:**
+  - Either a comment-vs-YAML typo (check `references/default-templates/orchestrator-<release>.yml`) or a release-gated field (`--target-release` does not match the validating Orchestrator's release).
+- **Cross-field error (e.g., IKE/IPsec GCM, OSPF auth, Branch NAT prefix length, VXLAN VTEP interface):**
+  - Look up the section in `references/known-constraints.yaml` (`constraints` and `structural_and_apply_constraints`) and apply the documented companion fix.

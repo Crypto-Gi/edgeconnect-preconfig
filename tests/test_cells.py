@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "scripts"))
 from cells import cell_problems, option_limits, subnet_problems  # noqa: E402
 from generate import generate  # noqa: E402
 from render import flow_through, main as render_main, read_rows, render_row  # noqa: E402

@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "scripts"))
 import capture  # noqa: E402
 import translate  # noqa: E402  guard-ok: scripts are imported after the sys.path insert, like capture above
 from common import redact_secrets  # noqa: E402
