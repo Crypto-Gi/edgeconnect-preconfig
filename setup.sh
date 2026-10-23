@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install or update the EdgeConnect toolkit from main, in one folder (macOS and Linux): you pick
-# the repositories (the edgeconnect-auto CLI, the preconfig scripts, the MCP guide skill) and each
+# the repositories (the edgeconnect-auto CLI, the edgeconnect-preconfig CLI, the MCP server's guide and report skills) and each
 # one's agent skill, plus, if you want it, the MCP server run locally (stdio) for the agents you
 # choose. The same file ships in edgeconnect-orchestrator-automation, edgeconnect-preconfig and
 # edgeconnect-mcp. A Docker (HTTPS) MCP server is installed by hand from the edgeconnect-mcp guide.
@@ -18,10 +18,10 @@ Usage: setup.sh [--repos LIST] [--mcp stdio|docker|no] [--agents LIST] [--dir PA
 
   --repos LIST       repositories to install, by number: 1,2,3 or "all" (default: all)
                      1) edgeconnect-orchestrator-automation  2) edgeconnect-preconfig
-                     3) edgeconnect-mcp (guide skill, and the server if --mcp stdio)
+                     3) edgeconnect-mcp (guide and report skills, and the server if --mcp stdio)
   --mcp stdio        with 3: also run the MCP server locally for your agents (default)
   --mcp docker       with 3: you run it in Docker over HTTPS; print the install guide link
-  --mcp no           with 3: guide skill only
+  --mcp no           with 3: the skills only
   --dir PATH         install folder (default: the current folder, or ~/edgeconnect when run
                      from your home folder, or $EDGECONNECT_HOME)
   --skills folder    1) skills and MCP server only in the install folder (default)
@@ -86,14 +86,14 @@ Which repositories do you want to install?
 |   | managing-edgeconnect-firewall-and-objects  | application definitions     |
 +---+--------------------------------------------+-----------------------------+
 | 2 | edgeconnect-preconfig                      | edgeconnect-preconfig       |
-|   |                                            | command: capture appliance, |
-|   | Skill:                                     | build YAML template + CSV,  |
-|   | building-edgeconnect-preconfig-templates   | validate and upload         |
+|   |                                            | command: build a template   |
+|   | Skill:                                     | and CSV from an appliance,  |
+|   | building-edgeconnect-preconfig-templates   | validate, upload            |
 +---+--------------------------------------------+-----------------------------+
-| 3 | edgeconnect-mcp                            | Guide skill, and the MCP    |
-|   |                                            | server if you want it:      |
-|   | Skill:                                     | local (stdio) here, or      |
-|   | edgeconnect-guide                          | Docker set up by hand       |
+| 3 | edgeconnect-mcp                            | Guide and report skills,    |
+|   |                                            | and the MCP server if you   |
+|   | Skills:                                    | want it: local (stdio)      |
+|   | edgeconnect-guide, edgeconnect-report      | here, or Docker by hand     |
 +---+--------------------------------------------+-----------------------------+
 
 EOF
@@ -277,7 +277,7 @@ if [ -e "$ROOT/.env" ]; then
   echo "already exists, kept unchanged"
 else
   (umask 077; cat > "$ROOT/.env" <<'EOF'
-# Shared by edgeconnect-auto, the preconfig scripts and the local MCP server. Never commit or share this file.
+# Shared by edgeconnect-auto, edgeconnect-preconfig and the local MCP server. Never commit or share this file.
 # One slot per Orchestrator; the nickname is what you pass to --orchestrator.
 orch_1=lab
 lab_base_url=https://<ORCHESTRATOR_FQDN_OR_IP>
@@ -293,7 +293,8 @@ lab_api_key=<API_KEY>
 #   <nickname>_tls_sha256=<fingerprint> (self-signed certificate)
 # Preconfig: Orchestrators allowed for /validate, comma-separated nicknames.
 # EC_VALIDATORS=lab
-# MCP server: writes stay off unless you turn them on; options in
+# MCP server: writes stay off unless you turn them on. Three read-only POSTs (alarms, interface
+#   totals, health) run with writes off; <nickname>_mcp_get_only=true allows GETs only. Options in
 #   https://github.com/Crypto-Gi/edgeconnect-mcp#configuration
 EOF
   )
@@ -485,7 +486,7 @@ You are working with HPE Aruba EdgeConnect SD-WAN through an Orchestrator. Three
 
 These tools are run by a person. You help by writing the CSV files and the exact commands; the person pastes and runs them in their own terminal and sends you the output.
 
-- You may run read-only steps yourself when you can (validate, plan, dry run, MCP reads). You never run an `edgeconnect-auto` write (`APPLY`) or an MCP write. Preconfig uploads follow the preconfig skill's own flow: only after the user approves its table, with `--approve`.
+- You may run read-only steps yourself when you can (validate, plan, dry run, report collection, MCP reads). You never run an `edgeconnect-auto` write (`APPLY`) or an MCP write. Preconfig uploads follow the preconfig skill's own flow: only after the user approves its table, with `--approve`.
 - For every operation you run or propose, show the exact command in its own code block, ready to paste, even when you run it yourself (for an MCP call, the tool and request). Show only the command lines, not the files you prepared; for an edit to a CSV, name the file and the cells you changed, then show the command that uses it.
 - Give each command as one block the person can paste as it is, with the Orchestrator named and the folder it must run from. The `edgeconnect-auto` and `edgeconnect-preconfig` commands already find the shared `.env`, so no `--dotenv` is needed.
 - For a write, say what to check on the prompt before typing `APPLY` (the Orchestrator name and the list of changes), and ask them to paste the run summary back so you can read it and offer a read back.
@@ -498,20 +499,22 @@ Find the first row that matches what the user wants.
 | If the user wants to... | Use | Skill to read first |
 |---|---|---|
 | create, change or delete **firewall policies** (global or inter-segment), **zones**, **address groups**, **service groups**, **application definitions**, **application groups**, **AppExpress Monitor** entries, or **template-group ACLs**, especially in bulk from a list or spreadsheet | **`edgeconnect-auto`** (command line) | `managing-edgeconnect-firewall-and-objects` |
-| **capture** an appliance's configuration, build a **preconfig template**, or **render, check, validate or upload preconfigs** | **`edgeconnect-preconfig <stage>`** (command line) | `building-edgeconnect-preconfig-templates` |
-| look something up, list or explain things, troubleshoot, check status or alarms, **read back** what a change did, or do any other Orchestrator task that is not in the two rows above | **MCP server** (tools `list_orchestrators`, `find_operations`, `describe_operation`, `api_get`, `api_write`) | `edgeconnect-guide` |
+| build a **preconfig template** and CSV from a working appliance, choose the per-site settings, or **validate or upload preconfigs** | **`edgeconnect-preconfig <command>`** (command line: `list`, `build`, `variables`, `compare`, `validate`, `upload`) | `building-edgeconnect-preconfig-templates` |
+| a **report**: monthly availability or service level, NOC digest, WAN capacity, lifecycle and licences, a major incident, or an executive summary | **`edgeconnect-mcp report`** (command line: `bin/edgeconnect-mcp report` in this folder when the MCP server is installed here, otherwise `PYTHONPATH=edgeconnect-mcp/src python3 -m edgeconnect_mcp --dotenv .env report`) | `edgeconnect-report` |
+| look something up, list or explain things, troubleshoot, check status or alarms, **read back** what a change did, or do any other Orchestrator task that is not in the rows above | **MCP server** (tools `list_orchestrators`, `find_operations`, `describe_operation`, `api_get`, `api_read_post`, `api_write`) | `edgeconnect-guide` |
 
 If a request fits two rows, use the upper one: it has the stronger approval step. If it fits none, or you are unsure which tool owns an object, say so in one line and ask; do not guess.
 
-Examples: "add 200 application definitions from this sheet" -> `edgeconnect-auto`. "allow segment A to reach segment B on TCP 443" -> `edgeconnect-auto`. "build a preconfig for this branch appliance" -> `edgeconnect-preconfig`. "which appliances are unreachable?" -> MCP. "did that firewall change take effect?" -> MCP read back.
+Examples: "add 200 application definitions from this sheet" -> `edgeconnect-auto`. "allow segment A to reach segment B on TCP 443" -> `edgeconnect-auto`. "build a preconfig for this branch appliance" -> `edgeconnect-preconfig`. "give me last month's availability report" -> `edgeconnect-mcp report`. "which appliances are unreachable?" -> MCP. "did that firewall change take effect?" -> MCP read back.
 
 ## Step 2: follow the tool's approval flow
 
 Each tool has its own way of making sure a person approves a write. Never skip or imitate it.
 
 - **`edgeconnect-auto`:** you write the CSV and run the read-only checks (validate, plan, dry run). The user alone performs the write by typing `APPLY` in their own terminal. You never type it, never ask the user to paste it into chat, and never get around it.
-- **`edgeconnect-preconfig`:** capture, translate, render and validate only read from the Orchestrator or write local files. Nothing is uploaded unless the user explicitly approves, and then only with the script's `--approve` option, as the preconfig skill describes.
-- **MCP:** reads are free. The first `api_write` call changes nothing: it returns the exact change and a one-time confirmation code. Show that change to the user. Only after they say yes, repeat the identical call with the code. If the server refuses a write, tell the user and stop; do not look for another way in.
+- **`edgeconnect-preconfig`:** `list`, `build`, `variables`, `compare` and `validate` only read from the Orchestrator (GET) or write local files. `upload` shows what it would upload and uploads nothing unless the user explicitly approves, and then only with `--approve`, as the preconfig skill describes. The toolkit never applies a preconfig to an appliance.
+- **`edgeconnect-mcp report`:** reads only (GETs, plus the three read-only POSTs unless the Orchestrator is GET-only) and writes local files. Ask the report options the skill lists once, with their defaults, before collecting.
+- **MCP:** reads are free (`api_get`, and `api_read_post` for the three read-only POSTs). The first `api_write` call changes nothing: it returns the exact change and a one-time confirmation code. Show that change to the user. Only after they say yes, repeat the identical call with the code. If the server refuses a write, tell the user and stop; do not look for another way in.
 
 ## Rules
 
@@ -527,7 +530,7 @@ Each tool has its own way of making sure a person approves a write. Never skip o
 - `.env`: the one settings file shared by `edgeconnect-auto`, `edgeconnect-preconfig` and the local MCP server (Orchestrator nicknames, URLs, API keys, TLS pins). They all find it by themselves, so run them from any folder.
 - `edgeconnect-orchestrator-automation/` and `edgeconnect-preconfig/`, when installed: the tools' source, kept current by `setup.sh`. Read them, do not edit them.
 - Keep your own CSVs, reports and captures in a separate work folder, not in the tool folders. Never commit them or `.env`.
-- `edgeconnect-mcp/`, if it was picked: its guide skill and, when "Installed here" lists it, the MCP server that your agent starts through `bin/edgeconnect-mcp` with the shared `.env`. Otherwise the MCP server runs separately (for example in Docker). If its tools are not available, say so and continue with the other two; do not try to install or start it.
+- `edgeconnect-mcp/`, if it was picked: its guide and report skills and, when "Installed here" lists it, the MCP server that your agent starts through `bin/edgeconnect-mcp` with the shared `.env`. Otherwise the MCP server runs separately (for example in Docker). If its tools are not available, say so and continue with the other two; do not try to install or start it.
 
 ## How to answer
 
@@ -542,8 +545,8 @@ EOF
 # Listed from what the folder holds, so a later run that picks fewer repositories keeps the earlier ones.
 LIST_AUTO='- `edgeconnect-auto` and the skill `managing-edgeconnect-firewall-and-objects` (edgeconnect-orchestrator-automation)'
 LIST_PRECONFIG='- `edgeconnect-preconfig` and the skill `building-edgeconnect-preconfig-templates` (edgeconnect-preconfig)'
-LIST_MCP='- the skill `edgeconnect-guide` for the MCP server (edgeconnect-mcp); the server itself runs separately'
-LIST_MCP_LOCAL='- the skill `edgeconnect-guide` and the MCP server, run locally by `bin/edgeconnect-mcp` with the shared `.env` (edgeconnect-mcp)'
+LIST_MCP='- the skills `edgeconnect-guide` and `edgeconnect-report` for the MCP server (edgeconnect-mcp); the server itself runs separately'
+LIST_MCP_LOCAL='- the skills `edgeconnect-guide` and `edgeconnect-report`, and the MCP server and `report` command, run locally by `bin/edgeconnect-mcp` with the shared `.env` (edgeconnect-mcp)'
 LIST_END='A tool not listed here is not installed in this folder: do not run its commands. If the user needs it, tell them to run setup.sh again and pick it.'
 {
   printf '\n## Installed here\n\n'
@@ -557,7 +560,10 @@ LIST_END='A tool not listed here is not installed in this folder: do not run its
 section() { sed -n '/^## Installed here$/,/^A tool not listed here is not installed/p' "$1"; }
 rest() { sed '/^## Installed here$/,/^A tool not listed here is not installed/d' "$1"; }
 LIST_LINES="$ROOT/.AGENTS.md.lines"
-printf '%s\n' '## Installed here' '' "$LIST_AUTO" "$LIST_PRECONFIG" "$LIST_MCP" "$LIST_MCP_LOCAL" "$LIST_END" > "$LIST_LINES"
+# Lines earlier releases generated count as generated too, so an unedited AGENTS.md from them is still updated.
+LIST_MCP_OLD='- the skill `edgeconnect-guide` for the MCP server (edgeconnect-mcp); the server itself runs separately'
+LIST_MCP_LOCAL_OLD='- the skill `edgeconnect-guide` and the MCP server, run locally by `bin/edgeconnect-mcp` with the shared `.env` (edgeconnect-mcp)'
+printf '%s\n' '## Installed here' '' "$LIST_AUTO" "$LIST_PRECONFIG" "$LIST_MCP" "$LIST_MCP_LOCAL" "$LIST_MCP_OLD" "$LIST_MCP_LOCAL_OLD" "$LIST_END" > "$LIST_LINES"
 sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi | cut -d' ' -f1; }
 # Fingerprint of the text outside the Installed here list, trailing blank lines dropped.
 fingerprint() { rest "$1" | awk '{ line[NR] = $0 } END { n = NR; while (n > 0 && line[n] == "") n--; for (i = 1; i <= n; i++) print line[i] }' | sha256; }
@@ -637,8 +643,8 @@ EOF
   echo
   echo "Then check:"
   if picked edgeconnect-orchestrator-automation; then echo "  edgeconnect-auto --orchestrator lab discovery"; fi
-  if picked edgeconnect-preconfig; then echo "  edgeconnect-preconfig capture --help"; fi
-  if [ "$MCP_MODE" = stdio ]; then echo "  restart your agents and ask: list my EdgeConnect orchestrators"; fi
+  if picked edgeconnect-preconfig; then echo "  edgeconnect-preconfig list --orchestrator lab"; fi
+  if [ "$MCP_MODE" = stdio ]; then echo "  restart your agents and ask: list my EdgeConnect orchestrators"; echo "  $ROOT/bin/edgeconnect-mcp report --help"; fi
 fi
 if [ -n "${MCP_LATER:-}" ]; then
   echo
@@ -654,5 +660,5 @@ elif [ "$MCP_MODE" = docker ]; then
 elif picked edgeconnect-mcp; then
   echo "MCP server: not installed (you chose No). To run it here later, run setup.sh again and answer 1 at \"Install the MCP server too?\"; if it runs in Docker, answer 2."
 else
-  echo "MCP server: not part of this install. Run setup.sh again and pick 3 for its guide skill and, if you want, the server."
+  echo "MCP server: not part of this install. Run setup.sh again and pick 3 for its skills and, if you want, the server."
 fi

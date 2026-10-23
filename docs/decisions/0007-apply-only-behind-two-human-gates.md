@@ -8,4 +8,4 @@ Upload itself needs only `--approve`, as before.
 
 Considered: a personal PIN stored as a hash (stops an agent that fakes a terminal, at the cost of setup); an upload key typed per run. Not adopted for now; revisit if an agent is ever seen driving a pseudo-terminal.
 
-Checked by: `tests/test_apply_gate.py`.
+Checked by: `tests/test_apply_gate.py` (removed with 0008, together with `tests/harnesses/apply_and_diff.py`).

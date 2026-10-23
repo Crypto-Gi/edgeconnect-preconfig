@@ -10,7 +10,7 @@ Writing EdgeConnect preconfiguration YAML files by hand is slow and brittle: the
 
 This repository packages a **lean, self-contained AI skill (`skills/building-edgeconnect-preconfig-templates/`)** plus a **deterministic Python toolkit and test suite (`tests/`)**:
 - **Works standalone or with any AI coding agent:** Run the Python scripts directly from your terminal, or let your AI agent drive them conversationally, translate customer spreadsheets into `<site>.csv`, adapt site topologies, and self-heal validation errors.
-- **Zero bloat when installed:** Installing `skills/building-edgeconnect-preconfig-templates/` copies only `SKILL.md`, `references/`, and the 13 runtime `scripts/` into your agent (no repository READMEs or test harnesses).
+- **Zero bloat when installed:** Installing `skills/building-edgeconnect-preconfig-templates/` copies only `SKILL.md`, `VERSION`, `references/`, and the 16 runtime `scripts/` into your agent (no repository READMEs or test harnesses).
 - **Verified against real hardware & virtual fabrics:** Proven by option and mutation tests, captures of real appliances from several Orchestrators (`9.3.7`–`10.0.0`), and live appliance apply-and-diff runs, including every section that `/validate` alone could not prove (IPv6 and router advertisements, DHCP failover, NAT pool references, AppExpress groups, all four IDS/IPS modes).
 
 ---
@@ -23,7 +23,7 @@ Three repositories that work together:
 |---|---|---|
 | [edgeconnect-orchestrator-automation](https://github.com/Crypto-Gi/edgeconnect-orchestrator-automation) | `edgeconnect-auto` CLI: deploys and removes firewall policies, zones, address, service and application groups, application definitions and template-group ACLs from reviewed CSVs, with a dry run, a typed `APPLY` and readback verification. | `managing-edgeconnect-firewall-and-objects` |
 | [edgeconnect-preconfig](https://github.com/Crypto-Gi/edgeconnect-preconfig) (this repository) | Turns an existing appliance into a Jinja2 + CSV preconfiguration template, then renders, validates and uploads one preconfig per site. | `building-edgeconnect-preconfig-templates` |
-| [edgeconnect-mcp](https://github.com/Crypto-Gi/edgeconnect-mcp) | MCP server that lets Claude or any MCP client read, and with your approval change, an Orchestrator through its REST API. | `edgeconnect-guide` |
+| [edgeconnect-mcp](https://github.com/Crypto-Gi/edgeconnect-mcp) | MCP server that lets Claude or any MCP client read, and with your approval change, an Orchestrator through its REST API; since v0.3.0 also the `edgeconnect-mcp report` command. | `edgeconnect-guide`, `edgeconnect-report` |
 
 **Install the CLI, the preconfig scripts and their two skills** (macOS and Linux; needs git, Python 3.9 or later and, for the skills, Node.js 18 or later):
 
@@ -41,13 +41,13 @@ The same `setup.sh` is in all three repositories. It asks a few questions, then 
 
 Everything lands in the one folder, from `main`: the repositories, for 1 and 2 a Python environment and the `edgeconnect-auto` (1) and `edgeconnect-preconfig` (2) commands in `~/.local/bin`, for a local MCP server its launcher `<folder>/bin/edgeconnect-mcp`, and one shared `.env`. The last screen shows how to fill in `.env` for what you picked: the Orchestrator lines, the API key, a self-signed certificate, `EC_VALIDATORS` for preconfig and MCP writes. It also writes `AGENTS.md` (which tool an agent should use for which task, and what this folder has installed) and a `CLAUDE.md` that points to it, so start your agent there; an `AGENTS.md` that `setup.sh` wrote and you never edited is kept up to date on every run, and one you have edited is never overwritten (the new text goes to `AGENTS.md.new`). Run it again to update. Options for answering without prompts: `--repos 1,3` (or `all`), `--mcp stdio|docker|no`, `--agents 1,2,15` (numbers or names such as `claude-code,codex`), `--dir PATH`, `--skills folder|home`, `--yes`.
 
-Picking 3 installs the MCP guide skill, `edgeconnect-guide`, and, if you choose local, the stdio MCP server for your agents; a Docker server is installed by hand, as the [edgeconnect-mcp README](https://github.com/Crypto-Gi/edgeconnect-mcp#install) covers.
+Picking 3 installs the MCP repository's skills (`setup.sh` installs every skill a picked repository has: `edgeconnect-guide` and, since edgeconnect-mcp v0.3.0, `edgeconnect-report`) and, if you choose local, the stdio MCP server for your agents; a Docker server is installed by hand, as the [edgeconnect-mcp README](https://github.com/Crypto-Gi/edgeconnect-mcp#install) covers.
 
 ---
 
 ## Use It Without an AI: the Command Line
 
-`setup.sh` installs the `edgeconnect-preconfig` command. Six verbs cover the whole job; `edgeconnect-preconfig --help` lists them, and each takes `--help`.
+`setup.sh` installs the `edgeconnect-preconfig` command (in `~/.local/bin`; it runs `scripts/cli.py` with the toolkit's Python and the shared `.env` of the install folder, unless `EC_DOTENV` names another). Six commands cover the whole job; `edgeconnect-preconfig --help` lists them, each takes `--help`, and `edgeconnect-preconfig --version` prints the toolkit version.
 
 ```bash
 edgeconnect-preconfig list --orchestrator lab                      # test the .env profile and list appliances: hostname, nePk, model, ECOS, site, reachable
@@ -59,11 +59,33 @@ edgeconnect-preconfig upload ./preconfig-output/Branch-01/site-branch --csv site
 edgeconnect-preconfig upload ./preconfig-output/Branch-01/site-branch --csv sites.csv --approve  # uploads the valid, non-conflicting rows
 ```
 
-- **build** writes `preconfig-output/<hostname>/`: `reference.yaml`, the template, `example.csv`, `summary.md` with the verdict, and `build.json`. Nothing is kept unless Orchestrator's `/validate` accepts the result. Validation runs on the Orchestrator the appliance came from; `--validate-on <lab>` names another. Either way it must be listed in `EC_VALIDATORS`. An earlier folder of the same name is renamed, never overwritten.
-- **variables** shows the settings as a tick list. Hostname, serial, secrets and every Deployment-page and appliance-info value (addresses, next hops, bandwidths, DHCP, location) are always per site, no questions; interface names, labels, zones, segments, firewall and deployment mode stay fixed unless you flip them. The Top 10 and Top 20 are the settings that differed most often between appliances of the same design in the captured corpus (`references/variable-ranking.json`); "All" opens one section at a time. Type numbers to flip a setting, a word to search, Enter when done. A gateway that equals an interface address follows that address. `--pick top10 --yes` (or `top20`, or `all` to make every setting per site) and `--set column,...` do the same without questions. Top 10 and Top 20 never tick template groups or overlays; flip them yourself if sites differ.
-- **compare** reads the other sites (GET only), makes every setting whose value differs between them per site, and asks you to confirm or edit. Its `sites.csv` has a row for every site with that site's own values (serials and secrets blank), and every row is validated.
-- **Nothing applies.** The command line stops at upload, and every upload has `autoApply` off. Applying a preconfig to an appliance is done by a person in Orchestrator; no script here can do it.
-- **variables** and **compare** write `site-<name>/` inside the build folder; the build's own files never change. The old stage scripts still run by name (`edgeconnect-preconfig capture ...`); the live-versus-cached check is now `cache-check`.
+- **list** `--orchestrator NICK [--search TEXT]`: logs in, reads the release and lists the appliances; `--search` keeps those whose hostname, nePk, model or site contains the text. The first line says whether `/validate` may run on that Orchestrator.
+- **build** `--orchestrator NICK --appliance NAME|nePk [--out DIR] [--validate-on NICK] [--target-release RELEASE]` writes `<out>/<hostname>/` (default `./preconfig-output/<hostname>/`): `reference.yaml`, the template `<hostname>.jinja2` and `<hostname>.csv`, `example.csv` (this appliance's own values), `variables.csv`, `columns.json`, `columns.md`, `ledger.json`, `summary.md` with the verdict, `checks.json`, `rendered/` and `build.json`. The folder is kept only if Orchestrator's `/validate` accepts the example row; the capture itself stays in the work folder (see below). Validation runs on the Orchestrator the appliance came from; `--validate-on <lab>` names another, and then object names (groups, labels, segments) are swapped for ones that exist there, for the check only. Either way the validator must be allowed in `.env` (see `EC_VALIDATORS` in step 2 below). An earlier folder of the same name is renamed to `<name>.previous-<UTC stamp>`, never overwritten. `--target-release` is only needed when the validator's API key may not read its release (`GET /gms/versions`); build then says so.
+- **variables** `FOLDER [--pick top10|top20|all] [--set COL,...] [--name NAME] [--yes]` shows the settings as a tick list. Hostname, serial, secrets and every Deployment-page and appliance-info value (addresses, next hops, bandwidths, DHCP, location) are always per site, no questions; interface names, labels, zones, segments, firewall and deployment mode stay fixed unless you flip them. The Top 10 and Top 20 are the settings that differed most often between appliances of the same design in the captured corpus (`references/variable-ranking.json`); "All" opens one section at a time. Type numbers to flip a setting (`4 12`), `s1`.. to open a section, `a` for all sections, `t` for the Top list, `l` for the locked ones, a word to search, Enter when done, `q` to quit. A gateway that equals an interface address follows that address. `--pick top10 --yes` (or `top20`, or `all` to make every setting per site) and `--set column,...` do the same without questions; `--yes` needs `--pick`. Top 10 and Top 20 never tick template groups or overlays; flip them yourself if sites differ.
+- **compare** `FOLDER SITE [SITE ...] [--name NAME] [--yes]` reads 1 to 4 other sites on the same Orchestrator (GET only; 2 recommended), makes every setting whose value differs between them per site, and asks you to confirm (`Y`), stop (`n`) or `edit` the tick list. Its `sites.csv` has this site's row and a row for every other site with that site's own values (`preconfig_name` is `<hostname>_preconfig`; serials and secrets blank), and every row is validated. A site whose interface names differ at the same place (`wan1` where this site has `wan0`) gets no row: a note names it, because its values would land on the wrong interfaces. Build a separate template for that design.
+- **validate** `FOLDER --csv FILE [--orchestrator NICK]` renders and validates every row on the build's validator (or the one named); rows that pass are written to `FOLDER/rendered/`.
+- **upload** `FOLDER --csv FILE [--orchestrator NICK] [--approve]` validates every row again, skips a row whose name or serial is already on the Orchestrator, and uploads only with `--approve`. It uploads to the build's validator unless `--orchestrator` names another, and runs `/validate` there itself (upload does not check `EC_VALIDATORS`).
+- **Nothing applies.** The command line stops at upload, and every upload has `autoApply` off. Applying a preconfig to an appliance is done by a person in Orchestrator; no script here can do it (`docs/decisions/0008`).
+- **variables** and **compare** write `site-<name>/` inside the build folder (an earlier one is renamed, as above); the build's own files never change. Give `validate` and `upload` the build folder or a `site-<name>` folder.
+- **Put FOLDER first** after `validate` and `upload`. If the first word after them is an option (`upload --csv ...`), the old stage script runs instead and asks for its own options.
+- **The stage scripts still run by name:** `cache-check`, `capture`, `check`, `generate`, `options`, `render`, `translate`, and `validate` / `upload` in their stage form (for example `edgeconnect-preconfig capture --orchestrator lab --appliance 0.NE --role reference`). The old live-versus-cached stage `compare` is now `cache-check`. For the help of the `validate` and `upload` stages run the script itself (`python3 scripts/upload.py --help`), since `edgeconnect-preconfig upload --help` shows the command. `cells` and `synth` are listed too, but they are libraries with no command line.
+- **Captures** go to the work folder: `$PRECONFIG_WORK`, else `preconfig-work/` in the install folder when it exists, else `./preconfig-work/` (`reference/<orchestrator>/<nePk>/<UTC stamp>/` for build, `samples/...` for compare).
+- **Exit codes:** 0 done; 1 when some rows failed or you stopped at a question; 2 when the command stopped, with one `error:` line; 130 after Ctrl-C.
+
+### When a command stops
+
+| You see | What it means | What to do |
+|---|---|---|
+| `... is not a validator Orchestrator: /validate runs only on the ones listed in EC_VALIDATORS ...` | The validator is not allowed in `.env`. | Add it to `EC_VALIDATORS`, or pass `--validate-on <lab>`. |
+| `PermissionDeniedError (HTTP 403) from /gms/appliance/preconfiguration/validate` | The key's roles do not allow `/validate`; a read-only key is refused, although nothing is saved. Nothing was kept. | Validate on an Orchestrator whose key may validate: `--validate-on <lab>`. |
+| `unknown or incomplete Orchestrator profile 'x' (configured: ...)` | No `x_base_url` and `x_api_key` in the `.env` that was found. | Fix `.env`, or point `EC_DOTENV` at the right file. |
+| `AuthenticationError`, `TransportError` (401, redirect, TLS, network) | The capture stops; no folder is left behind. | Check the URL, the key and, for a self-signed certificate, `<nick>_tls_sha256`. |
+| `GET /subnets refused (HTTP 403) ...` (or `/subnets/all`) | The key may not read the routes, so the preconfig would lose them (`docs/decisions/0010`). | Give the key read rights for them and run again. |
+| `... lacks appliance or deployment.sysConfig data (appliance may be offline with no Orchestrator cache)` | The appliance is unreachable and Orchestrator holds no cached copy. | Bring it online, or pick another appliance. |
+| `appliance 'x': 0 matches by nePk or exact hostname` | The name is not on that Orchestrator (hostnames match exactly). | Run `list` and copy the hostname or nePk. |
+| `... did not give its release (GET /gms/versions refused): pass --target-release` | The key may not read the release. | Pass `--target-release` with one of the releases it names. |
+
+A read the API key's roles refuse (HTTP 403) on any other endpoint does **not** stop the run (`docs/decisions/0009`). The capture records it and `summary.md` lists it under "Not readable: the format has a place for it, but a GET cannot read it; check it by hand", with the note "Orchestrator refused GET <path> (HTTP 403): the API key's RBAC roles do not allow it, so these sections may lack values; check them by hand or widen the key's read roles and capture again". The verdict then reads "Complete for preconfig; N item(s) to check by hand." Business hours (`availabilityTimeSettings`) are always in that group, because Orchestrator returns them only through a POST.
 
 ---
 
@@ -82,8 +104,10 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Without `setup.sh` there is no `edgeconnect-preconfig` command; run the same commands as `python3 skills/building-edgeconnect-preconfig-templates/scripts/cli.py COMMAND ...` inside the virtual environment. The tests need the same packages (`python3 -m unittest discover -s tests`).
+
 ### 2. Configure `.env`
-Copy `.env.example` to `.env` in your working directory (or set `EC_DOTENV=/path/to/.env`):
+Copy `.env.example` to `.env` in your working directory, or set `EC_DOTENV=/path/to/.env`. Without `EC_DOTENV` the scripts use the first `.env` they find: the working directory, then the skill folder and each folder above it (so the install folder's shared `.env` is found). Environment variables of the same name override `.env` values.
 
 ```dotenv
 # Read-only reference Orchestrator profile
@@ -97,8 +121,13 @@ lab_base_url=https://lab-orchestrator.example.com
 lab_api_key=YOUR_LAB_API_KEY
 # Self-signed lab certificate: pin it instead of turning checks off.
 # lab_tls_sha256=<SHA-256 fingerprint, e.g. from: openssl x509 -noout -fingerprint -sha256>
+# Orchestrators /validate may run on (a nickname containing lab, vlab, test or sandbox is allowed too)
 EC_VALIDATORS=lab
 ```
+
+- Each profile is a nickname: `orch_N=<nick>`, `<nick>_base_url` (https only; the path defaults to `/gms/rest`) and `<nick>_api_key`. Optional: `<nick>_tls_sha256` (pin a self-signed certificate; a profile name never turns certificate checks off), `<nick>_ca_bundle=/path/to/ca.pem` (a private CA), `<nick>_api_key_header` (default `X-Auth-Token`).
+- `EC_VALIDATORS` lists the nicknames `/validate` may run on (build, variables, compare, validate, render, check). A profile whose nickname contains `lab`, `vlab`, `test` or `sandbox` is allowed too, even when it is not listed; with neither, only `lab` and `vlab` are. Name a production profile so it does not match by accident.
+- `/validate` may need more than a read-only key: in testing, Orchestrator refused it (HTTP 403) for a read-only key, although nothing is saved. A read-only key is enough for capture and `list`.
 
 ### 3. Capture a Reference Appliance (Read-Only `GET`)
 ```bash
@@ -106,17 +135,20 @@ SKILL_SCRIPTS="skills/building-edgeconnect-preconfig-templates/scripts"
 
 python3 "$SKILL_SCRIPTS/capture.py" --orchestrator prod --appliance 2.NE --role reference
 ```
-> Captures live and cached appliance state via `GET` only, redacts all passwords/PSKs/RADIUS keys/certificates to `<SECRET:path>` before touching disk, and automatically downloads `GET /gms/appliance/preconfiguration/default` into `references/default-templates/orchestrator-<release>.yml` if the Orchestrator release is new.
+> Prints the capture folder at the end. Captures live and cached appliance state via `GET` only, redacts all passwords/PSKs/RADIUS keys/certificates to `<SECRET:path>` before touching disk, and automatically downloads `GET /gms/appliance/preconfiguration/default` into `references/default-templates/orchestrator-<release>.yml` if the Orchestrator release is new (not with `--only`, and not when the key may not read `GET /gms/versions`). Use `--role sample` for the other sites of the same design (written under `samples/`). A read the key's roles refuse is recorded and reported, not fatal; see [When a command stops](#when-a-command-stops).
 
 ### 4. Generate the Site-Type Jinja2 & CSV Template
 ```bash
 python3 "$SKILL_SCRIPTS/translate.py" \
   --capture ./preconfig-work/reference/prod/2.NE/<UTC_STAMP> \
-  --site-type retail-branch
+  --site-type retail-branch \
+  --target-release 9.7.1.42046
 ```
-> Writes `./preconfig-output/retail-branch/` containing `retail-branch.jinja2`, `retail-branch.csv` (blank headers), `example.csv` (pre-filled reference row with `preconfig_name` and `serial_number`), `columns.json`, `columns.md` (what to enter in each column), `reference.yaml`, `variables.csv`, `ledger.json`, and `summary.md` (the toolkit version, then every item the YAML does not carry, grouped: toolkit errors, gaps, outside preconfig, owned by templates or Orchestrator).
+> `--target-release` (default `9.7.1.42046`) must be the release of the Orchestrator that validates and applies; `references/default-templates/` must hold its default template. Writes `./preconfig-output/retail-branch/` containing `retail-branch.jinja2`, `retail-branch.csv` (blank headers), `example.csv` (pre-filled reference row with `preconfig_name` and `serial_number`), `columns.json`, `columns.md` (what to enter in each column), `reference.yaml`, `variables.csv`, `ledger.json`, and `summary.md` (the toolkit version, then every item the YAML does not carry, grouped: toolkit errors, gaps, not readable, outside preconfig, owned by templates or Orchestrator, then the verdict). Edit `variables.csv` and re-run with `--variables variables.csv`; a run without `--variables` writes a fresh sheet and keeps the old one as `variables.previous.csv`.
 
 ### 5. Validate Rows, Emit `.yml` Files Immediately & Upload on Approval
+Copy `example.csv` to `sites.csv` and add a row per site (`preconfig_name`, optional `serial_number`, and the columns `columns.md` explains). `--csv` is required.
+
 ```bash
 # Step 5a: Check each cell offline (address format, ranges, subnets), validate each row in memory and immediately write rendered/<preconfig_name>.yml for valid rows (0 uploads)
 python3 "$SKILL_SCRIPTS/upload.py" \
@@ -203,7 +235,7 @@ mkdir -p .github/skills && cp -R skills/building-edgeconnect-preconfig-templates
 
 ## Output Directory Structure
 
-All generated artifacts are written to `./preconfig-output/<site-type>/` in your current working directory and kept permanently on disk:
+The stage scripts write to `./preconfig-output/<site-type>/` in your current working directory (`--out` names another) and keep everything on disk:
 
 ```text
 ./preconfig-output/<site-type>/
@@ -219,10 +251,21 @@ All generated artifacts are written to `./preconfig-output/<site-type>/` in your
 ├── columns.json            # Column metadata (YAML path, scalar type, address format, optional/secret flags)
 ├── columns.md              # What to enter in each column: format, allowed values, the reference value, the fields it fills
 ├── checks.json             # check.py results
+├── validation.json         # validate.py results (for files in rendered/)
 ├── upload-report.json      # Per-row validation, conflict, and upload report
 └── rendered/
     ├── Store-010-Primary.yml
     └── Store-020-Primary.yml
+```
+
+The command line keeps the same files per build, plus its own:
+
+```text
+./preconfig-output/<hostname>/
+├── build.json              # source and validator Orchestrator, capture folder, target release, toolkit version
+├── <hostname>.jinja2, <hostname>.csv, example.csv, reference.yaml, variables.csv, ledger.json, summary.md, columns.*, checks.json, rendered/
+├── site-<name>/            # from variables or compare: the same files for the chosen columns, plus sites.csv
+└── <hostname>.previous-<UTC stamp>/   # an earlier build of the same appliance
 ```
 
 ---
@@ -241,17 +284,22 @@ edgeconnect-preconfig/
 │   ├── TESTING_AND_VERIFICATION.md           # Verification report: unit tests, captures, live applies
 │   └── decisions/                            # Decision records
 ├── skills/
-│   └── building-edgeconnect-preconfig-templates/   # <-- Lean installable skill (23 files: zero README/test bloat)
+│   └── building-edgeconnect-preconfig-templates/   # <-- Lean installable skill (26 files: zero README/test bloat)
 │       ├── SKILL.md
-│       ├── references/                       # 9.6/9.7/10.0 default templates, endpoint-catalogue, known-constraints, lessons, validate-behaviour
+│       ├── VERSION                           # toolkit version (1.2.2)
+│       ├── references/                       # 9.6/9.7/10.0 default templates, endpoint-catalogue, known-constraints, lessons, validate-behaviour, variable-ranking.json
 │       └── scripts/                          # 16 runtime scripts (cli, capture, cache_check, translate, mappers, decisions, variables, generate, cells, render, check, validate, upload, synth, options, common)
 ├── tests/                                    # offline unit tests & maintainer lab harnesses
 │   ├── test_capture.py
 │   ├── test_cells.py
+│   ├── test_cli.py
+│   ├── test_common_tls.py
 │   ├── test_decisions.py
 │   ├── test_generate.py
 │   ├── test_mappers.py
+│   ├── test_no_apply.py                      # fails if any script or test calls the apply API or sets autoApply true
 │   ├── test_raw_diff.py
+│   ├── test_report.py
 │   ├── test_variables.py
 │   └── harnesses/                            # corpus.py, lab_diff.py, probes.py, rank_variables.py, raw_diff.py, scan.py, suite.py
 └── dist/                                     # Pre-built archives for Claude Desktop / Cowork upload
@@ -263,8 +311,8 @@ edgeconnect-preconfig/
 
 ## Safety & Scope Boundaries
 
-- **What this project does:** Read-only appliance configuration capture (`GET` only), secret redaction, Jinja2 + CSV preconfig template generation, YAML 1.2 validation, non-saving Orchestrator `/validate` checks, immediate local `.yml` emission for valid rows, and approval-gated preconfig staging (`POST /gms/appliance/preconfiguration`).
-- **What this project does NOT do:** It never writes to read-only reference Orchestrators, never writes `.yml` files for rows that fail validation, never uploads without `--approve`, never overwrites existing Orchestrator `preconfig_name` or `serial_number` entries (conflicting rows are skipped while valid non-conflicting rows proceed), and never modifies shared day-2 Template Groups or Business Intent Overlays directly.
+- **What this project does:** Read-only appliance configuration capture (`GET` only), secret redaction, Jinja2 + CSV preconfig template generation, YAML 1.2 validation, non-saving Orchestrator `/validate` checks, immediate local `.yml` emission for valid rows, and approval-gated preconfig staging (`POST /gms/appliance/preconfiguration`, always with `autoApply: false`).
+- **What this project does NOT do:** It never applies a preconfig and cannot ask Orchestrator to apply one later (`docs/decisions/0008`). Its only write is `upload --approve`, to the Orchestrator you name. It never writes `.yml` files for rows that fail validation, never uploads without `--approve`, never overwrites existing Orchestrator `preconfig_name` or `serial_number` entries (conflicting rows are skipped while valid non-conflicting rows proceed), and never modifies shared day-2 Template Groups or Business Intent Overlays directly.
 
 ---
 

@@ -9,7 +9,7 @@ Verified across HPE Aruba EdgeConnect Orchestrator releases `9.6.4`, `9.7.1`, an
 - **Identify Orchestrator release from `GET /gms/versions` (`current`):** Never trust Swagger `info.version`.
 - **Default preconfiguration template (`GET /gms/appliance/preconfiguration/default`):**
   - Bundled baselines for `9.6.4.40046`, `9.7.1.42046`, and `10.0.0.40516` live in `references/default-templates/`.
-  - On first connection to any uncached Orchestrator release, `capture.py` automatically downloads `GET /gms/appliance/preconfiguration/default` into `references/default-templates/orchestrator-<release>.yml`.
+  - On first connection to any uncached Orchestrator release, `capture.py` automatically downloads `GET /gms/appliance/preconfiguration/default` into `references/default-templates/orchestrator-<release>.yml` (not with `--only`, and not when the API key may not read `GET /gms/versions`).
 - **Derive field names from YAML keys, never from template comments (known comment drifts include):**
   - `inboundPortForwarding`: comments say `wanInterface`, `destIp`, `destPort`, `targetIp`, `targetPort`, while the actual YAML keys are `sourceInterface`, `destinationIpSubnet`, `destinationPortRange`, `translateIp`, `translatePortRange`.
   - `nac.applyPolicies`: comments say `interface`, while the actual YAML key is `auth_interface`.
