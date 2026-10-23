@@ -288,14 +288,21 @@ lab_api_key=<API_KEY>
 # prod_base_url=https://<ORCHESTRATOR_FQDN_OR_IP>
 # prod_api_key=<API_KEY>
 
-# Optional per nickname: <nickname>_ca_bundle=/path/to/ca.pem (private CA),
-#   <nickname>_api_key_header=X-Auth-Token,
-#   <nickname>_tls_sha256=<fingerprint> (self-signed certificate)
-# Preconfig: Orchestrators allowed for /validate, comma-separated nicknames.
+# Format: one KEY=value per line, no inline comments ("value # note" is all value), base URLs https:// only.
+# Nicknames: letters, digits and _ (not "orch" or orch_...). Pick the default with orch_default=<nickname>.
+# Optional per nickname: <nickname>_ca_bundle=/full/path/ca.pem (private CA, no ~),
+#   <nickname>_api_key_header=X-Auth-Token (the default),
+#   <nickname>_tls_sha256=<64 hex digits, colons allowed> (self-signed certificate; pins that host only)
+# Preconfig: Orchestrators allowed for /validate, exact nicknames, comma-separated. None if unset.
 # EC_VALIDATORS=lab
-# MCP server: writes stay off unless you turn them on. Three read-only POSTs (alarms, interface
-#   totals, health) run with writes off; <nickname>_mcp_get_only=true allows GETs only. Options in
-#   https://github.com/Crypto-Gi/edgeconnect-mcp#configuration
+# MCP server, per nickname. On only for true, 1 or yes; anything else, including "on", is off.
+#   <nickname>_mcp_writes=true      allow api_write (two-step confirmation unless _mcp_confirm_writes=false)
+#   <nickname>_mcp_get_only=true    GETs only: refuses the three read-only POSTs (alarms, interface totals,
+#                                   health) and every api_write
+# Every key, its default and accepted values: .env.example in each repository
+#   https://github.com/Crypto-Gi/edgeconnect-mcp/blob/main/.env.example
+#   https://github.com/Crypto-Gi/edgeconnect-orchestrator-automation/blob/main/.env.example
+#   https://github.com/Crypto-Gi/edgeconnect-preconfig/blob/main/.env.example
 EOF
   )
   echo "created: replace the placeholders before the first run"
