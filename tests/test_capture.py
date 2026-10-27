@@ -188,14 +188,13 @@ class DefaultTemplateTest(unittest.TestCase):
             return real(method, path, query, expected_status, expect_json)
 
         client.request = request
-        folder = Path(tempfile.mkdtemp())
-        real_dir, capture.DEFAULT_TEMPLATES_DIR = capture.DEFAULT_TEMPLATES_DIR, folder
-        self.addCleanup(setattr, capture, "DEFAULT_TEMPLATES_DIR", real_dir)
+        bundled, work = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
         capture.client_for = lambda nickname: client
         err = io.StringIO()
-        with contextlib.redirect_stderr(err):
+        with mock.patch.object(capture, "DEFAULT_TEMPLATES_DIR", bundled), mock.patch.object(capture, "WORK_DIR", work), contextlib.redirect_stderr(err):
             capture.capture("lab", "lab-a", "reference", 0, Path(tempfile.mkdtemp()))
-        return folder / "orchestrator-10.0.0.99999.yml", err.getvalue()
+        self.assertEqual(list(bundled.iterdir()), [])  # the toolkit folder stays clean: a downloaded template goes to the work folder
+        return work / "reference" / "default-templates" / "orchestrator-10.0.0.99999.yml", err.getvalue()
 
     def test_template_in_a_base64_json_configdata_field_is_cached(self):
         # The shape an Orchestrator on 10.0.0.40625 returns: base64 YAML inside a JSON object.
@@ -212,6 +211,12 @@ class DefaultTemplateTest(unittest.TestCase):
         saved, err = self.run_with({"configData": base64.b64encode(b"just a sentence").decode()})
         self.assertFalse(saved.exists())
         self.assertIn("10.0.0.99999", err)
+
+    def test_a_downloaded_template_is_found_for_its_release(self):
+        saved, _ = self.run_with("applianceInfo:\n  hostname: example\n")
+        with mock.patch.object(common, "WORK_DIR", saved.parents[2]):
+            path, why = common.find_default_template("10.0.0.99999")
+        self.assertEqual((path, why.startswith("the exact template")), (saved, True))
 
     def test_plain_text_template_is_still_cached(self):
         saved, _ = self.run_with("applianceInfo:\n  hostname: example\n")

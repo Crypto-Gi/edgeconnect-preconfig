@@ -12,4 +12,5 @@ Combines three changes that were open as separate pull requests (#4, #5, #6).
   - A bonded `blanN`/`bwanN` with an empty speed counts as the default.
 - **Capture**: reachability state 5 (sync in progress) counts as reachable, so live reads run.
 - **Release families** (`docs/decisions/0014`): a release without its own default template uses the newest template of the same major.minor. Failing that, it uses the nearest older release (marked untested), then the nearest newer one. Only an empty template folder stops the build. `summary.md` and `ledger.json` (`default_template`) say which template was used and why.
+- **Downloaded templates go to the work folder**: capture saves an Orchestrator's own default template in `<PRECONFIG_WORK>/reference/default-templates/`, never inside `toolkit/` or the skill. Template lookup searches both folders, and a bundled template wins over a download.
 - **Missing PyYAML**: prints how to install it instead of a traceback.
