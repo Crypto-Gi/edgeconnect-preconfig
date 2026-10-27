@@ -542,7 +542,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     info = load_build(a.folder)
     base = a.folder if (a.folder / "build.json").is_file() else a.folder.parent
     from capture import Stop, capture
-    from translate import Capture, NothingToConvert, build, gated_paths, prune
+    from translate import Capture, NothingToConvert, allowed_paths, build, prune
     from variables import classify, sheet_items, write_sheet
     caps = []
     for site in a.sites:
@@ -551,9 +551,9 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
             caps.append(capture(info["orchestrator"], site, "sample", 0.2, WORK_DIR / "samples" / info["orchestrator"]))
         except Stop as stop:
             raise Fail(str(stop))
-    gated = gated_paths(info["target_release"])
+    allowed = allowed_paths(info["target_release"])
     try:
-        others = [prune(build(Capture(c), []), gated, []) for c in caps]
+        others = [prune(build(Capture(c), []), allowed, []) for c in caps]
     except NothingToConvert as error:
         raise Fail(str(error))
     reference = load_yaml(base / "reference.yaml")

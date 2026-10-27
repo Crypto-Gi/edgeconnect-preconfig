@@ -389,8 +389,9 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
         ha_cfg.update({
             "haIpPool": my_ha["subnet"],
             "haSubnetMask": int(my_ha["mask"]),
-            "hav6IpPool": my_ha.get("v6HaSubnet", "fd00::a9fe:0000/112"),
-            "hav6SubnetMask": int(my_ha.get("v6HaMask", 126)),
+            # ECOS 9.5.x HA groups carry v6HaSubnet null and v6HaMask 0 (no IPv6 HA); /validate needs a mask of 1-127, so use Orchestrator's default pool
+            "hav6IpPool": my_ha.get("v6HaSubnet") or "fd00::a9fe:0000/112",
+            "hav6SubnetMask": int(my_ha.get("v6HaMask") or 126),
             "haVlanStart": int(my_ha["vlanStart"]),
             "haInterface": ha_if,
             "haInterfaceOrder": ",".join(order_labels),
@@ -444,30 +445,37 @@ def flat_paths(value: Any, prefix: str = "") -> set:
     return out
 
 
-def gated_paths(target: str) -> set:
-    """Key paths that exist in some other release's default template but not in the target's."""
-    folder = DEFAULT_TEMPLATE.parent
-    own = flat_paths(load_yaml(folder / "orchestrator-{}.yml".format(target)))
-    other = set()
-    for f in folder.glob("orchestrator-*.yml"):
-        if f.name != "orchestrator-{}.yml".format(target):
-            other |= flat_paths(load_yaml(f))
-    return other - own
+# Key paths /validate accepts that no default template shows (corpus run of 2026-10-27; docs/decisions/0013).
+TEMPLATE_OMISSIONS = {
+    "bgpSystemConfig.neighbors.bfdEnabled", "bgpSystemConfig.neighbors.peerAdjacency",
+    "segmentBgpSystems.neighbors.bfdEnabled", "segmentBgpSystems.neighbors.peerAdjacency",
+    "ospfSystemConfig.interfaces.bfdEnabled",
+    "deploymentInfo.deploymentInterfaces.addressingMode",
+    "ipSlaRule.ruleEntries.ipslaMonitor.tunnelName", "ipSlaRule.ruleEntries.ipslaMonitor.sourceInterfaceName",
+    "ipSlaRule.ruleEntries.ipslaMonitor.forceDnsThroughProbePath", "ipSlaRule.ruleEntries.downAction.subnetMetricDelta",
+}
 
 
-def prune(value: Any, gated: set, ledger: List[Dict[str, Any]], prefix: str = "") -> Any:
+def allowed_paths(target: str) -> set:
+    """Key paths a preconfig for the target release may hold: those in its default template, plus TEMPLATE_OMISSIONS."""
+    return flat_paths(load_yaml(DEFAULT_TEMPLATE.parent / "orchestrator-{}.yml".format(target))) | TEMPLATE_OMISSIONS
+
+
+def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = "") -> Any:
+    """Drop every key path not in `allowed`, one ledger line per path: an appliance can report keys the target's format rejects (ECOS 9.5.x NAC)."""
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
             p = "{}.{}".format(prefix, k) if prefix else str(k)
-            if p in gated:
+            if p not in allowed:
                 if not any(e["target"] == p for e in ledger):
-                    ledger.append({"item": "source key", "disposition": "release-gated", "target": p, "note": "exists only in another release's preconfig format; not written for the target release"})
+                    ledger.append({"item": "source key", "disposition": "outside-preconfig", "target": p,
+                                   "note": "not in the target release's preconfig format (its default template), so not written; the target keeps its own setting"})
                 continue
-            out[k] = prune(v, gated, ledger, p)
+            out[k] = prune(v, allowed, ledger, p)
         return out
     if isinstance(value, list):
-        return [prune(v, gated, ledger, prefix) for v in value]
+        return [prune(v, allowed, ledger, prefix) for v in value]
     return value
 
 
@@ -492,7 +500,7 @@ REPORT_GROUPS = [
     ("Toolkit errors: a toolkit bug, report it", {"toolkit-error"}),
     ("Gaps: the preconfig format has a place for it, but the value was not carried", {"unresolved", "unmapped-source-key"}),
     ("Not readable: the format has a place for it, but a GET cannot read it; check it by hand", {"not-readable"}),
-    ("Outside preconfig: the format has no place for it; set it another way", {"outside-preconfig", "release-gated"}),
+    ("Outside preconfig: the format has no place for it; set it another way", {"outside-preconfig", "release-gated"}),  # release-gated: ledgers written before 1.2.4
     ("Owned elsewhere: comes from template groups or Orchestrator, as intended", {"template-group", "orchestrator-managed"}),
 ]
 QUIET = {"mapped", "default-omitted", "runtime", "empty-or-absent", "context", "from-default-template"}
@@ -614,7 +622,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     cap = Capture(args.capture)
     ledger: List[Dict[str, Any]] = []
     try:
-        reference = prune(build(cap, ledger), gated_paths(args.target_release), ledger)
+        reference = prune(build(cap, ledger), allowed_paths(args.target_release), ledger)
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2
@@ -639,7 +647,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     order = list(default_doc)
     reference = {k: reference[k] for k in sorted(reference, key=lambda x: order.index(x) if x in order else 999)}
     try:
-        others = [] if section_modes else [prune(build(Capture(folder), []), gated_paths(args.target_release), []) for folder in args.compare or []]
+        others = [] if section_modes else [prune(build(Capture(folder), []), allowed_paths(args.target_release), []) for folder in args.compare or []]
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2

@@ -120,6 +120,12 @@ class CaptureTest(unittest.TestCase):
         self.assertIn(("reachability", "denied"), [(i["id"], i["status"]) for i in index])
         self.assertEqual([(i["label"], i["status"]) for i in index if i["id"] == "deployment"], [("cached", "ok"), ("live", "ok")])
 
+    def test_sync_in_progress_counts_as_reachable(self):
+        final = self.run_capture(FakeClient(state=5), ["deployment"])  # state 5: Orchestrator is re-syncing a reachable appliance
+        self.assertTrue(json.loads((final / "run.json").read_text())["reachable"])
+        index = json.loads((final / "capture-index.json").read_text())
+        self.assertEqual([(i["label"], i["status"]) for i in index if i["id"] == "deployment"], [("cached", "ok"), ("live", "ok")])
+
     def test_a_refused_routes_read_stops_the_capture(self):
         for path, only in (("/subnets", ["subnets"]), ("/subnets/all", ["subnets-all-vrfs"])):
             with self.assertRaises(capture.Stop) as stop:
