@@ -5,11 +5,13 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
 import capture  # noqa: E402
 import translate  # noqa: E402  guard-ok: scripts are imported after the sys.path insert, like capture above
+import common  # noqa: E402  guard-ok: scripts are imported after the sys.path insert
 from common import redact_secrets  # noqa: E402
 
 
@@ -223,13 +225,14 @@ class DefaultTemplateTest(unittest.TestCase):
 
 
 class TranslateMissingTemplateTest(unittest.TestCase):
-    def test_unknown_release_stops_with_a_clear_message(self):
+    def test_no_template_at_all_stops_with_a_clear_message(self):
+        # an unknown build falls back to a bundled template (docs/decisions/0014); only an empty template folder stops
         err = io.StringIO()
-        with contextlib.redirect_stderr(err):
+        empty = Path(tempfile.mkdtemp())
+        with mock.patch.object(common, "DEFAULT_TEMPLATES_DIR", empty), mock.patch.object(common, "WORK_DIR", empty), contextlib.redirect_stderr(err):
             code = translate.main(["--capture", tempfile.mkdtemp(), "--site-type", "t", "--target-release", "10.0.0.99999"])
         self.assertEqual(code, 2)
-        self.assertIn("10.0.0.99999", err.getvalue())
-        self.assertIn("capture", err.getvalue())
+        self.assertIn("no default templates", err.getvalue())
 
 
 if __name__ == "__main__":

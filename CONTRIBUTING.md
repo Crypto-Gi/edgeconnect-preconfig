@@ -44,7 +44,7 @@ edgeconnect-preconfig/
 ├── skills/
 │   └── building-edgeconnect-preconfig-templates/   # <-- Lean installable skill (26 files: zero README/test bloat)
 │       ├── SKILL.md
-│       ├── VERSION                           # toolkit version (1.2.4)
+│       ├── VERSION                           # toolkit version (1.2.5)
 │       ├── references/                       # 9.6/9.7/10.0 default templates, endpoint-catalogue, known-constraints, lessons, validate-behaviour, variable-ranking.json
 │       └── scripts/                          # 16 runtime scripts (cli, capture, cache_check, translate, mappers, decisions, variables, generate, cells, render, check, validate, upload, synth, options, common)
 ├── tests/                                    # offline unit tests & maintainer lab harnesses

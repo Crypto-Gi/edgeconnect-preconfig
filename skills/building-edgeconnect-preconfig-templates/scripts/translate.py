@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, WORK_DIR, load_yaml, toolkit_version, write_json  # noqa: E402
+from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, WORK_DIR, find_default_template, load_yaml, toolkit_version, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 from generate import generate  # noqa: E402
 from decisions import list_mode, make_decide, propose  # noqa: E402
 from variables import classify, read_sheet, sheet_items, write_sheet  # noqa: E402
@@ -457,8 +457,8 @@ TEMPLATE_OMISSIONS = {
 
 
 def allowed_paths(target: str) -> set:
-    """Key paths a preconfig for the target release may hold: those in its default template, plus TEMPLATE_OMISSIONS."""
-    return flat_paths(load_yaml(DEFAULT_TEMPLATE.parent / "orchestrator-{}.yml".format(target))) | TEMPLATE_OMISSIONS
+    """Key paths a preconfig for the target release may hold: those in its default template (find_default_template), plus TEMPLATE_OMISSIONS."""
+    return flat_paths(load_yaml(find_default_template(target)[0])) | TEMPLATE_OMISSIONS
 
 
 def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = "") -> Any:
@@ -533,7 +533,8 @@ def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: 
              "- Toolkit: {}. If a newer version exists, refresh it (re-run setup.sh in the install folder; it pulls main and reinstalls the skill) and translate again before reporting gaps.".format(toolkit_version()),
              "- Source: {} {} ({}), Orchestrator release {}; written for Orchestrator release {}.".format(
                  source.get("orchestrator"), (source.get("appliance") or {}).get("nePk"), (source.get("appliance") or {}).get("hostName"), source.get("release"), release),
-             "- Sections written ({}): {}.".format(len(reference), ", ".join(reference) or "none"), ""]
+             "- Sections written ({}): {}.".format(len(reference), ", ".join(reference) or "none")]
+    lines += ["- Default template: {} ({}).".format(e["target"], e["note"]) for e in ledger if e["item"] == "default template"] + [""]
     known = set().union(*(d for _, d in REPORT_GROUPS)) | QUIET
     groups = REPORT_GROUPS + [("Unknown disposition: treat as a gap", {e["disposition"] for e in ledger} - known)]
     for title, dispositions in groups:
@@ -611,31 +612,30 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
     if args.compare and args.variables:
         parser.error("--compare writes a fresh variables.csv: do not combine it with --variables")
-    if not (DEFAULT_TEMPLATE.parent / "orchestrator-{}.yml".format(args.target_release)).is_file():
-        have = sorted(f.name[len("orchestrator-"):-len(".yml")] for f in DEFAULT_TEMPLATE.parent.glob("orchestrator-*.yml"))
-        print("no default preconfig template for Orchestrator release {} (have: {}). Run capture.py once against an Orchestrator on "
-              "that release to cache it, or pass --target-release with one of these.".format(args.target_release, ", ".join(have)), file=sys.stderr)
+    template, template_why = find_default_template(args.target_release)
+    if template is None:
+        print(template_why, file=sys.stderr)
         return 2
+    default_doc = load_yaml(template)
     out = args.out or (Path.cwd() / "preconfig-output" / args.site_type)
     global IGNORE_OWNERSHIP
     IGNORE_OWNERSHIP = args.ignore_template_ownership
     cap = Capture(args.capture)
-    ledger: List[Dict[str, Any]] = []
+    ledger: List[Dict[str, Any]] = [{"item": "default template", "disposition": "context", "target": template.name, "note": template_why}]
     try:
         reference = prune(build(cap, ledger), allowed_paths(args.target_release), ledger)
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2
-    unseen = sorted(flat_paths(reference) - flat_paths(load_yaml(DEFAULT_TEMPLATE.parent / "orchestrator-{}.yml".format(args.target_release))))
+    unseen = sorted(flat_paths(reference) - flat_paths(default_doc))
     if unseen:
-        ledger.append({"item": "release fit", "disposition": "context", "target": "", "note": "{} key paths are not shown in the {} default template (valid optional keys or unverified for that release): {}".format(len(unseen), args.target_release, ", ".join(unseen[:12]) + (" ..." if len(unseen) > 12 else ""))})
+        ledger.append({"item": "release fit", "disposition": "context", "target": "", "note": "{} key paths are not shown in the default template {} (valid optional keys or unverified for that release): {}".format(len(unseen), template.name, ", ".join(unseen[:12]) + (" ..." if len(unseen) > 12 else ""))})
     tag_unmapped(cap, ledger)
-    scope_by_template(ledger, set(load_yaml(DEFAULT_TEMPLATE.parent / "orchestrator-{}.yml".format(args.target_release))))
+    scope_by_template(ledger, set(default_doc))
     out.mkdir(parents=True, exist_ok=True)
     decisions_in = load_yaml(args.decisions) if args.decisions else {}
     section_modes = bool(set(decisions_in) - {"include_from_default", "approved_by"}) and not args.variables  # the older per-section choice
     included: List[str] = []
-    default_doc = load_yaml(DEFAULT_TEMPLATE.parent / "orchestrator-{}.yml".format(args.target_release))
     import copy
     for section in decisions_in.get("include_from_default", []):
         if section in reference:
@@ -661,7 +661,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     probe = Builder()
     probe.find_secrets(reference)
     source = {"orchestrator": cap.run["orchestrator"], "release": cap.run["release"], "appliance": cap.run["appliance"], "capture": str(args.capture)}
-    write_json(out / "ledger.json", {"toolkit": toolkit_version(), "target_release": args.target_release, "source": source, "entries": ledger})
+    write_json(out / "ledger.json", {"toolkit": toolkit_version(), "target_release": args.target_release, "default_template": {"file": template.name, "why": template_why}, "source": source, "entries": ledger})
     (out / "summary.md").write_text(summary_md(ledger, reference, source, args.target_release), encoding="utf-8")
     if section_modes:
         proposal = propose(reference, probe.secret_paths)
