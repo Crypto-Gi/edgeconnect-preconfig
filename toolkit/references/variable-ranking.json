@@ -1,0 +1,870 @@
+{
+ "appliances": 60,
+ "designs": 4,
+ "settings": [
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[lan].ipAddressMask",
+   "differs_pct": 100,
+   "pairs": 704,
+   "appliances": 56
+  },
+  {
+   "setting": "deploymentInfo.dhcpInfo[lan].dhcpAddressMask",
+   "differs_pct": 100,
+   "pairs": 121,
+   "appliances": 18
+  },
+  {
+   "setting": "deploymentInfo.dhcpInfo[lan].endIpAddress",
+   "differs_pct": 100,
+   "pairs": 121,
+   "appliances": 18
+  },
+  {
+   "setting": "deploymentInfo.dhcpInfo[lan].gatewayIpAddress",
+   "differs_pct": 100,
+   "pairs": 121,
+   "appliances": 18
+  },
+  {
+   "setting": "deploymentInfo.dhcpInfo[lan].startIpAddress",
+   "differs_pct": 100,
+   "pairs": 121,
+   "appliances": 18
+  },
+  {
+   "setting": "bgpSystemConfig.routerId",
+   "differs_pct": 100,
+   "pairs": 52,
+   "appliances": 17
+  },
+  {
+   "setting": "managementIp.ipAddress",
+   "differs_pct": 100,
+   "pairs": 78,
+   "appliances": 13
+  },
+  {
+   "setting": "ospfSystemConfig.routerId",
+   "differs_pct": 100,
+   "pairs": 28,
+   "appliances": 8
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[wan].interfaceComment",
+   "differs_pct": 100,
+   "pairs": 15,
+   "appliances": 6
+  },
+  {
+   "setting": "managementRoutes.routes[mgmt].nextHop",
+   "differs_pct": 100,
+   "pairs": 10,
+   "appliances": 5
+  },
+  {
+   "setting": "applianceInfo.location.city",
+   "differs_pct": 99,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "applianceInfo.location.zipCode",
+   "differs_pct": 99,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "applianceInfo.location.state",
+   "differs_pct": 97,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "templateGroups.groups",
+   "differs_pct": 97,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "bgpSystemConfig.asn",
+   "differs_pct": 96,
+   "pairs": 52,
+   "appliances": 17
+  },
+  {
+   "setting": "inboundPortForwarding.portForwardingRules[#].destinationIpSubnet",
+   "differs_pct": 95,
+   "pairs": 21,
+   "appliances": 7
+  },
+  {
+   "setting": "applianceInfo.site",
+   "differs_pct": 93,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "deploymentInfo.ipsecUdpPort",
+   "differs_pct": 93,
+   "pairs": 15,
+   "appliances": 7
+  },
+  {
+   "setting": "branchNatMapsConfig.branchNatRules[*].destinationIpSubnet",
+   "differs_pct": 93,
+   "pairs": 15,
+   "appliances": 6
+  },
+  {
+   "setting": "deploymentInfo.totalOutboundBandwidth",
+   "differs_pct": 91,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "applianceInfo.group",
+   "differs_pct": 90,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "deploymentInfo.totalInboundBandwidth",
+   "differs_pct": 90,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "inboundPortForwarding.portForwardingRules[#].translateIp",
+   "differs_pct": 90,
+   "pairs": 21,
+   "appliances": 7
+  },
+  {
+   "setting": "branchNatMapsConfig.branchNatRules[*].translateDestinationIpSubnet",
+   "differs_pct": 90,
+   "pairs": 10,
+   "appliances": 5
+  },
+  {
+   "setting": "applianceInfo.region",
+   "differs_pct": 85,
+   "pairs": 802,
+   "appliances": 54
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[wan].outboundMaxBandwidth",
+   "differs_pct": 85,
+   "pairs": 619,
+   "appliances": 53
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[wan].inboundMaxBandwidth",
+   "differs_pct": 83,
+   "pairs": 619,
+   "appliances": 53
+  },
+  {
+   "setting": "inboundPortForwarding.portForwardingRules[#].sourceIpSubnet",
+   "differs_pct": 76,
+   "pairs": 21,
+   "appliances": 7
+  },
+  {
+   "setting": "inboundPortForwarding.portForwardingRules[#].comment",
+   "differs_pct": 71,
+   "pairs": 21,
+   "appliances": 7
+  },
+  {
+   "setting": "inboundPortForwarding.portForwardingRules[#].destinationPortRange",
+   "differs_pct": 71,
+   "pairs": 21,
+   "appliances": 7
+  },
+  {
+   "setting": "inboundPortForwarding.portForwardingRules[#].translatePortRange",
+   "differs_pct": 71,
+   "pairs": 21,
+   "appliances": 7
+  },
+  {
+   "setting": "applianceInfo.location.country",
+   "differs_pct": 68,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "inboundPortForwarding.portForwardingRules[#].destinationProtocol",
+   "differs_pct": 67,
+   "pairs": 21,
+   "appliances": 7
+  },
+  {
+   "setting": "branchNatMapsConfig.branchNatRules[*].direction",
+   "differs_pct": 60,
+   "pairs": 15,
+   "appliances": 6
+  },
+  {
+   "setting": "managementRoutes.routes[mgmt].metric",
+   "differs_pct": 60,
+   "pairs": 10,
+   "appliances": 5
+  },
+  {
+   "setting": "interfaceConfig.interfaces[wan].interfaceSpeed",
+   "differs_pct": 57,
+   "pairs": 23,
+   "appliances": 11
+  },
+  {
+   "setting": "ospfSystemConfig.opaqueEnable",
+   "differs_pct": 57,
+   "pairs": 28,
+   "appliances": 8
+  },
+  {
+   "setting": "applianceInfo.location.address",
+   "differs_pct": 56,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[lan].zone",
+   "differs_pct": 54,
+   "pairs": 704,
+   "appliances": 56
+  },
+  {
+   "setting": "deploymentInfo.dhcpInfo[lan].maximumLease",
+   "differs_pct": 54,
+   "pairs": 121,
+   "appliances": 18
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[wan].ipAddressMask",
+   "differs_pct": 52,
+   "pairs": 619,
+   "appliances": 53
+  },
+  {
+   "setting": "interfaceConfig.interfaces[wan].admin",
+   "differs_pct": 52,
+   "pairs": 23,
+   "appliances": 11
+  },
+  {
+   "setting": "interfaceConfig.interfaces[wan].interfaceDuplex",
+   "differs_pct": 52,
+   "pairs": 23,
+   "appliances": 11
+  },
+  {
+   "setting": "inboundPortForwarding.portForwardingRules[#].sourceInterface",
+   "differs_pct": 52,
+   "pairs": 21,
+   "appliances": 7
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[wan].nextHop",
+   "differs_pct": 51,
+   "pairs": 619,
+   "appliances": 53
+  },
+  {
+   "setting": "deploymentInfo.dhcpInfo[lan].dnsServers[#]",
+   "differs_pct": 51,
+   "pairs": 121,
+   "appliances": 18
+  },
+  {
+   "setting": "bgpSystemConfig.enableGracefulRestart",
+   "differs_pct": 50,
+   "pairs": 52,
+   "appliances": 17
+  },
+  {
+   "setting": "applianceInfo.contact.name",
+   "differs_pct": 48,
+   "pairs": 841,
+   "appliances": 59
+  },
+  {
+   "setting": "inboundPortForwarding.portForwardingRules[#].translate",
+   "differs_pct": 48,
+   "pairs": 21,
+   "appliances": 7
+  },
+  {
+   "setting": "appExpressGroups[#]",
+   "differs_pct": 47,
+   "pairs": 471,
+   "appliances": 43
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[lan].interfaceLabel",
+   "differs_pct": 45,
+   "pairs": 704,
+   "appliances": 56
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[wan].behindNat",
+   "differs_pct": 45,
+   "pairs": 619,
+   "appliances": 53
+  },
+  {
+   "setting": "deploymentInfo.dhcpInfo[lan].defaultLease",
+   "differs_pct": 45,
+   "pairs": 121,
+   "appliances": 18
+  },
+  {
+   "setting": "segmentLocalRoutes[#].routes[#].routeIpSubnet",
+   "differs_pct": 42,
+   "pairs": 101,
+   "appliances": 21
+  },
+  {
+   "setting": "applianceInfo.contact.email",
+   "differs_pct": 39,
+   "pairs": 841,
+   "appliances": 59
+  },
+  {
+   "setting": "segmentLocalRoutes[#].routes[#].nextHop",
+   "differs_pct": 38,
+   "pairs": 101,
+   "appliances": 21
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[wan].addressingMode",
+   "differs_pct": 37,
+   "pairs": 619,
+   "appliances": 53
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[wan].interfaceLabel",
+   "differs_pct": 34,
+   "pairs": 619,
+   "appliances": 53
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].samplingInterval",
+   "differs_pct": 33,
+   "pairs": 69,
+   "appliances": 15
+  },
+  {
+   "setting": "applianceInfo.clusterProfile",
+   "differs_pct": 33,
+   "pairs": 12,
+   "appliances": 8
+  },
+  {
+   "setting": "branchNatMapsConfig.branchNatRules[*].priorityLevel",
+   "differs_pct": 33,
+   "pairs": 15,
+   "appliances": 6
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].enable",
+   "differs_pct": 30,
+   "pairs": 69,
+   "appliances": 15
+  },
+  {
+   "setting": "deploymentInfo.serverPerSegment",
+   "differs_pct": 28,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "businessIntentOverlays.overlays",
+   "differs_pct": 26,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "ospfSystemConfig.redistMapToOspf",
+   "differs_pct": 25,
+   "pairs": 28,
+   "appliances": 8
+  },
+  {
+   "setting": "idsIpsConfig.profile",
+   "differs_pct": 24,
+   "pairs": 366,
+   "appliances": 37
+  },
+  {
+   "setting": "deploymentInfo.dhcpInfo[lan].dhcpType",
+   "differs_pct": 21,
+   "pairs": 154,
+   "appliances": 20
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].ipslaMonitor.tunnelName",
+   "differs_pct": 21,
+   "pairs": 57,
+   "appliances": 13
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[wan].firewallMode",
+   "differs_pct": 20,
+   "pairs": 619,
+   "appliances": 53
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].ipslaMonitor.monitorType",
+   "differs_pct": 20,
+   "pairs": 69,
+   "appliances": 15
+  },
+  {
+   "setting": "idsIpsConfig.mode",
+   "differs_pct": 19,
+   "pairs": 366,
+   "appliances": 37
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].comment",
+   "differs_pct": 19,
+   "pairs": 69,
+   "appliances": 15
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].ipslaMonitor.monitorUpThreshold",
+   "differs_pct": 19,
+   "pairs": 67,
+   "appliances": 14
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].ipslaMonitor.ipAddress",
+   "differs_pct": 19,
+   "pairs": 57,
+   "appliances": 13
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].ipslaMonitor.sourceInterfaceName",
+   "differs_pct": 19,
+   "pairs": 57,
+   "appliances": 13
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].ipslaMonitor.keepAlive",
+   "differs_pct": 18,
+   "pairs": 67,
+   "appliances": 14
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].ipslaMonitor.monitorDownThreshold",
+   "differs_pct": 18,
+   "pairs": 67,
+   "appliances": 14
+  },
+  {
+   "setting": "thirdPartyServicesAssociation.zscalerAssociation",
+   "differs_pct": 14,
+   "pairs": 839,
+   "appliances": 55
+  },
+  {
+   "setting": "segmentLocalRoutes[#].segment",
+   "differs_pct": 13,
+   "pairs": 839,
+   "appliances": 55
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[wan].zone",
+   "differs_pct": 10,
+   "pairs": 619,
+   "appliances": 53
+  },
+  {
+   "setting": "applianceInfo.location.address2",
+   "differs_pct": 9,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[lan].segment",
+   "differs_pct": 6,
+   "pairs": 704,
+   "appliances": 56
+  },
+  {
+   "setting": "segmentLocalRoutes[#].localMetric",
+   "differs_pct": 6,
+   "pairs": 367,
+   "appliances": 39
+  },
+  {
+   "setting": "multicast[#].enable",
+   "differs_pct": 5,
+   "pairs": 731,
+   "appliances": 52
+  },
+  {
+   "setting": "multicast[#].rpAddresses",
+   "differs_pct": 5,
+   "pairs": 731,
+   "appliances": 52
+  },
+  {
+   "setting": "applianceInfo.contact.phoneNumber",
+   "differs_pct": 4,
+   "pairs": 841,
+   "appliances": 59
+  },
+  {
+   "setting": "segmentLocalRoutes[#].localCommunities",
+   "differs_pct": 4,
+   "pairs": 839,
+   "appliances": 55
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].ipslaMonitor.samplingWindow",
+   "differs_pct": 4,
+   "pairs": 67,
+   "appliances": 14
+  },
+  {
+   "setting": "thirdPartyServicesAssociation.axisAssociation",
+   "differs_pct": 2,
+   "pairs": 839,
+   "appliances": 55
+  },
+  {
+   "setting": "thirdPartyServicesAssociation.netskopeAssociation",
+   "differs_pct": 2,
+   "pairs": 839,
+   "appliances": 55
+  },
+  {
+   "setting": "segmentLocalRoutes[#].routes[#].advertise",
+   "differs_pct": 2,
+   "pairs": 101,
+   "appliances": 21
+  },
+  {
+   "setting": "segmentLocalRoutes[#].redistToSDwanFabricRouteMap",
+   "differs_pct": 1,
+   "pairs": 766,
+   "appliances": 53
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].downAction.downActionType",
+   "differs_pct": 1,
+   "pairs": 69,
+   "appliances": 15
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].upAction.upActionType",
+   "differs_pct": 1,
+   "pairs": 69,
+   "appliances": 15
+  },
+  {
+   "setting": "applianceInfo.networkRole",
+   "differs_pct": 0,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "deploymentInfo.deploymentMode",
+   "differs_pct": 0,
+   "pairs": 879,
+   "appliances": 60
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[lan].interfaceName",
+   "differs_pct": 0,
+   "pairs": 704,
+   "appliances": 56
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[lan].interfaceType",
+   "differs_pct": 0,
+   "pairs": 704,
+   "appliances": 56
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[wan].interfaceName",
+   "differs_pct": 0,
+   "pairs": 619,
+   "appliances": 53
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[wan].interfaceType",
+   "differs_pct": 0,
+   "pairs": 619,
+   "appliances": 53
+  },
+  {
+   "setting": "deploymentInfo.deploymentInterfaces[wan].segment",
+   "differs_pct": 0,
+   "pairs": 619,
+   "appliances": 53
+  },
+  {
+   "setting": "multicast[#].filterName",
+   "differs_pct": 0,
+   "pairs": 731,
+   "appliances": 52
+  },
+  {
+   "setting": "multicast[#].segment",
+   "differs_pct": 0,
+   "pairs": 731,
+   "appliances": 52
+  },
+  {
+   "setting": "multicast[#].pim[lan].drPriority",
+   "differs_pct": 0,
+   "pairs": 542,
+   "appliances": 46
+  },
+  {
+   "setting": "multicast[#].pim[lan].helloInterval",
+   "differs_pct": 0,
+   "pairs": 542,
+   "appliances": 46
+  },
+  {
+   "setting": "multicast[#].pim[lan].igmpEnable",
+   "differs_pct": 0,
+   "pairs": 542,
+   "appliances": 46
+  },
+  {
+   "setting": "multicast[#].pim[lan].interfaceName",
+   "differs_pct": 0,
+   "pairs": 542,
+   "appliances": 46
+  },
+  {
+   "setting": "multicast[#].pim[lan].joinPruneInterval",
+   "differs_pct": 0,
+   "pairs": 542,
+   "appliances": 46
+  },
+  {
+   "setting": "multicast[#].pim[lan].pimEnable",
+   "differs_pct": 0,
+   "pairs": 542,
+   "appliances": 46
+  },
+  {
+   "setting": "segmentLocalRoutes[#].advertiseLocalLanSubnets",
+   "differs_pct": 0,
+   "pairs": 367,
+   "appliances": 39
+  },
+  {
+   "setting": "segmentLocalRoutes[#].advertiseLocalWanSubnets",
+   "differs_pct": 0,
+   "pairs": 367,
+   "appliances": 39
+  },
+  {
+   "setting": "segmentLocalRoutes[#].filterRoutesWithLocalASN",
+   "differs_pct": 0,
+   "pairs": 367,
+   "appliances": 39
+  },
+  {
+   "setting": "segmentLocalRoutes[#].routes[#].advertiseToBgp",
+   "differs_pct": 0,
+   "pairs": 101,
+   "appliances": 21
+  },
+  {
+   "setting": "segmentLocalRoutes[#].routes[#].advertiseToOspf",
+   "differs_pct": 0,
+   "pairs": 101,
+   "appliances": 21
+  },
+  {
+   "setting": "segmentLocalRoutes[#].routes[#].interfaceName",
+   "differs_pct": 0,
+   "pairs": 101,
+   "appliances": 21
+  },
+  {
+   "setting": "segmentLocalRoutes[#].routes[#].metric",
+   "differs_pct": 0,
+   "pairs": 101,
+   "appliances": 21
+  },
+  {
+   "setting": "segmentLocalRoutes[#].routes[#].routeLabel",
+   "differs_pct": 0,
+   "pairs": 101,
+   "appliances": 21
+  },
+  {
+   "setting": "segmentLocalRoutes[#].routes[#].tag",
+   "differs_pct": 0,
+   "pairs": 101,
+   "appliances": 21
+  },
+  {
+   "setting": "segmentLocalRoutes[#].routes[#].zone",
+   "differs_pct": 0,
+   "pairs": 101,
+   "appliances": 21
+  },
+  {
+   "setting": "deploymentInfo.dhcpInfo[lan].dhcpInterfaceName",
+   "differs_pct": 0,
+   "pairs": 154,
+   "appliances": 20
+  },
+  {
+   "setting": "deploymentInfo.dhcpInfo[lan].netbiosNodeType",
+   "differs_pct": 0,
+   "pairs": 121,
+   "appliances": 18
+  },
+  {
+   "setting": "bgpSystemConfig.enable",
+   "differs_pct": 0,
+   "pairs": 52,
+   "appliances": 17
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].routeLabel",
+   "differs_pct": 0,
+   "pairs": 69,
+   "appliances": 15
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].ipslaMonitor.metricCombination",
+   "differs_pct": 0,
+   "pairs": 67,
+   "appliances": 14
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].ipslaMonitor.monitorDownLatencyThreshold",
+   "differs_pct": 0,
+   "pairs": 67,
+   "appliances": 14
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].ipslaMonitor.monitorDownLossThreshold",
+   "differs_pct": 0,
+   "pairs": 67,
+   "appliances": 14
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].ipslaMonitor.monitorUpLatencyThreshold",
+   "differs_pct": 0,
+   "pairs": 67,
+   "appliances": 14
+  },
+  {
+   "setting": "ipSlaRule.ruleEntries[#].ipslaMonitor.monitorUpLossThreshold",
+   "differs_pct": 0,
+   "pairs": 67,
+   "appliances": 14
+  },
+  {
+   "setting": "interfaceConfig.interfaces[wan].interfaceName",
+   "differs_pct": 0,
+   "pairs": 23,
+   "appliances": 11
+  },
+  {
+   "setting": "ospfSystemConfig.areas[#].areaId",
+   "differs_pct": 0,
+   "pairs": 28,
+   "appliances": 8
+  },
+  {
+   "setting": "ospfSystemConfig.areas[#].areaType",
+   "differs_pct": 0,
+   "pairs": 28,
+   "appliances": 8
+  },
+  {
+   "setting": "ospfSystemConfig.areas[#].redist",
+   "differs_pct": 0,
+   "pairs": 28,
+   "appliances": 8
+  },
+  {
+   "setting": "ospfSystemConfig.areas[#].summary",
+   "differs_pct": 0,
+   "pairs": 28,
+   "appliances": 8
+  },
+  {
+   "setting": "ospfSystemConfig.areas[#].translatorRole",
+   "differs_pct": 0,
+   "pairs": 28,
+   "appliances": 8
+  },
+  {
+   "setting": "ospfSystemConfig.enable",
+   "differs_pct": 0,
+   "pairs": 28,
+   "appliances": 8
+  },
+  {
+   "setting": "inboundPortForwarding.portForwardingRules[#].segment",
+   "differs_pct": 0,
+   "pairs": 21,
+   "appliances": 7
+  },
+  {
+   "setting": "branchNatMapsConfig.branchNatRules[*].comment",
+   "differs_pct": 0,
+   "pairs": 15,
+   "appliances": 6
+  },
+  {
+   "setting": "branchNatMapsConfig.branchNatRules[*].enable",
+   "differs_pct": 0,
+   "pairs": 15,
+   "appliances": 6
+  },
+  {
+   "setting": "branchNatMapsConfig.branchNatRules[*].interfaceName",
+   "differs_pct": 0,
+   "pairs": 15,
+   "appliances": 6
+  },
+  {
+   "setting": "branchNatMapsConfig.branchNatRules[*].protocol",
+   "differs_pct": 0,
+   "pairs": 15,
+   "appliances": 6
+  },
+  {
+   "setting": "branchNatMapsConfig.branchNatRules[*].segment",
+   "differs_pct": 0,
+   "pairs": 15,
+   "appliances": 6
+  },
+  {
+   "setting": "managementRoutes.routes[mgmt].interfaceName",
+   "differs_pct": 0,
+   "pairs": 10,
+   "appliances": 5
+  },
+  {
+   "setting": "managementRoutes.routes[mgmt].routeIpSubnet",
+   "differs_pct": 0,
+   "pairs": 10,
+   "appliances": 5
+  },
+  {
+   "setting": "managementRoutes.routes[mgmt].sourceIp",
+   "differs_pct": 0,
+   "pairs": 10,
+   "appliances": 5
+  }
+ ]
+}

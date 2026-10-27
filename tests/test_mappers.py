@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "harnesses"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "scripts"))
 from lab_diff import GuardrailError, check_guardrails, compare_intended_vs_actual  # noqa: E402
 from common import parse_yaml  # noqa: E402
 from mappers import Ctx, m_bgpSystemConfig, m_branchNatMapsConfig, m_dhcpRemoteAddressPoolConfig, m_flowRedirection, m_ipAllowList, m_multicast, m_nac, m_peerPriority, m_segmentBgpSystems, m_tunnelConfiguration, m_vrrp, m_vxlan, m_managementIp, m_ecLicensing, m_managementRoutes, m_secureWebServicesConfig, passthrough_max_bandwidth  # noqa: E402

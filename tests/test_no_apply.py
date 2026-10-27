@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS = ROOT / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"
+SCRIPTS = ROOT / "toolkit" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 import upload  # noqa: E402
 from generate import generate  # noqa: E402

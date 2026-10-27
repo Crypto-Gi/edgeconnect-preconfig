@@ -500,7 +500,7 @@ REPORT_GROUPS = [
     ("Toolkit errors: a toolkit bug, report it", {"toolkit-error"}),
     ("Gaps: the preconfig format has a place for it, but the value was not carried", {"unresolved", "unmapped-source-key"}),
     ("Not readable: the format has a place for it, but a GET cannot read it; check it by hand", {"not-readable"}),
-    ("Outside preconfig: the format has no place for it; set it another way", {"outside-preconfig", "release-gated"}),  # release-gated: ledgers written before 1.2.4
+    ("Outside preconfig: the format has no place for it; set it another way", {"outside-preconfig", "release-gated"}),  # release-gated: ledgers written before 1.3.0
     ("Owned elsewhere: comes from template groups or Orchestrator, as intended", {"template-group", "orchestrator-managed"}),
 ]
 QUIET = {"mapped", "default-omitted", "runtime", "empty-or-absent", "context", "from-default-template"}

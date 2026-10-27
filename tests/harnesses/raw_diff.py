@@ -17,7 +17,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "toolkit" / "scripts"))
 from common import load_yaml, paths_of, write_json  # noqa: E402
 
 ID_KEYS = ("ifName", "interfaceName", "name", "self", "prefix", "subnet", "id")

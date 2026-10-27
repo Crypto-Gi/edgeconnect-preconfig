@@ -236,7 +236,7 @@ case "$SCOPE" in
   2|home|global|"~"|"~/") SCOPE=home ;;
   *) die "choose 1 (this folder) or 2 (your user account), not $SCOPE" ;;
 esac
-PRECONFIG_SCRIPTS="$ROOT/edgeconnect-preconfig/skills/building-edgeconnect-preconfig-templates/scripts"
+PRECONFIG_SCRIPTS="$ROOT/edgeconnect-preconfig/toolkit/scripts"
 
 say "Repositories (main) in $ROOT"
 mkdir -p "$ROOT"
@@ -265,8 +265,10 @@ if picked edgeconnect-orchestrator-automation; then
   echo "edgeconnect-auto $("$ROOT/.venv/bin/python" -c 'import edgeconnect_automation as e; print(e.__version__)') installed"
 fi
 if picked edgeconnect-preconfig; then
+  # before 1.3.0 the scripts lived only in the skill folder, which still ships a copy
+  [ -d "$PRECONFIG_SCRIPTS" ] || PRECONFIG_SCRIPTS="$ROOT/edgeconnect-preconfig/skills/building-edgeconnect-preconfig-templates/scripts"
   "$ROOT/.venv/bin/python" -m pip install -q --disable-pip-version-check -r "$ROOT/edgeconnect-preconfig/requirements.txt"
-  echo "preconfig scripts $(cat "$ROOT/edgeconnect-preconfig/skills/building-edgeconnect-preconfig-templates/VERSION" 2>/dev/null || echo "(no VERSION file)"): Jinja2 and PyYAML installed"
+  echo "preconfig scripts $(cat "$PRECONFIG_SCRIPTS/../VERSION" 2>/dev/null || echo "(no VERSION file)"): Jinja2 and PyYAML installed"
 fi
 fi  # NEED_PYTHON
 

@@ -18,7 +18,9 @@ from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_ope
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_TEMPLATES_DIR = SKILL_DIR / "references" / "default-templates"
-_DEFAULT_WORK = SKILL_DIR.parents[2] / "preconfig-work" if len(SKILL_DIR.parents) >= 3 and (SKILL_DIR.parents[2] / "preconfig-work").exists() else Path.cwd() / "preconfig-work"
+# SKILL_DIR is <repo>/toolkit, or <repo>/skills/<skill> for the copy the skill ships; the install folder holds the repo.
+_INSTALL = (SKILL_DIR.parents[1] if SKILL_DIR.parent.name == "skills" else SKILL_DIR.parent).parent
+_DEFAULT_WORK = _INSTALL / "preconfig-work" if (_INSTALL / "preconfig-work").exists() else Path.cwd() / "preconfig-work"
 WORK_DIR = Path(os.environ.get("PRECONFIG_WORK", _DEFAULT_WORK))
 CATALOGUE = SKILL_DIR / "references" / "endpoint-catalogue.yaml"
 

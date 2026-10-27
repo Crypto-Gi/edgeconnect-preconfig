@@ -19,7 +19,7 @@ Convert an HPE Aruba EdgeConnect appliance configuration into a verified site-ty
   ```bash
   edgeconnect-preconfig capture --orchestrator lab --appliance 0.NE --role reference
   ```
-  If `edgeconnect-preconfig` is not on the PATH, give the full form with the install folder's real path: `"<install folder>/.venv/bin/python" "<install folder>/edgeconnect-preconfig/skills/building-edgeconnect-preconfig-templates/scripts/capture.py" --orchestrator lab ...`.
+  If `edgeconnect-preconfig` is not on the PATH, give the full form with the install folder's real path: `"<install folder>/.venv/bin/python" "<install folder>/edgeconnect-preconfig/toolkit/scripts/capture.py" --orchestrator lab ...`.
 - Real values only: the Orchestrator nickname (`--orchestrator`, `--validate`), real paths (quoted when they hold spaces), the real site folder and CSV. No placeholders the user has to fill in.
 - When you change `variables.csv` or the site CSV, that is an edit, not a command: name the file and each changed cell (row, column, old value to new value), then show the command that re-runs with it.
 - An upload command with `--approve` is shown only after the user approved the validation table.
@@ -94,7 +94,7 @@ Validation runs on the Orchestrator the appliance was read from (`--validate-on`
 | Toolkit errors | `toolkit-error` | A mapper failed; its section is missing | A toolkit bug: quote the error, name the section, say the YAML lacks it until the toolkit is fixed |
 | Gaps | `unresolved`, `unmapped-source-key` | The format has a place for it, but the value was not carried | The only real defects. For each: what is missing, the captured value, what a new site would get instead, and what the user can do now (set it per site after apply, start the section from the default template with `include_from_default`, or a template group) |
 | Not readable | `not-readable` | The format has a place for it, but a GET-only capture cannot read the value (business hours), or the API key's RBAC roles refused the read (HTTP 403; the note names the GET, `docs/decisions/0009`) | Not a defect of the YAML. Ask the user to check the setting by hand and set it per site if it is not the default; for a refused read, they can also widen the key's read roles and capture again |
-| Outside preconfig | `outside-preconfig` (`release-gated` in ledgers before 1.2.4) | The format has no place for it, including source keys the target release's default template does not have | Not a defect. List it as "to set outside preconfig", with the route the note gives (template group, Orchestrator overlay or firewall settings, another workflow) |
+| Outside preconfig | `outside-preconfig` (`release-gated` in ledgers before 1.3.0) | The format has no place for it, including source keys the target release's default template does not have | Not a defect. List it as "to set outside preconfig", with the route the note gives (template group, Orchestrator overlay or firewall settings, another workflow) |
 | Owned elsewhere | `template-group`, `orchestrator-managed` | Templates or Orchestrator services provide it | Expected. A new site gets it only by joining the same template groups and services, which `templateGroups` and `businessIntentOverlays` already name |
 | Mapped on an assumption | `mapped` with "assumption" in the note | Carried, on a stated assumption | Ask the owner to confirm each one |
 

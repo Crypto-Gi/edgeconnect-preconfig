@@ -44,11 +44,11 @@ A read the API key's roles refuse (HTTP 403) on any other endpoint does **not** 
 
 ## The stage scripts, step by step
 
-The six commands above run these stages for you. To run them yourself (`SKILL_SCRIPTS` is the skill's `scripts/` folder):
+The six commands above run these stages for you. To run them yourself (`SKILL_SCRIPTS` is `toolkit/scripts`, or the `scripts/` folder of an installed skill):
 
 ### Capture a Reference Appliance (Read-Only `GET`)
 ```bash
-SKILL_SCRIPTS="skills/building-edgeconnect-preconfig-templates/scripts"
+SKILL_SCRIPTS="toolkit/scripts"
 
 python3 "$SKILL_SCRIPTS/capture.py" --orchestrator prod --appliance 2.NE --role reference
 ```

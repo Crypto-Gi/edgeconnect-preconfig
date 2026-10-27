@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "toolkit" / "scripts"))
 from common import DEFAULT_TEMPLATES_DIR, WORK_DIR, client_for, utc_stamp, write_json  # noqa: E402
 from validate import PATH, Stop, validate_text, validator  # noqa: E402
 

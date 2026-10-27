@@ -1,0 +1,129 @@
+# Read endpoints that inform preconfig sections. Data, not code: capture.py reads this file.
+# Evidence: Orchestrator 9.7.1.42046 Swagger (API-ORCH/swagger_file_api_9.7.1.42046), paths under /gms/rest.
+#
+# Fields
+#   id        file-name stem for the capture
+#   path      GET path (relative to /gms/rest)
+#   scope     appliance    -> nePk query parameter added
+#             orchestrator -> no nePk; Orchestrator-wide context, captured once per run
+#   source    cached   -> cached=true is saved as "cached", cached=false as "live"
+#             fromGms  -> fromGms=true is "cached", fromGms=false is "live"
+#             single   -> one request, saved as "orchestrator" (data only Orchestrator holds)
+#             live     -> one request, saved as "live" (GET passthrough to the appliance)
+#             backup   -> one request, saved as "backup" (stored running-config backups)
+#   params    extra fixed query parameters
+#   reduce    latest-backup -> keep only the newest entry of a list answer
+#   sections  preconfig top-level sections the data informs ([] = context only)
+#   seen_on   Orchestrator releases where the endpoint answered (filled from capture results)
+#   notes     limits and interpretation hints
+#
+# Grows with evidence. Never add state-only endpoints (leases, neighbours, tunnel state, statistics).
+
+endpoints:
+  # --- identity and Orchestrator-held data ---------------------------------------------------
+  - {id: appliance, path: /appliance, scope: appliance, source: single, sections: [applianceInfo],
+     notes: "hostname, group, site, model, softwareVersion; nePk itself is a runtime ID"}
+  - {id: appliances-all, path: /appliance, scope: orchestrator, source: single, sections: [deploymentInfo],
+     notes: "peer hostname and serial for EdgeHA haConfig"}
+  - {id: network-role-and-site, path: /appliance/networkRoleAndSite, scope: appliance, source: single, sections: [applianceInfo]}
+  - {id: extra-info, path: /appliance/extraInfo, scope: appliance, source: single, sections: [applianceInfo],
+     notes: "location and contact"}
+  - {id: region-associations, path: /regions/appliances, scope: orchestrator, source: single, sections: [applianceInfo]}
+  - {id: regions, path: /regions, scope: orchestrator, source: single, sections: []}
+  - {id: groups, path: /gms/group, scope: orchestrator, source: single, sections: [applianceInfo],
+     notes: "resolve group ID to group name"}
+  - {id: template-association, path: /template/applianceAssociation, scope: appliance, source: single, sections: [templateGroups]}
+  - {id: template-groups, path: /template/templateGroups, scope: orchestrator, source: single, sections: [],
+     notes: "which templates each group contains; drives template-group ownership"}
+  - {id: security-maps, path: /securityMaps, scope: appliance, source: single, sections: [],
+     notes: "firewall zone-pair rules; preconfig has no firewall section, read only to ledger rules Orchestrator did not push (gms_marked false)"}
+  - {id: overlay-config, path: /gms/overlays/config, scope: orchestrator, source: single, sections: [businessIntentOverlays]}
+  - {id: overlay-association, path: /gms/overlays/association, scope: orchestrator, source: single, sections: [businessIntentOverlays]}
+  - {id: interface-labels, path: /gms/interfaceLabels, scope: orchestrator, source: single, sections: [],
+     notes: "resolve interface-label IDs to names"}
+  - {id: segments, path: /vrf/config/segments, scope: orchestrator, source: single, sections: [],
+     notes: "resolve segment (VRF) IDs to names"}
+  - {id: zones, path: /zones, scope: orchestrator, source: single, sections: [],
+     notes: "resolve zone IDs to names"}
+  - {id: ha-groups, path: /haGroups, scope: orchestrator, source: single, sections: [deploymentInfo]}
+  - {id: cluster-profiles, path: /cluster/profiles, scope: orchestrator, source: single, sections: [applianceInfo],
+     notes: "clusterProfile"}
+  - {id: cluster-profile-mapping, path: /cluster/profileMapping, scope: orchestrator, source: single, sections: [applianceInfo]}
+  - {id: appexpress-group-association, path: /applicationDefinition/appExpressGroup/association, scope: orchestrator, source: single, sections: [appExpressGroups]}
+  - {id: zscaler-association, path: /thirdPartyServices/zscaler/applianceAssociation, scope: orchestrator, source: single, sections: [thirdPartyServicesAssociation]}
+  - {id: axis-association, path: /thirdPartyServices/axis/applianceAssociation, scope: orchestrator, source: single, sections: [thirdPartyServicesAssociation]}
+  - {id: netskope-association, path: /thirdPartyServices/netskope/applianceAssociation, scope: orchestrator, source: single, sections: [thirdPartyServicesAssociation]}
+  - {id: ids-profile-state, path: /ids/profilestate, scope: orchestrator, source: single, sections: [idsIpsConfig]}
+  - {id: ids-state, path: /ids/state, scope: orchestrator, source: single, sections: [idsIpsConfig]}
+
+  # --- appliance configuration, live and cached ------------------------------------------------
+  - {id: system-info, path: /systemInfo/system, scope: appliance, source: cached, sections: [applianceInfo]}
+  - {id: deployment, path: /deployment, scope: appliance, source: cached, sections: [deploymentInfo, managementIp]}
+  - {id: interface-state, path: /interfaceState, scope: appliance, source: cached, sections: [interfaceConfig],
+     notes: "mixes configuration and state; map only admin settings"}
+  - {id: dhcp-settings, path: /dhcpConfig/dhcpSettings, scope: appliance, source: cached, sections: [deploymentInfo]}
+  - {id: dhcp-relay, path: /dhcpConfig/relay, scope: appliance, source: cached, sections: [deploymentInfo]}
+  - {id: dhcp-reservation, path: /dhcpConfig/reservation, scope: appliance, source: cached, sections: [deploymentInfo]}
+  - {id: dhcp-remote-subnets, path: /dhcpConfig/remoteSubnets, scope: appliance, source: cached, sections: [dhcpRemoteAddressPoolConfig]}
+  - {id: subnets, path: /subnets, scope: appliance, source: cached, sections: [localRoutes, segmentLocalRoutes],
+     notes: "includes learned routes; only locally configured entries are intent"}
+  - {id: subnets-all-vrfs, path: /subnets/all, scope: appliance, source: single, sections: [segmentLocalRoutes],
+     notes: "no cached switch in Swagger; label orchestrator until behaviour is known"}
+  - {id: admin-distance, path: /appliance/adminDistance, scope: appliance, source: cached, sections: [],
+     notes: "no preconfig field; ledgered (template-group when an adminDistance template is selected, else unresolved)"}
+  - {id: bgp-system, path: /bgp/config/system, scope: appliance, source: fromGms, sections: [bgpSystemConfig]}
+  - {id: bgp-neighbors, path: /bgp/config/neighbor, scope: appliance, source: fromGms, sections: [bgpSystemConfig]}
+  - {id: bgp-system-all-vrfs, path: /bgp/config/allVrfs/system, scope: appliance, source: fromGms, sections: [segmentBgpSystems]}
+  - {id: bgp-neighbors-all-vrfs, path: /bgp/config/allVrfs/neighbor, scope: appliance, source: fromGms, sections: [segmentBgpSystems]}
+  - {id: ospf-system, path: /ospf/config/system, scope: appliance, source: fromGms, sections: [ospfSystemConfig]}
+  - {id: ospf-areas, path: /ospf/config/areas, scope: appliance, source: fromGms, sections: [ospfSystemConfig]}
+  - {id: ospf-interfaces, path: /ospf/config/interfaces, scope: appliance, source: fromGms, sections: [ospfSystemConfig]}
+  - {id: ospf-system-all-vrfs, path: /ospf/config/allVrfs/system, scope: appliance, source: fromGms, sections: [segmentOspfConfig]}
+  - {id: ospf-interfaces-all-vrfs, path: /ospf/config/allVrfs/interfaces, scope: appliance, source: fromGms, sections: [segmentOspfConfig]}
+  - {id: route-maps, path: /routeMaps, scope: appliance, source: cached, sections: [],
+     notes: "usually template-provided (routes template)"}
+  - {id: peer-priority, path: /appliance/peerPriorityList, scope: appliance, source: cached, sections: [peerPriority]}
+  - {id: vrrp, path: /vrrp, scope: appliance, source: cached, sections: [vrrp]}
+  - {id: ipsla-managers, path: /ipsla/config/managers, scope: appliance, source: fromGms, sections: [ipSlaRule]}
+  - {id: port-forwarding, path: /portForwarding, scope: appliance, source: cached, sections: [inboundPortForwarding]}
+  - {id: loopbacks, path: /virtualif/loopback, scope: appliance, source: cached, sections: [loopbackInterface]}
+  - {id: vtis, path: /virtualif/vti, scope: appliance, source: cached, sections: [virtualTunnelInterface]}
+  - {id: passthrough-tunnels, path: /tunnels2/passThrough, scope: appliance, source: single, sections: [tunnelConfiguration],
+     notes: "search endpoint; mixes state (operStatus) with configuration"}
+  - {id: pppoe, path: /appliance/pppoeList, scope: appliance, source: cached, sections: [pppoe]}
+  - {id: custom-tags, path: /customApplianceTags, scope: appliance, source: cached, sections: [customApplianceTags]}
+  - {id: link-aggregation, path: /linkAggregation, scope: appliance, source: cached, sections: [linkAggregation]}
+  - {id: bridge-groups, path: /bridgeGroups, scope: appliance, source: cached, sections: [bridgeGroups]}
+  - {id: bfd-vrfs, path: /bfd/config/vrfs, scope: appliance, source: cached, sections: [segmentBfdConfigs]}
+  - {id: nat-pools, path: /nat/natPools, scope: appliance, source: cached, sections: [natPools]}
+  - {id: branch-nat-maps, path: /nat/maps, scope: appliance, source: cached, sections: [branchNatMapsConfig],
+     notes: "Branch NAT rules (branchNatMapsConfig); /natMaps is the legacy WAN NAT policy map"}
+  - {id: nat-maps, path: /natMaps, scope: appliance, source: cached, sections: [],
+     notes: "legacy WAN NAT policy map (not branchNatMapsConfig)"}
+  - {id: nat-all, path: /natAll, scope: appliance, source: cached, sections: [],
+     notes: "legacy inbound/outbound NAT-all flags"}
+  - {id: vxlan, path: /vxlan/config, scope: appliance, source: fromGms, sections: [vxlan]}
+  - {id: vxlan-vni-map, path: /vxlan/segVniMap, scope: appliance, source: fromGms, sections: [vxlan]}
+  - {id: cluster-state, path: /cluster, scope: orchestrator, source: single, sections: [flowRedirection]}
+  - {id: nac, path: /nac, scope: appliance, source: cached, sections: [nac]}
+  - {id: secure-web-services, path: /secureWebServicesConfig, scope: appliance, source: cached, sections: [secureWebServicesConfig]}
+  - {id: multicast-config, path: /multicast/config, scope: appliance, source: cached, sections: [multicast]}
+  - {id: multicast-enable, path: /multicast/enable, scope: appliance, source: cached, sections: [multicast]}
+  - {id: mgmt-services, path: /mgmtServices, scope: appliance, source: cached, sections: [],
+     notes: "usually template-provided (mgmtServices template)"}
+  - {id: sse-interfaces, path: /thirdPartyServices/sse/interfaces, scope: appliance, source: cached, sections: [],
+     notes: "SSE service interfaces (veth*) made by the SSE integration; ledgered orchestrator-managed"}
+
+  # --- sources found for sections that have no Orchestrator endpoint (2026-10-15, evidence in references/lessons.md) ---
+  - {id: ip-allow-list, path: /appliance/rest, scope: appliance, source: live, params: {url: ipAllowList}, sections: [ipAllowList],
+     notes: "GET passthrough to the appliance REST API; live only"}
+  - {id: static-routes-configured, path: /appliance/rest, scope: appliance, source: live, params: {url: subnets3/configured}, sections: [localRoutes, segmentLocalRoutes],
+     notes: "GET passthrough; configured static routes keyed prefix > nhop > interface, with comment and the advert_bgp/advert_ospf flags that /subnets reports as false (2026-10-17 round trip)"}
+  - {id: running-config, path: /appliance/backup, scope: appliance, source: backup, params: {runningConfig: "true"}, reduce: latest-backup,
+     sections: [ecLicensing, poE, managementIp, managementRoutes, flowRedirection, usblte, vxlan, interfaceConfig, availabilityTimeSettings, idsIpsConfig],
+     notes: "CLI running-config text of the newest stored backup (can be older than the live configuration; the capture records backupTime). Secrets and hashes are redacted"}
+
+# Preconfig sections with no read endpoint identified yet. Next places to look:
+#   GET /appliance/rest?url=<path> (live passthrough to the appliance REST API; GET only)
+#   GET /appliance/backup?runningConfig=true (running configuration text, also for offline appliances)
+no_endpoint_yet: [availabilityTimeSettings]   # business hours are returned only by POST /stats/config/applianceBusinessHours/get; capture is GET-only

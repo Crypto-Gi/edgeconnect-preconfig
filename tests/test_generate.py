@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "scripts"))
 from common import ServerError, ValidationError, changed_paths, normalize_serial, parse_yaml, resolve_output_filename  # noqa: E402
 from generate import generate  # noqa: E402
 from options import extract  # noqa: E402

@@ -15,7 +15,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import List, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "toolkit" / "scripts"))
 from common import WORK_DIR  # noqa: E402
 from corpus import latest  # noqa: E402
 from translate import Capture, allowed_paths, build, prune  # noqa: E402  guard-ok: scripts are imported after the sys.path insert
