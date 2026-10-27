@@ -245,7 +245,7 @@ def m_vrrp(ctx: Ctx) -> Optional[Dict[str, Any]]:
         entry: Dict[str, Any] = {
             "groupId": v["groupId"], "interfaceName": v["interface"], "admin": v["enable"],
             "virtualIpAddress": v["vipaddr"], "advertisementTimer": v["adv_timer"], "priority": v["priority"],
-            "tracker": v["tracker"], "version": v["version"], "preemption": v["preempt"],
+            "tracker": v.get("tracker", False), "version": v["version"], "preemption": v["preempt"],
         }
         if v.get("auth"):
             entry["authenticationString"] = v["auth"]
@@ -475,7 +475,7 @@ def m_interfaceConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
         name = i["ifname"]
         if not re.match(r"^(lan|wan|tlan|twan|twlan|blan|bwan)\d+$", name):
             continue
-        if i.get("ifSpeed") == "auto" and i.get("ifDuplex") == "auto" and i.get("admin"):
+        if i.get("ifSpeed") in ("auto", "") and i.get("ifDuplex") in ("auto", "") and i.get("admin"):  # "": a bonded blanN/bwanN has no speed of its own
             continue
         speed = i.get("ifSpeed")
         if speed != "auto" and not str(speed).isdigit():
@@ -671,7 +671,7 @@ def m_ipSlaRule(ctx: Ctx) -> Optional[Dict[str, Any]]:
                 up_act = {"upActionType": "clearAlarm"}
         else:
             up_act = {"upActionType": up_str.get(str(up_raw), "clearAlarm")}
-        rules.append({"enable": v["enable"], "samplingInterval": int(v["interval"]), "comment": nul(v["comment"]), "routeLabel": ctx.label(v["routeLabelId"]) if v["routeLabelId"] else None,
+        rules.append({"enable": v["enable"], "samplingInterval": int(v["interval"]), "comment": nul(v["comment"]), "routeLabel": ctx.label(v["routeLabelId"]) if v.get("routeLabelId") else None,
                       "ipslaMonitor": monitor, "downAction": down_act, "upAction": up_act})
     rules.sort(key=lambda r: (str(r["ipslaMonitor"].get("monitorType")), str(r["ipslaMonitor"].get("interfaceName") or ""), str(r["ipslaMonitor"].get("ipAddress") or r["ipslaMonitor"].get("urls") or "")))
     if not rules:

@@ -100,7 +100,7 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
         target = find_appliance(listing["data"], appliance)
         nepk = str(target.get("nePk") or target.get("id"))
         reach = reader.get("/reachability/gms", {"nePk": nepk})
-        reachable = bool(reach["ok"] and isinstance(reach["data"], dict) and int(reach["data"].get("state", 2)) in (1, 4))
+        reachable = bool(reach["ok"] and isinstance(reach["data"], dict) and int(reach["data"].get("state", 2)) in (1, 4, 5))  # 1 normal, 4 out of sync, 5 sync in progress
         index: List[Dict[str, Any]] = []
         if reach.get("error") == "PermissionDeniedError":  # unknown, not unreachable: try the live reads and report the refusal (decision 0009)
             reachable = None

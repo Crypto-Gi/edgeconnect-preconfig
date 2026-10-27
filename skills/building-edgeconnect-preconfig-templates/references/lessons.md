@@ -17,7 +17,11 @@ Verified across HPE Aruba EdgeConnect Orchestrator releases `9.6.4`, `9.7.1`, an
   - `tunnelConfiguration.tunnels[]`: comments say `nat`, while the actual YAML key is `natMode` (`snat` only on `no_encap` tunnels).
   - `multicast[].pim[]`: comments say `interface`, while the actual YAML key is `interfaceName`.
   - `tunnelConfiguration.tunnels[].ikeConfig`: comments list `ikeEncryptAlgorithm: auto`, which `/validate` rejects (`default`, `aes128`, `aes256`, `aes128gcm16`, `aes256gcm16`, `null` only).
-- **Release differences (`gated_paths` in `translate.py`):**
+- **Allow list (`allowed_paths` / `prune` in `translate.py`, `docs/decisions/0013`):** only key paths in the target release's default template, plus `TEMPLATE_OMISSIONS`, are written; each dropped path is one `outside-preconfig` ledger line.
+  - ECOS `9.5.x` NAC `aaaProfile` carries `dot1x_acct_server_group` and `mac_acct_server_group`; no template has them and `/validate` rejects them (`Unrecognized field`).
+  - ECOS `9.5.x` leaves out `routeLabelId` in `/ipsla/config/managers` and `tracker` in `/vrrp`; the mappers read both with `.get()` (tracker defaults to `false`, the template value).
+  - ECOS `9.5.x` HA groups report `v6HaSubnet: null` and `v6HaMask: 0`; `/validate` needs a mask of 1-127, so `haConfig` takes Orchestrator's default `fd00::a9fe:0000/112` and `126`.
+- **Release differences (dropped by the same allow list):**
   - `10.0.0` adds `ikePqcgroup` and `ipsecPqcgroup` under `tunnelConfiguration.tunnels[].ipsecConfig`, and `flowProcess` under `flowRedirection`.
   - `9.6.4` uses `nac.server[].address` instead of `nac.server[].host` and lacks `dhcpRemoteAddressPoolConfig` and `multicast`.
   - Pre-`9.6` appliances (`9.3.x`, `9.5.x`) omit `sysConfig.roles`, `applianceIPs[].role`, and `sysConfig.maxInBW` in `GET /deployment`.
@@ -151,6 +155,6 @@ Using the skill, you diagnose and report; you never edit the toolkit (`SKILL.md`
 - **`Business Intent Overlays / Template groups / Interface Label / Segment / Zone / Role is invalid`:**
   - The YAML references an object name from the source Orchestrator that does not exist on the target Orchestrator. Query the target Orchestrator's inventory (or run `check.py --substitute` for lab testing) and put valid target names in the site CSV (if the field is fixed, make it a column in `variables.csv` first), then re-run; never edit `reference.yaml`.
 - **`Unrecognized field: "<name>"`:**
-  - Either a comment-vs-YAML typo (check `references/default-templates/orchestrator-<release>.yml`) or a release-gated field (`--target-release` does not match the validating Orchestrator's release).
+  - Either a comment-vs-YAML typo (check `references/default-templates/orchestrator-<release>.yml`) or a key outside the target's format (`--target-release` does not match the validating Orchestrator's release).
 - **Cross-field error (e.g., IKE/IPsec GCM, OSPF auth, Branch NAT prefix length, VXLAN VTEP interface):**
   - Look up the section in `references/known-constraints.yaml` (`constraints` and `structural_and_apply_constraints`) and apply the documented companion fix.

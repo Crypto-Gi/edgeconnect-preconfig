@@ -10,7 +10,7 @@ from mappers import Ctx, m_bgpSystemConfig, m_branchNatMapsConfig, m_dhcpRemoteA
 from synth import substitute  # noqa: E402
 from mappers import m_idsIpsConfig, m_interfaceConfig, m_segmentOspfConfig  # noqa: E402
 from suite import load_constraints  # noqa: E402
-from translate import HARDEN, build, drop_template_fields, local_firewall_rules, prune, template_fields  # noqa: E402
+from translate import HARDEN, allowed_paths, build, drop_template_fields, local_firewall_rules, prune, template_fields  # noqa: E402  guard-ok: scripts are imported after the sys.path insert
 import copy  # noqa: E402
 
 
@@ -135,11 +135,65 @@ class Substitution(unittest.TestCase):
 
 
 class Release(unittest.TestCase):
-    def test_prune_removes_gated_paths_and_ledgers_once(self):
+    def test_prune_keeps_only_allowed_paths_and_ledgers_each_drop_once(self):
         ledger = []
-        out = prune({"a": {"keep": 1, "gated": 2}, "l": [{"gated": 1, "x": 2}, {"gated": 3}]}, {"a.gated", "l.gated"}, ledger)
+        out = prune({"a": {"keep": 1, "extra": 2}, "l": [{"extra": 1, "x": 2}, {"extra": 3}]}, {"a", "a.keep", "l", "l.x"}, ledger)
         self.assertEqual(out, {"a": {"keep": 1}, "l": [{"x": 2}, {}]})
-        self.assertEqual([e["target"] for e in ledger], ["a.gated", "l.gated"])
+        self.assertEqual([(e["target"], e["disposition"]) for e in ledger], [("a.extra", "outside-preconfig"), ("l.extra", "outside-preconfig")])
+
+    def test_allowed_paths_follow_the_target_template_plus_known_omissions(self):
+        allowed = allowed_paths("9.7.1.42046")
+        self.assertIn("nac.aaaProfile.dot1x_server_group", allowed)
+        self.assertIn("deploymentInfo.deploymentInterfaces.addressingMode", allowed)  # /validate accepts it; the template does not show it
+        self.assertNotIn("nac.aaaProfile.dot1x_acct_server_group", allowed)
+        self.assertNotIn("tunnelConfiguration.tunnels.ipsecConfig.ikePqcgroup", allowed)  # 10.0 only
+
+
+class Ecos95(unittest.TestCase):
+    """ECOS 9.5.x returns keys later releases dropped and leaves out keys they added (lab corpus, 2026-10-27)."""
+
+    def test_nac_accounting_server_groups_are_not_written(self):
+        aaa = {"self": 1, "name": "default", "da_enable": False, "da_server": "default", "dot1x_acct_server_group": "default", "dot1x_default_role": "default", "dot1x_profile": "default",
+               "dot1x_server_group": "default", "mac_acct_server_group": "default", "mac_default_role": "default", "mac_profile": "default", "mac_server_group": "default", "stats_timeout": 10}
+        src = {"nacEnable": False, "server": {"1": {"self": 1, "address": "192.0.2.5", "authport": 1812, "key": "", "name": "default", "source_ip_interface": "any"}},
+               "serverGroup": {"1": {"self": 1, "name": "default", "server": {"1": {"self": 1, "name": "default"}}}}, "aaaProfile": {"1": aaa},
+               "dot1x": {"1": {"self": 1, "name": "default"}}, "macAuthProfile": {"1": {"self": 1, "name": "default"}}, "applyPolicies": {"if": {"lan0": {"profile": "default", "auth_type": 1}}}}
+        ledger = []
+        out = prune({"nac": m_nac(ctx({"nac": src, "deployment": DEP})[0])}, allowed_paths("9.7.1.42046"), ledger)
+        self.assertNotIn("dot1x_acct_server_group", out["nac"]["aaaProfile"][0])
+        self.assertNotIn("mac_acct_server_group", out["nac"]["aaaProfile"][0])
+        self.assertEqual(out["nac"]["aaaProfile"][0]["dot1x_server_group"], "default")
+        self.assertEqual(sorted(e["target"] for e in ledger), ["nac.aaaProfile.dot1x_acct_server_group", "nac.aaaProfile.mac_acct_server_group"])
+
+    def test_ip_sla_rule_without_route_label(self):
+        from mappers import m_ipSlaRule
+        op = {"type": "ip-monitor", "ip-monitor-ip": "192.0.2.98", "tunnel-name": "to_peer_DefaultOverlay", "src-port-name": "lo20000"}
+        c, notes = ctx({"deployment": DEP, "ipsla-managers": {"MGR_1": {"enable": True, "interval": "1", "comment": "", "upAction": "def-alarm", "downAction": "alarm", "operation": {"OPR_1": op}}}})
+        rule = m_ipSlaRule(c)["ruleEntries"][0]
+        self.assertIsNone(rule["routeLabel"])
+        self.assertEqual(rule["ipslaMonitor"]["tunnelName"], "to_peer_DefaultOverlay")
+
+    def test_vrrp_without_tracker(self):
+        c, _ = ctx({"vrrp": [{"groupId": 100, "interface": "lan1", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 1, "priority": 128, "version": 2, "preempt": True,
+                              "auth": "", "desc": "vrrp ipv4", "pkt_trace": False, "holddown": 60}]})
+        self.assertFalse(m_vrrp(c)["vrrpEntries"][0]["tracker"])  # no tracker on 9.5.x is the template default, false
+
+    def test_ha_group_without_ipv6_pool_gets_orchestrator_default(self):
+        dep = copy.deepcopy(DEP)
+        dep["sysConfig"]["haIf"] = "lan1"
+        dep["sysConfig"]["ifLabels"]["wan"] = [{"id": "1", "name": "INET"}]
+        wan = {"vlan": 0, "label": "1", "wanSide": True, "vrf": 0, "zone": 0, "harden": 1, "behindNAT": "none", "maxBW": {"outbound": 50000, "inbound": 50000}, "version": 4, "ip": "198.51.100.10", "mask": 24, "wanNexthop": "198.51.100.1"}
+        dep["modeIfs"] = [{"ifName": "wan0", "applianceIPs": [wan]}, {"ifName": "lan1", "applianceIPs": [dict(wan, vlan=4000)]}]
+        ha = {"g1": {"subnet": "169.254.1.0/24", "mask": 30, "v6HaSubnet": None, "v6HaMask": 0, "vlanStart": 4000, "appliances": [{"nePk": "9.NE"}, {"nePk": "8.NE"}]}}
+        cap = FakeCap({"appliance": {"hostName": "h1", "groupId": "1.Network", "site": "S1", "networkRole": "0"}, "deployment": dep, "ha-groups": ha})
+        cap.folder = "fake"
+        ha_cfg = build(cap, [])["deploymentInfo"]["haConfig"]
+        self.assertEqual((ha_cfg["hav6IpPool"], ha_cfg["hav6SubnetMask"]), ("fd00::a9fe:0000/112", 126))  # /validate rejects mask 0
+
+    def test_bonded_interface_without_speed_is_default_not_unresolved(self):
+        c, notes = ctx({"interface-state": {"ifInfo": [{"ifname": "blan0", "ifSpeed": "", "ifDuplex": "", "admin": True}]}})
+        self.assertIsNone(m_interfaceConfig(c))
+        self.assertFalse(any(n["disposition"] == "unresolved" for n in notes))
 
 
 class ApplyGuardrailAndDiff(unittest.TestCase):

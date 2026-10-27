@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import ssl
 import subprocess
+import sys
 from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -385,7 +386,10 @@ def write_json(path: Path, value: Any) -> None:
 def parse_yaml(text: str) -> Any:
     """YAML 1.2 core-schema scalars. PyYAML's default (1.1) turns 1:1 into 61, 08034 into an octal error, and yes/no/on/off
     into booleans, whereas Orchestrator's parser reads `importRouteTarget: 1:1` and `zipCode: 08034` as strings."""
-    import yaml
+    try:
+        import yaml
+    except ImportError:
+        raise SystemExit("PyYAML is not installed for {}: run `{} -m pip install -r requirements.txt`".format(sys.executable, sys.executable))
 
     class Core(yaml.SafeLoader):
         pass
