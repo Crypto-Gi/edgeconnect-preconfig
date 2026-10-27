@@ -326,14 +326,30 @@ def resolve_output_filename(row: Mapping[str, Any], index: int = 1) -> Tuple[str
     return base, base + ".yml"
 
 
-def find_default_template(release: str) -> Optional[Path]:
-    """Locate orchestrator-<release>.yml in the skill's bundled references/default-templates/ or WORK_DIR."""
-    fname = "orchestrator-{}.yml".format(release)
-    for folder in (DEFAULT_TEMPLATES_DIR, WORK_DIR / "reference" / "default-templates"):
-        candidate = folder / fname
-        if candidate.is_file():
-            return candidate
-    return None
+def _release_key(release: str) -> Tuple[int, ...]:
+    return tuple(int(n) for n in re.findall(r"\d+", str(release)))
+
+
+def find_default_template(release: str) -> Tuple[Optional[Path], str]:
+    """(template, why) for an Orchestrator release (docs/decisions/0014): the exact build, else the newest template of the same
+    major.minor, else the nearest older release, else the nearest newer; never None only because the exact build is missing."""
+    have: Dict[str, Path] = {}
+    for folder in (WORK_DIR / "reference" / "default-templates", DEFAULT_TEMPLATES_DIR):  # bundled wins
+        for p in folder.glob("orchestrator-*.yml"):
+            have[p.stem[len("orchestrator-"):]] = p
+    if release in have:
+        return have[release], "the exact template for Orchestrator release {}".format(release)
+    key = _release_key(release)
+    family = [r for r in have if _release_key(r)[:2] == key[:2]]
+    if family:
+        r = max(family, key=_release_key)
+        return have[r], "no template for {}: using {}, the newest of the same {} family".format(release, r, ".".join(map(str, key[:2])))
+    older = [r for r in have if _release_key(r) < key]
+    newer = [r for r in have if _release_key(r) > key]
+    if older or newer:
+        r = max(older, key=_release_key) if older else min(newer, key=_release_key)
+        return have[r], "no template for {} or its family: using {}, the nearest {} release (release {} is untested)".format(release, r, "older" if older else "newer", release)
+    return None, "no default templates in {}".format(DEFAULT_TEMPLATES_DIR)
 
 
 def redact_secrets(value: Any, path: str = "$") -> Tuple[Any, List[str]]:
