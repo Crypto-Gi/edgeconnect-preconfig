@@ -31,6 +31,8 @@ _PEM = re.compile(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", re.S)
 _CRYPT = re.compile(r"\$(1|2[aby]?|5|6|y)\$[./A-Za-z0-9$]{8,}")
 # [ \t]: a keyword with an empty value must not reach across the line break and redact the next line's first word
 _CLI_SECRET = re.compile(r"(?im)(\b(?:password|passwd|secret|psk|pre-shared-key|passphrase|auth-key|authentication-key|md5|api-key|token)\b[ \t]+(?:\d[ \t]+)?)(\S+)")
+# free text (banners, comments): "pass: x", "password=x", "pwd: x"; a CLI keyword needs the ':' or '=' so "pass-through" stays
+_TEXT_SECRET = re.compile(r"(?i)(\b(?:pass(?:word|wd)?|pwd)[ \t]*[:=][ \t]*)([^\s\\\"]+)")
 _SERIAL_HEX = re.compile(r"^[0-9A-F]{12}$")
 
 
@@ -370,6 +372,7 @@ def redact_secrets(value: Any, path: str = "$") -> Tuple[Any, List[str]]:
                 found.append(where)
                 return "<SECRET:{}>".format(where)
             text = _CLI_SECRET.sub(lambda m: m.group(1) + "<SECRET:text>", _CRYPT.sub("<SECRET:hash>", _PEM.sub("<SECRET:pem>", item)))
+            text = _TEXT_SECRET.sub(lambda m: m.group(1) + "<SECRET:text>" if not m.group(2).startswith("<SECRET:") else m.group(0), text)
             if text != item:
                 found.append(where)
             return text

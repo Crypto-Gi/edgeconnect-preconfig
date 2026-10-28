@@ -169,6 +169,15 @@ class RedactTest(unittest.TestCase):
         self.assertEqual(out["cli"].splitlines()[:4], cli.splitlines()[:4])  # nothing to hide on those lines, so they stay byte for byte
         self.assertEqual(out["cli"].splitlines()[4], "   password 0 <SECRET:text>")
 
+    def test_free_text_credentials(self):
+        motd = "Monitor login (192.0.2.10:88)\nuser: demo  pass: Hunter2x\nPassword=Swordfish9 pwd: abc123"
+        out, paths = redact_secrets({"banners": {"motd": motd}, "cli": "   interface pass-through max-bandwidth 50000\n   bypass: on"})
+        self.assertEqual(out["banners"]["motd"], "Monitor login (192.0.2.10:88)\nuser: demo  pass: <SECRET:text>\nPassword=<SECRET:text> pwd: <SECRET:text>")
+        self.assertEqual(out["cli"], "   interface pass-through max-bandwidth 50000\n   bypass: on")
+        self.assertEqual(paths, ["$.banners.motd"])
+        out, _ = redact_secrets({"cli": 'web meta "{\\"note\\":\\"pass: abc\\"}"'})  # JSON inside a CLI line: the value ends at the escape
+        self.assertEqual(out["cli"], 'web meta "{\\"note\\":\\"pass: <SECRET:text>\\"}"')
+
     def test_nac_server_key_is_secret_but_tag_key_is_not(self):
         out, paths = redact_secrets({"nac": {"server": [{"host": "192.0.2.5", "authport": 1812, "key": "radius-shared"}]},
                                      "tags": [{"key": "site", "value": "a"}]})
