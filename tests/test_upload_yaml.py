@@ -76,7 +76,14 @@ class YamlFiles(unittest.TestCase):
                                           "comment": "uploaded via building-edgeconnect-preconfig-templates"}])
         self.assertRegex(out, r"uploaded +br-1\.yml")
         self.assertIn("verified", out)
-        _, _ = self.run_upload(["--yaml", self.file("br-9.yml", GOOD.replace("br-1", "br-9")), "--approve"], Client())  # accepted, changes nothing
+        approved = Client()
+        code, _ = self.run_upload(["--yaml", self.file("br-9.yml", GOOD.replace("br-1", "br-9")), "--approve"], approved)  # accepted, changes nothing
+        self.assertEqual((code, len(approved.posted)), (0, 1))
+
+    def test_missing_path_says_no_such_file(self):
+        code, out = self.run_upload(["--yaml", str(self.dir / "nothing-*.yml")], Client())  # an unmatched glob reaches us literally
+        self.assertIn("no such file", out)
+        self.assertNotIn("FileNotFoundError", out)
 
     def test_folder_and_several_files_with_one_bad_and_one_conflict(self):
         folder = self.dir / "batch"

@@ -9,6 +9,8 @@ Behavior:
      serial_number already exists on Orchestrator, only that conflicting row is skipped from upload; other valid rows proceed.
   4. Never uploads automatically: without --approve, prints the validation/conflict table and stops with 0 writes.
      With --approve, uploads only the valid, non-conflicting rows and verifies them via readback.
+  5. --yaml FILE|DIR ...: checks ready preconfig files the same way and uploads every file that passes without --approve
+     (docs/decisions/0017: uploading is not applying). autoApply is always off; nothing here ever applies a preconfig.
 """
 import argparse
 import base64
@@ -263,6 +265,8 @@ def interface_route_warnings(doc: Dict[str, Any]) -> List[str]:
 
 def yaml_refusal(path: Path) -> Tuple[Optional[str], str, str]:
     """(refusal, detail, text) for one file; refusal None when the file is a preconfig YAML to send to /validate."""
+    if not path.exists():  # e.g. a shell glob that matched nothing arrives as a literal path
+        return "refused: no such file", "check the path or pattern", ""
     try:
         text = path.read_text(encoding="utf-8")
         doc = None if "{{" in text else parse_yaml(text)
