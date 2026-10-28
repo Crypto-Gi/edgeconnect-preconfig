@@ -594,9 +594,26 @@ def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.
     return route
 
 
+def sharing_source(ctx: Ctx) -> Optional[Dict[str, Any]]:
+    """auto_subnet.vrf of /systemInfo/system; None, ledgered not-readable, when that read failed or has another shape: not "no settings"."""
+    data = ctx.data("system-info")
+    if data is None and not any(i.get("id") == "system-info" and i.get("status") != "ok" for i in getattr(ctx.cap, "index", None) or []):
+        return {}  # not captured at all
+    auto = (data.get("auto_subnet") or {}) if isinstance(data, dict) else None
+    vrfs = (auto.get("vrf") or {}) if isinstance(auto, dict) else None
+    if not isinstance(vrfs, dict):
+        ctx.note("system-info", "not-readable", "localRoutes, segmentLocalRoutes", "the subnet-sharing read (/systemInfo/system) failed or has an unexpected shape, so subnet-sharing settings "
+                 "(advertise local LAN/WAN subnets, metric, communities, local ASN filter, route map) are not written and segments with only such settings are unknown; check them by hand")
+        return None
+    return vrfs or {}
+
+
 def subnet_sharing(ctx: Ctx, vrf: str, target: str) -> Dict[str, Any]:
     """Subnet-sharing settings of one segment from /systemInfo/system auto_subnet (verified by live apply on ECOS 9.7.1)."""
-    src = (((ctx.data("system-info") or {}).get("auto_subnet") or {}).get("vrf") or {}).get(vrf)
+    vrfs = sharing_source(ctx)
+    if vrfs is None:
+        return {}
+    src = vrfs.get(vrf)
     # ECOS 9.6.2+ keeps no trace of useSharedSubnetInfo or the OSPF-to-subnet-share redistribution fields (route maps replaced them)
     ctx.note("system-info.auto_subnet", "default-omitted", target, "useSharedSubnetInfo, redistOspfToSubnetShare, ospfRedistMetric, ospfRedistTag are legacy fields that ECOS does not store (route maps replaced them): nothing to carry, the target keeps its defaults")
     if not src:
@@ -631,8 +648,7 @@ def note_no_route_map(ctx: Ctx, vrf: str, entry: Dict[str, Any], target: str) ->
 
 def sharing_segments(ctx: Ctx) -> List[str]:
     """Segment IDs with subnet-sharing settings in /systemInfo/system auto_subnet."""
-    vrfs = ((ctx.data("system-info") or {}).get("auto_subnet") or {}).get("vrf") or {}
-    return [vrf for vrf in vrfs if ctx.segment(vrf)]
+    return [vrf for vrf in sharing_source(ctx) or {} if ctx.segment(vrf)]
 
 
 def per_segment(ctx: Ctx) -> bool:
@@ -688,6 +704,9 @@ def m_segmentLocalRoutes(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         unread = [name for vrf, name in sorted(ctx.vrfs.items()) if vrf != "0"] if raw is None else []
         if unread:  # without /subnets/all, "no segment routes" cannot be told from "segment routes not read"
             ctx.note("subnets-all-vrfs", "not-readable", "segmentLocalRoutes.routes", "the per-segment routes read (/subnets/all) could not be read, so the routes of segment(s) {} are unknown and not written; check them by hand".format(", ".join(unread)))
+        elif sharing_source(ctx) is None:  # no segment routes, but segments with subnet-sharing settings only cannot be told
+            ctx.note("system-info", "not-readable", "segmentLocalRoutes", "no non-default segment has configured routes, but the subnet-sharing read failed, so segments with "
+                     "only subnet-sharing settings are unknown and segmentLocalRoutes is not written; check them by hand")
         else:
             ctx.note("subnets-all-vrfs", "default-omitted", "segmentLocalRoutes", "0 non-default segments with configured routes or subnet-sharing settings")
         return None

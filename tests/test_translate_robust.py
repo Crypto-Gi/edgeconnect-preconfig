@@ -370,5 +370,35 @@ class NamesAndOwnershipNotGuessed(unittest.TestCase):
         self.assertNotIn("localRoutes", out)  # the routes template may set some of its fields
         self.assertEqual([e["target"] for e in ledger if e["item"] == "template-groups templates"], ["localRoutes, segmentLocalRoutes"])
 
+class SubnetSharingRead(unittest.TestCase):
+    """A failed /systemInfo/system read is not "no subnet-sharing settings": nothing is written from it and nothing claims defaults."""
+
+    def run_with(self, system_info, failed=False):
+        data = copy.deepcopy(DATA)
+        data["template-groups"][0].update(selectedTemplateNames=[])
+        data["subnets"] = {"subnets": {"entries": [{"state": dict(ROUTE)}]}}
+        data["subnets-all-vrfs"] = {"subnets": {"0": {"entries": [{"state": dict(ROUTE)}]}}}
+        if system_info is not None:
+            data["system-info"] = system_info
+        cap = FakeCap(data)
+        cap.index = [{"id": "system-info", "label": "live", "status": "error" if failed else "ok"}]
+        ledger = []
+        return build(cap, ledger), ledger
+
+    def test_a_readable_sharing_read_is_carried(self):
+        out, ledger = self.run_with({"auto_subnet": {"vrf": {"0": {"add_local_lan": True, "add_local_metric": 55}}}})
+        self.assertEqual((out["localRoutes"]["advertiseLocalLanSubnets"], out["localRoutes"]["localMetric"]), (True, 55))
+        self.assertTrue(any(e["item"] == "system-info.auto_subnet" and e["disposition"] == "default-omitted" for e in ledger))
+
+    def test_a_failed_or_malformed_sharing_read_writes_routes_only_and_says_so(self):
+        for name, (info, failed) in {"read failed": (None, True), "not an object": ("x", False), "auto_subnet not an object": ({"auto_subnet": 7}, False)}.items():
+            with self.subTest(name):
+                out, ledger = self.run_with(info, failed)
+                self.assertEqual(len(out["localRoutes"]["routes"]), 1)
+                self.assertFalse(set(out["localRoutes"]) - {"routes"})  # no sharing flag is guessed
+                self.assertTrue(any(e["item"] == "system-info" and e["disposition"] == "not-readable" and "localRoutes" in e["target"] for e in ledger))
+                self.assertFalse(any(e["disposition"] == "default-omitted" and (e["item"].startswith("system-info") or e["target"] == "segmentLocalRoutes") for e in ledger))
+                self.assertTrue(any(e["disposition"] == "not-readable" and e["target"].startswith("segmentLocalRoutes") for e in ledger))
+
 if __name__ == "__main__":
     unittest.main()
