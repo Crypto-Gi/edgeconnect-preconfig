@@ -53,6 +53,7 @@ Verified across HPE Aruba EdgeConnect Orchestrator releases `9.6.4`, `9.7.1`, an
    - **Router Advertisements (`raInfo`):** Only valid on IPv6-only LAN interfaces; `/validate` rejects `raInfo` on any IPv4 or dual-stack interface (`Cannot apply router advertisement config to IPv4 interface`).
    - **Dual-stack on VLAN subinterfaces (`vlan > 0`):** On ECOS `9.6.x`, dual-stack IPv4 + IPv6 on a VLAN subinterface (`vlan > 0`) is ignored during `/apply`.
    - **Canonical interface ordering:** `/deployment` orders `deploymentInterfaces` with `lan` interfaces before `wan` interfaces, then by base interface name and numeric VLAN ID (`lan0`, `lan0.55`, `lan0.71`, `wan0.4000`, `wan1`).
+   - An `inline-router` deployment with only WAN (or only LAN) interfaces passes `/validate`, but apply rejects the deployment step: "Must provide both LAN side and WAN side interfaces for inline router mode", and later steps that need the deployment (OSPF interfaces) fail with it (lab, 2026-10-28; not in the default templates). The deployment is still written as the source has it (no interface is invented), ledgered `unresolved`, and shown as a warning at the top of `summary.md` and in the translate output.
 2. **EdgeHA (`deploymentInfo.haConfig` & `applianceInfo.clusterProfile`):**
    - Reconstructed from `GET /haGroups`, `GET /cluster/profileMapping`, `GET /appliance`, and the auto-generated subinterfaces on `sysConfig.haIf` (`lan1.100`..`lan1.103`).
    - Exclude auto-generated `haIf` subinterfaces from `deploymentInterfaces`.

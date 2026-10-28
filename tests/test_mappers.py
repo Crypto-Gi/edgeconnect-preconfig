@@ -1589,5 +1589,48 @@ class InterfaceRouteNextHopZero(unittest.TestCase):
                 self.assertFalse([n for n in notes if n["disposition"] == "unresolved"], notes)
 
 
+class InlineRouterOneSide(unittest.TestCase):
+    """Apply rejects inline-router without both LAN and WAN interfaces ("Must provide both LAN side and WAN side interfaces for inline router
+    mode"); /validate accepts it. The deployment is still written as the source has it, with a loud warning; the build never fails on it."""
+    WAN = {"vlan": 0, "label": "1", "wanSide": True, "vrf": 0, "zone": 0, "harden": 1, "behindNAT": "none", "maxBW": {"outbound": 50000}, "version": 4, "ip": "198.51.100.10", "mask": 24, "wanNexthop": "198.51.100.1"}
+
+    def build(self, mode_ifs, inline=True, ha_if=None):
+        dep = copy.deepcopy(DEP)
+        dep["sysConfig"].update(mode="router", inline=inline)
+        if ha_if:
+            dep["sysConfig"]["haIf"] = ha_if
+        dep["sysConfig"]["ifLabels"]["wan"] = [{"id": "1", "name": "INET"}]
+        dep["modeIfs"] = mode_ifs
+        cap = FakeCap({"appliance": {"hostName": "h1", "groupId": "1.Network", "site": "S1", "networkRole": "0"}, "deployment": dep})
+        cap.folder = "fake"
+        ledger = []
+        return build(cap, ledger), ledger
+
+    def test_wan_only_router_is_written_and_warned(self):
+        from translate import summary_md
+        out, ledger = self.build([{"ifName": "wan0", "applianceIPs": [self.WAN]}])
+        self.assertEqual((out["deploymentInfo"]["deploymentMode"], [i["interfaceName"] for i in out["deploymentInfo"]["deploymentInterfaces"]]), ("inline-router", ["wan0"]))
+        gaps = [e for e in ledger if e["target"] == "deploymentInfo.deploymentMode"]
+        self.assertEqual([(e["disposition"], e["note"]) for e in gaps],
+                         [("unresolved", "inline-router with no LAN interface: the deployment step will be rejected on apply; set the deployment by hand")])
+        summary = summary_md(ledger, out, {}, "9.7.1.42046")
+        self.assertIn("**Warning: apply will fail**: inline-router with no LAN interface", summary.split("## ")[0])
+
+    LAN = {"vlan": 0, "label": "4", "wanSide": False, "vrf": 0, "zone": 0, "ip": "192.0.2.1", "mask": 24}
+
+    def warnings(self, *args, **kw):
+        return [e["note"].split(":")[0] for e in self.build(*args, **kw)[1] if e["target"] == "deploymentInfo.deploymentMode"]
+
+    def test_both_sides_no_warning(self):
+        self.assertEqual(self.warnings([{"ifName": "wan0", "applianceIPs": [self.WAN]}, {"ifName": "lan0", "applianceIPs": [self.LAN]}]), [])
+
+    def test_other_cases(self):
+        lan0 = {"ifName": "lan0", "applianceIPs": [self.LAN]}
+        self.assertEqual(self.warnings([lan0]), ["inline-router with no WAN interface"])
+        self.assertEqual(self.warnings([{"ifName": "wan0", "applianceIPs": [self.WAN]}], inline=False), [])  # router mode, not inline-router
+        self.assertEqual(self.warnings([{"ifName": "wan0", "applianceIPs": [self.WAN]}, {"ifName": "lan0", "applianceIPs": [{"vlan": 0}]}]), [])  # the LAN entry was unreadable
+        self.assertEqual(self.warnings([lan0, {"ifName": "lan1", "applianceIPs": [dict(self.WAN, vlan=4000)]}], ha_if="lan1"), [])  # EdgeHA WAN links count
+
+
 if __name__ == "__main__":
     unittest.main()

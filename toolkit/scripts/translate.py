@@ -574,6 +574,12 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_release: Optional[s
         note("deployment.modeIfs[].harden", "mapped", "deploymentInterfaces[].firewallMode", "verified: 0 All, 1 harden, 2 stateful, 3 statefulSNAT")
         note("deployment.modeIfs[] wan dhcp lease", "runtime", "", "leased address, mask and next hop of DHCP WAN interfaces are runtime state; left empty")
         note("deployment.modeIfs[].zone", "mapped", "deploymentInterfaces[].zone", "id resolved through vrfZonesMap; the zone list holds repeated names across segments")
+        # /validate accepts it, apply rejects it: "Must provide both LAN side and WAN side interfaces for inline router mode" (lab, ECOS 9.7, 2026-10-28)
+        sides = {i["interfaceType"] for i in interfaces} | {"wan" if isinstance(a, dict) and a.get("wanSide") else "lan" for a in ha_mode_entries}
+        if di["deploymentMode"] == "inline-router" and not if_failed:
+            for side in ("lan", "wan"):
+                if side not in sides:
+                    note("deployment.modeIfs", "unresolved", "deploymentInfo.deploymentMode", "inline-router with no {} interface: the deployment step will {}; set the deployment by hand".format(side.upper(), APPLY_FAILS))
     ha_groups = cap.data("ha-groups") or {}
     if ha_if and ha_mode_entries and failed_read(ctx, "ha-groups", "haConfig is not written", "deploymentInfo.haConfig"):
         ha_groups = {}
@@ -829,6 +835,13 @@ def route_label_names(value: Any) -> set:
     return set()
 
 
+APPLY_FAILS = "be rejected on apply"  # a ledger note with these words is also a warning at the top of summary.md and the translate output
+
+
+def apply_warnings(ledger: List[Dict[str, Any]]) -> List[str]:
+    return [e["note"] for e in ledger if APPLY_FAILS in e["note"]]
+
+
 def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: Dict[str, Any], release: str) -> str:
     lines = ["# Translation summary", "",
              "- Toolkit: {}. If a newer version exists, refresh it (re-run setup.sh in the install folder; it pulls main and reinstalls the skill) and translate again before reporting gaps.".format(toolkit_version()),
@@ -838,7 +851,8 @@ def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: 
     route_labels = sorted(route_label_names(reference))
     if route_labels:  # global Orchestrator objects, like segments and interface labels: /validate rejects a name the target lacks
         lines.append("- Objects the YAML names: route labels the target Orchestrator must already have: {}.".format(", ".join(route_labels)))
-    lines += ["- Default template: {} ({}).".format(e["target"], e["note"]) for e in ledger if e["item"] == "default template"] + [""]
+    lines += ["- Default template: {} ({}).".format(e["target"], e["note"]) for e in ledger if e["item"] == "default template"]
+    lines += ["- **Warning: apply will fail**: " + w for w in apply_warnings(ledger)] + [""]
     known = set().union(*(d for _, d in REPORT_GROUPS)) | QUIET
     groups = REPORT_GROUPS + [("Unknown disposition: treat as a gap", {e["disposition"] for e in ledger} - known)]
     for title, dispositions in groups:
@@ -1004,6 +1018,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         n = sum(1 for e in ledger if e["disposition"] in dispositions)
         if n:
             print("{}: {}".format(title.split(":")[0], n))
+    for warning in apply_warnings(ledger):
+        print("WARNING: apply will fail:", warning)
     print("verdict:", verdict(ledger))
     print("report from", out / "summary.md")
     print(out)
