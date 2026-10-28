@@ -229,7 +229,7 @@ def drop_template_fields(out: Dict[str, Any], owned: Dict[str, Dict[Optional[str
                  "neighbour settings in the '{}' template ({}) are still written per neighbour: not verified whether the template pushes them to every neighbour (assumption: confirm they belong per neighbour)".format(name, ", ".join(sorted(unowned))))
 
 
-def build(cap: Capture, ledger: List[Dict[str, Any]], target_release: Optional[str] = None) -> Dict[str, Any]:
+def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str] = None) -> Dict[str, Any]:
     """Every independent block reads its source in a guard: a read of an unexpected shape is ledgered (not-readable for a whole read,
     toolkit-error for one item) and skipped, never the whole translation (owner rule, docs/decisions/0015).
     A replace-on-apply list is never written short without a ledger line."""
@@ -248,7 +248,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_release: Optional[s
     dep = dep if isinstance(dep, dict) else {}
     if not app.get("hostName") or not dep.get("sysConfig") or not isinstance(dep["sysConfig"], dict):
         raise NothingToConvert("capture {!r} lacks appliance or deployment.sysConfig data (appliance may be offline with no Orchestrator cache)".format(str(cap.folder)))
-    ctx = Ctx(cap, ledger, target_release)
+    ctx = Ctx(cap, ledger, target_ecos)
     # every read below: a read that failed (failed_read) or has another shape is ledgered not-readable and nothing is written from it
     extra_what = "location, contact and the IPsec UDP port are not carried"
     extra = None if failed_read(ctx, "extra-info", extra_what, "applianceInfo") else cap.data("extra-info") or {}
@@ -930,6 +930,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--out", type=Path)
     parser.add_argument("--ignore-template-ownership", action="store_true", help="map sections even when an associated template group provides them (mapper testing only)")
     parser.add_argument("--target-release", default="9.7.1.42046", help="Orchestrator release whose preconfig format is written (default template must exist)")
+    parser.add_argument("--target-ecos", help="ECOS release of the target appliance(s), e.g. 9.6.2.1; unknown by default, which leaves out what some ECOS releases reject on apply")
     parser.add_argument("--decisions", type=Path, help="decisions.yaml: include_from_default, or the older per-section modes (default_mode, sections, extra_variable, extra_fixed)")
     parser.add_argument("--variables", type=Path, help="variables.csv as edited by the owner (decision / column per field); without it a fresh sheet is written and used")
     parser.add_argument("--compare", nargs="+", type=Path, metavar="CAPTURE", help="capture folders of other appliances of this site type: a field that differs becomes a variable, one equal everywhere stays fixed")
@@ -947,7 +948,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     cap = Capture(args.capture)
     ledger: List[Dict[str, Any]] = [{"item": "default template", "disposition": "context", "target": template.name, "note": template_why}]
     try:
-        reference = prune(build(cap, ledger, args.target_release), allowed_paths(args.target_release), ledger)
+        reference = prune(build(cap, ledger, args.target_ecos), allowed_paths(args.target_release), ledger)
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2
@@ -971,7 +972,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     order = list(default_doc)
     reference = {k: reference[k] for k in sorted(reference, key=lambda x: order.index(x) if x in order else 999)}
     try:
-        others = [] if section_modes else [prune(build(Capture(folder), [], args.target_release), allowed_paths(args.target_release), []) for folder in args.compare or []]
+        others = [] if section_modes else [prune(build(Capture(folder), [], args.target_ecos), allowed_paths(args.target_release), []) for folder in args.compare or []]
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2

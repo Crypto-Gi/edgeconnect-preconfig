@@ -1552,42 +1552,62 @@ class ManagementPorts(unittest.TestCase):
 
 
 class InterfaceRouteNextHopZero(unittest.TestCase):
-    """ECOS 9.7+ rejects on apply a route with next hop 0.0.0.0 and an interface ("Interface cannot be specified when Next Hop is 0.0.0.0");
-    ECOS 9.6.2.1 applies it. Gated on the target release; build() without one keeps writing it."""
+    """A route with next hop 0.0.0.0 and an interface: apply rejects it on ECOS 9.7.1 ("Interface cannot be specified when Next Hop is 0.0.0.0")
+    and applies it on ECOS 9.6.2.1, both under a 9.7.1 Orchestrator. The target appliance's ECOS decides (translate --target-ecos): 9.7+ and
+    unknown leave it out with a ledger line, before 9.7 keeps it. The Orchestrator release (--target-release) does not decide."""
     IFROUTE = {"state": dict(ROUTE, prefix="10.14.32.0/21", nextHop="", ifName=""), "config": {"prefix": "10.14.32.0/21", "ifName": "lan1", "nextHop": "0.0.0.0"}}
     ANY_IF = {"state": dict(ROUTE, prefix="10.15.0.0/16", nextHop="", ifName=""), "config": {"prefix": "10.15.0.0/16", "ifName": "default", "nextHop": "0.0.0.0"}}
+    KEPT = [("10.14.32.0/21", "lan1"), ("10.15.0.0/16", None), ("198.51.100.0/24", "lan0")]
+    DROPPED = [("10.15.0.0/16", None), ("198.51.100.0/24", "lan0")]
 
-    def routes(self, release):
+    def routes(self, ecos, release="9.7.1.42046"):
         notes = []
         c = Ctx(FakeCap({"deployment": DEP, "subnets": {"subnets": {"entries": [self.IFROUTE, self.ANY_IF, {"state": ROUTE}]}}}), notes)
-        c.target_release = release  # what translate --target-release sets
+        c.target_release, c.target_ecos = release, ecos  # what translate --target-release and --target-ecos set
         from mappers import m_localRoutes
-        return [(r["routeIpSubnet"], r["interfaceName"]) for r in m_localRoutes(c)["routes"]], notes
+        return [(r["routeIpSubnet"], r["interfaceName"]) for r in m_localRoutes(c)["routes"]], [n["note"] for n in notes if n["disposition"] == "unresolved"]
 
-    def test_left_out_for_97_and_later(self):
-        for release in ("9.7.1.42046", "10.0.0.40516"):
-            with self.subTest(release):
-                routes, notes = self.routes(release)
-                self.assertEqual(routes, [("10.15.0.0/16", None), ("198.51.100.0/24", "lan0")])
-                gaps = [n for n in notes if n["disposition"] == "unresolved"]
-                self.assertEqual(len(gaps), 1, notes)
-                self.assertTrue(all(w in gaps[0]["note"] for w in ("10.14.32.0/21", "lan1", "Default", "ECOS 9.7+ rejects an interface with next hop 0.0.0.0")), gaps)
+    def test_ecos_97_and_later_drops(self):
+        for ecos in ("9.7.1.0", "10.0.0.1"):
+            with self.subTest(ecos):
+                routes, gaps = self.routes(ecos, release=None)
+                self.assertEqual(routes, self.DROPPED)
+                self.assertEqual(len(gaps), 1, gaps)
+                self.assertTrue(all(w in gaps[0] for w in ("10.14.32.0/21", "lan1", "Default", "target ECOS " + ecos, "ECOS 9.7+ rejects an interface with next hop 0.0.0.0")), gaps)
 
-    def test_build_passes_the_target_release(self):
-        for release, dropped in (("9.7.1.42046", True), (None, False)):
+    def test_ecos_before_97_keeps_under_a_97_orchestrator(self):
+        routes, gaps = self.routes("9.6.2.1")
+        self.assertEqual((routes, gaps), (self.KEPT, []))
+
+    def test_unknown_ecos_drops_and_says_why(self):
+        routes, gaps = self.routes(None)
+        self.assertEqual(routes, self.DROPPED)
+        self.assertEqual(len(gaps), 1, gaps)
+        self.assertTrue(gaps[0].startswith("target appliance ECOS unknown: ECOS 9.7+ rejects an interface with next hop 0.0.0.0 (route 10.14.32.0/21 on lan1, segment Default); "
+                                           "on ECOS before 9.7 it applies as is: pass --target-ecos"), gaps)
+
+    def test_translate_passes_the_target_ecos(self):
+        import contextlib, io, translate
+        from unittest import mock
+        seen = []
+
+        def fake_build(cap, ledger, target_ecos=None):
+            seen.append(target_ecos)
+            raise translate.NothingToConvert("stop")
+        with mock.patch.object(translate, "build", side_effect=fake_build), mock.patch.object(translate, "Capture", side_effect=lambda folder: folder), \
+                contextlib.redirect_stderr(io.StringIO()):
+            translate.main(["--capture", "x", "--site-type", "t", "--target-ecos", "9.6.2.1"])
+            translate.main(["--capture", "x", "--site-type", "t"])
+        self.assertEqual(seen, ["9.6.2.1", None])
+
+    def test_build_passes_the_target_ecos(self):
+        for ecos, dropped in (("9.6.2.1", False), ("9.7.1.0", True), (None, True)):
             cap = FakeCap({"appliance": {"hostName": "h1", "groupId": "1.Network", "site": "S1", "networkRole": "0"}, "deployment": dict(copy.deepcopy(DEP), modeIfs=[]),
                            "subnets": {"subnets": {"entries": [self.IFROUTE]}}})
             cap.folder = "fake"
             ledger = []
-            build(cap, ledger, release)
-            self.assertEqual(bool([e for e in ledger if "ECOS 9.7+ rejects" in e["note"]]), dropped, release)
-
-    def test_kept_before_97_and_without_a_target(self):
-        for release in ("9.6.4.40046", None):
-            with self.subTest(release):
-                routes, notes = self.routes(release)
-                self.assertEqual(routes, [("10.14.32.0/21", "lan1"), ("10.15.0.0/16", None), ("198.51.100.0/24", "lan0")])
-                self.assertFalse([n for n in notes if n["disposition"] == "unresolved"], notes)
+            build(cap, ledger, target_ecos=ecos)
+            self.assertEqual(bool([e for e in ledger if "ECOS 9.7+ rejects" in e["note"]]), dropped, ecos)
 
 
 class InlineRouterOneSide(unittest.TestCase):

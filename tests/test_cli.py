@@ -333,6 +333,22 @@ class Build(unittest.TestCase):
             self.assertEqual(len(list(out.glob("Br_1.previous-*"))), 1)
             self.assertEqual(list(out.glob(".building-*")), [])
 
+    def test_target_ecos_reaches_translate_and_build_json(self):
+        calls = []
+
+        def translate_into(out, capture, site, release, extra):
+            calls.append(extra)
+            out.mkdir(parents=True)
+            return "verdict: Complete for preconfig."
+        with tempfile.TemporaryDirectory() as tmp, self.fake_capture(tmp), mock.patch.object(cli, "VALIDATORS", {"lab"}), \
+                mock.patch.object(cli, "translate_into", side_effect=translate_into), mock.patch.object(cli, "checked", return_value=[]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            out = Path(tmp) / "out"
+            cli.cmd_build(["--orchestrator", "lab", "--appliance", "Br 1", "--out", str(out), "--target-ecos", "9.6.2.1"])
+            self.assertEqual(json.loads((out / "Br_1" / "build.json").read_text())["target_ecos"], "9.6.2.1")
+            cli.cmd_build(["--orchestrator", "lab", "--appliance", "Br 1", "--out", str(out)])
+        self.assertEqual(calls, [["--target-ecos", "9.6.2.1"], []])
+
 
 if __name__ == "__main__":
     unittest.main()
