@@ -57,7 +57,7 @@ class Ctx:
 
     def failed(self, target: str, item: str = "") -> bool:
         """Whether an item under target (and starting with item) was ledgered as unreadable; a default-omitted note would contradict it."""
-        return any(n["disposition"] == "toolkit-error" and (n["target"] == target or n["target"].startswith(target + ".")) and n["item"].startswith(item) for n in self.notes)
+        return any(n["disposition"] in ("toolkit-error", "not-readable") and (n["target"] == target or n["target"].startswith(target + ".")) and n["item"].startswith(item) for n in self.notes)
 
     def unmapped(self, item: str, source: Dict[str, Any], used: set, target: str) -> None:
         left = sorted(k for k in source if k not in used and k not in ("gms_marked", "gmsMarked", "self"))
@@ -72,14 +72,28 @@ def vrf_dict(ctx: Ctx, ident: str, default_only: bool = True) -> Any:
 ITEM_ERRORS = (KeyError, TypeError, ValueError, AttributeError, StopIteration, IndexError)
 
 
+class Unreadable(ValueError):
+    """A capture read the item depends on was not readable: nothing can be said about the item, so it is not written."""
+
+
 def item_failed(ctx: Ctx, item: str, section: str, err: Exception) -> None:
     """One source item the mapper could not read: ledgered and skipped, so the rest of its section is still written."""
+    if isinstance(err, Unreadable):
+        ctx.note(item, "not-readable", section, "{} not written: {}; check it by hand".format(item, err))
+        return
     ctx.note(item, "toolkit-error", section, "{} not written: the mapper could not read it ({}: {}); a toolkit bug to report".format(item, type(err).__name__, err))
+
+
+def num_key(key: Any) -> Tuple[int, int, str]:
+    """Sort key for numeric ids that never raises: numbers first in numeric order, anything else after them."""
+    return (0, int(key), "") if str(key).isdecimal() else (1, 0, str(key))
 
 
 def block(data: Dict[str, Any], key: str) -> Dict[str, Any]:
     """data[key] as a dict: {} when the key is absent, an error when it is present but unreadable (null or another type), so the caller's
     per-item guard ledgers it instead of writing an empty list."""
+    if data is None:
+        raise Unreadable("the read holding {} could not be read".format(key))
     value = data.get(key, {})
     if not isinstance(value, dict):
         raise TypeError("{} is {}, not an object".format(key, type(value).__name__))
@@ -111,13 +125,16 @@ def ospf_interface(name: str, i: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def m_ospfSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
-    all_systems, all_ifs = ctx.data("ospf-system-all-vrfs") or {}, ctx.data("ospf-interfaces-all-vrfs") or {}
+    all_systems, all_ifs = ctx.data("ospf-system-all-vrfs") or {}, ctx.data("ospf-interfaces-all-vrfs")
     if any(vrf != "0" and ospf_runs(all_systems, all_ifs, vrf) for vrf in all_systems):
         ctx.note("ospf-system", "default-omitted", "ospfSystemConfig", "non-default segment OSPF exists, so Default segment OSPF is included in segmentOspfConfig (Orchestrator ignores ospfSystemConfig when segmentOspfConfig is present)")
         return None
     system, areas, ifs = ctx.data("ospf-system"), ctx.data("ospf-areas"), ctx.data("ospf-interfaces")
     if not system or (not system.get("enable") and not ifs):
         ctx.note("ospf-system", "default-omitted", "ospfSystemConfig", "OSPF disabled and no interfaces")
+        return None
+    if ifs is None:  # interfaces replace on apply: an unread list is never written as an empty one
+        ctx.note("ospf-interfaces", "not-readable", "ospfSystemConfig.interfaces", "OSPF is enabled but its interfaces could not be read, so ospfSystemConfig is not written; check it by hand")
         return None
     out: Dict[str, Any] = {"enable": system["enable"], "routerId": nul(system.get("routerId")), "redistMapToOspf": nul(system.get("redistMapToOSPF")), "opaqueEnable": system.get("opaque_enable")}
     ctx.unmapped("ospf-system", system, {"enable", "routerId", "redistMapToOSPF", "opaque_enable"}, "ospfSystemConfig")
@@ -181,7 +198,7 @@ def m_segmentBfdConfigs(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
 
 def m_customApplianceTags(ctx: Ctx) -> Optional[Dict[str, Any]]:
     source = ctx.data("custom-tags") or {}
-    ordered = sorted(source.items(), key=lambda kv: (0, int(kv[0]), "") if str(kv[0]).isdigit() else (1, 0, str(kv[0])))
+    ordered = sorted(source.items(), key=lambda kv: num_key(kv[0]))
     tags = [t for t in each(ctx, "custom-tags", "customApplianceTags", ordered, lambda k, v: {"tagId": int(k), "key": v["name"], "value": v["value"]} if v.get("name") else None) if t]
     if not tags:
         if not ctx.failed("customApplianceTags"):
@@ -248,10 +265,14 @@ BGP_NEIGHBOR_USED = {"remote_as", "type", "enable", "hold", "ka", "lcl_interface
 
 def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str, Any], segment: Optional[str] = None) -> Optional[Dict[str, Any]]:
     live = [(ip, n) for ip, n in sorted((neighbors or {}).items()) if not managed(n)]
+    if system is None and segment is not None:
+        raise Unreadable("the segment's BGP settings could not be read")
     if not system and live:  # a non-dict system that is truthy fails on .get below
-        raise TypeError("BGP system settings unreadable ({}) while {} neighbor(s) exist".format(type(system).__name__, len(live)))
+        raise Unreadable("BGP settings could not be read ({}) while {} neighbor(s) exist".format(type(system).__name__, len(live)))
     if not system or (not system.get("enable") and not live):
         return None
+    if neighbors is None:  # neighbors replace on apply: an unread list is never written as an empty one
+        raise Unreadable("BGP is enabled but its neighbors could not be read")
     rt = (system.get("route_target") or {}).get("0") or {}
     out: Dict[str, Any] = {}
     if segment is not None:
@@ -286,6 +307,8 @@ def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str,
 
 def has_bgp(ctx: Ctx, system: Dict[str, Any], neighbors: Dict[str, Any], vrf: str) -> bool:
     """Whether segment vrf runs BGP; an unreadable segment counts as yes, so the per-segment pass writes the rest and ledgers it."""
+    if system is None:
+        return True
     try:
         return bool(bgp_value(ctx, "check", system, block(neighbors, vrf)))
     except ITEM_ERRORS:
@@ -293,7 +316,7 @@ def has_bgp(ctx: Ctx, system: Dict[str, Any], neighbors: Dict[str, Any], vrf: st
 
 
 def m_bgpSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
-    systems, neighbors = ctx.data("bgp-system-all-vrfs") or {}, ctx.data("bgp-neighbors-all-vrfs") or {}
+    systems, neighbors = ctx.data("bgp-system-all-vrfs") or {}, ctx.data("bgp-neighbors-all-vrfs")
     if any(vrf != "0" and has_bgp(ctx, systems[vrf], neighbors, vrf) for vrf in systems):
         ctx.note("bgp-system, bgp-neighbors", "default-omitted", "bgpSystemConfig", "non-default segment BGP exists, so Default segment BGP is included in segmentBgpSystems (Orchestrator ignores bgpSystemConfig when segmentBgpSystems is present)")
         return None
@@ -307,7 +330,7 @@ def m_bgpSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
 
 
 def m_segmentBgpSystems(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
-    systems, neighbors = ctx.data("bgp-system-all-vrfs") or {}, ctx.data("bgp-neighbors-all-vrfs") or {}
+    systems, neighbors = ctx.data("bgp-system-all-vrfs") or {}, ctx.data("bgp-neighbors-all-vrfs")
     non_default = [vrf for vrf in sorted(systems) if vrf != "0" and has_bgp(ctx, systems[vrf], neighbors, vrf)]
     if not non_default:
         ctx.note("bgp-system-all-vrfs", "default-omitted", "segmentBgpSystems", "0 non-default segments with BGP")
@@ -387,26 +410,26 @@ def ospf_kept(system: Dict[str, Any], interfaces: Any) -> bool:
 def ospf_runs(systems: Dict[str, Any], interfaces: Dict[str, Any], vrf: str) -> bool:
     """ospf_kept for one segment; an unreadable segment counts as yes, so the per-segment pass writes the rest and ledgers it."""
     try:
-        return ospf_kept(systems[vrf], interfaces.get(vrf))
+        return ospf_kept(systems[vrf], block(interfaces, vrf))
     except ITEM_ERRORS:
         return True
 
 
 def m_segmentOspfConfig(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
-    systems, interfaces, areas = ctx.data("ospf-system-all-vrfs") or {}, ctx.data("ospf-interfaces-all-vrfs") or {}, ctx.data("ospf-areas") or {}
+    systems, interfaces, areas = ctx.data("ospf-system-all-vrfs") or {}, ctx.data("ospf-interfaces-all-vrfs"), ctx.data("ospf-areas") or {}
     runs = {vrf: ospf_runs(systems, interfaces, vrf) for vrf in systems}
     enabled = any(r for vrf, r in runs.items() if vrf != "0")
     for vrf in sorted(systems):
         s = systems[vrf] if isinstance(systems[vrf], dict) else {}
         if not runs[vrf] and (vrf != "0" or enabled):
             # ECOS fills in a router ID on disabled segments and default_rtmap_to_ospf is the default: only a map of the site's own is a setting
-            kept = ["redistMapToOSPF " + s["redistMapToOSPF"]] if s.get("redistMapToOSPF") not in (None, "", "default_rtmap_to_ospf") else []
+            kept = ["redistMapToOSPF {}".format(s["redistMapToOSPF"])] if s.get("redistMapToOSPF") not in (None, "", "default_rtmap_to_ospf") else []
             if kept:
                 ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "outside-preconfig", "segmentOspfConfig",
                          "segment {}: OSPF switched off with no interfaces, but settings are kept ({}); such a segment is not written, so the target keeps its own".format(ctx.segment(vrf), ", ".join(kept)))
             else:
                 ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "default-omitted", "segmentOspfConfig", "segment {}: OSPF disabled with no interfaces, not written".format(ctx.segment(vrf)))
-        elif runs[vrf] and s and not s.get("enable") and enabled:
+        elif runs[vrf] and s and not s.get("enable") and enabled and isinstance((interfaces or {}).get(vrf, {}), dict) and interfaces is not None:
             ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "mapped", "segmentOspfConfig", "segment {}: OSPF switched off but configured on interfaces; written with enable false".format(ctx.segment(vrf)))
     if not enabled:
         ctx.note("ospf-system-all-vrfs", "default-omitted", "segmentOspfConfig", "0 non-default segments with OSPF")
@@ -547,18 +570,25 @@ def has_routes(ctx: Ctx, block: Any, vrf: str) -> bool:
         return True
 
 
+def routes_table(ctx: Ctx, ident: str) -> Optional[Dict[str, Any]]:
+    """The "subnets" table of a routes read, or None when the read (or the table in it) could not be read."""
+    raw = ctx.data(ident)
+    table = raw.get("subnets") if isinstance(raw, dict) else None
+    return table if isinstance(table, dict) else None
+
+
 def m_localRoutes(ctx: Ctx) -> Optional[Dict[str, Any]]:
     if per_segment(ctx):
-        if ctx.data("subnets-all-vrfs") is None and ctx.data("subnets") is None:  # segmentLocalRoutes ledgers both reads as not readable
+        if routes_table(ctx, "subnets-all-vrfs") is None and routes_table(ctx, "subnets") is None:  # segmentLocalRoutes ledgers both reads as not readable
             return None
         ctx.note("subnets", "default-omitted", "localRoutes", "non-default segments have routes or subnet-sharing settings, so the Default segment is written in segmentLocalRoutes (Orchestrator ignores localRoutes when segmentLocalRoutes is present)")
         return None
-    subnets = ctx.data("subnets")
+    subnets = routes_table(ctx, "subnets")
     if subnets is None:  # routes replace on apply: writing an empty list for an unread table would remove the target's routes
         ctx.note("subnets", "not-readable", "localRoutes.routes", "the routes read (/subnets) could not be read, live or cached, so localRoutes is not written; check the site's static routes by hand")
         return None
     try:
-        routes = route_list(ctx, (subnets.get("subnets") or {}).get("entries", []), "0")
+        routes = route_list(ctx, subnets.get("entries", []), "0")
     except ITEM_ERRORS as err:
         item_failed(ctx, "subnets", "localRoutes", err)
         return None
@@ -572,8 +602,8 @@ def m_localRoutes(ctx: Ctx) -> Optional[Dict[str, Any]]:
 
 
 def m_segmentLocalRoutes(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
-    raw = ctx.data("subnets-all-vrfs")
-    data = (raw or {}).get("subnets") or {}
+    raw = routes_table(ctx, "subnets-all-vrfs")
+    data = raw or {}
     if not per_segment(ctx):
         unread = [name for vrf, name in sorted(ctx.vrfs.items()) if vrf != "0"] if raw is None else []
         if unread:  # without /subnets/all, "no segment routes" cannot be told from "segment routes not read"
@@ -583,8 +613,8 @@ def m_segmentLocalRoutes(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         return None
     source = "subnets-all-vrfs"
     if raw is None:  # routes replace on apply: a segment whose routes were not read is left out, never written with an empty list
-        default = ctx.data("subnets")  # the Default segment's configured routes, the same table localRoutes reads
-        data = {"0": default.get("subnets") or {}} if default is not None else {}
+        default = routes_table(ctx, "subnets")  # the Default segment's configured routes, the same table localRoutes reads
+        data = {"0": default} if default is not None else {}
         unread = [ctx.segment(v) or v for v in sorted(sharing_segments(ctx)) if v not in data]
         ctx.note("subnets-all-vrfs", "not-readable", "segmentLocalRoutes.routes", "the per-segment routes read (/subnets/all) could not be read, so the routes of segment(s) {} are unknown and those segments are not written{}; check them by hand".format(
             ", ".join(unread) or "-", "; Default routes come from /subnets" if default is not None else ""))
@@ -923,7 +953,7 @@ def m_vxlan(ctx: Ctx) -> Optional[Dict[str, Any]]:
     seg_map = ctx.data("vxlan-vni-map") or {}
     if isinstance(live, dict) and live.get("vtepIf") and isinstance(seg_map, dict):
         maps = []
-        for seg_id, v in sorted(seg_map.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else str(kv[0])):
+        for seg_id, v in sorted(seg_map.items(), key=lambda kv: num_key(kv[0])):
             vni_val = (v or {}).get("vni")
             if str(vni_val) in ("None", "", "0", "-1", "4294967295"):
                 continue
@@ -941,7 +971,7 @@ def m_vxlan(ctx: Ctx) -> Optional[Dict[str, Any]]:
     if not vtep:
         dormant = ["{} {}".format(ctx.segment(k) or k, v.get("vni")) for k, v in sorted(seg_map.items(), key=lambda kv: str(kv[0]))
                    if isinstance(v, dict) and str(v.get("vni")) not in ("None", "", "0", "-1", "4294967295")] if isinstance(seg_map, dict) else []
-        if dormant and ctx.data("running-config") is None:
+        if dormant and ctx.data("running-config") is None and not (isinstance(live, dict) and "vtepIf" in live):
             ctx.note("vxlan-vni-map", "not-readable", "vxlan", "VNI maps ({}), but the VTEP interface could not be read (no /vxlan and no running-config), so they are not written; check by hand".format(", ".join(dormant)))
         elif dormant:  # vtepSrcInterface is required by the format, so the maps cannot be written on their own
             ctx.note("vxlan-vni-map", "outside-preconfig", "vxlan", "VNI maps ({}) but no VTEP interface: the format requires vtepSrcInterface, so they are not written; the target keeps its own".format(", ".join(dormant)))
@@ -1127,7 +1157,7 @@ def m_branchNatMapsConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     for map_name, mp in data.items() if isinstance(data, dict) else []:
         if not isinstance(mp, dict):  # names only ({"map1": "map1"}): the map is left with no rules (references/lessons.md)
             continue
-        for prio, e in sorted((mp.get("prio") or {}).items(), key=lambda kv: (0, int(kv[0]), "") if str(kv[0]).isdigit() else (1, 0, str(kv[0]))):
+        for prio, e in sorted((mp.get("prio") or {}).items(), key=lambda kv: num_key(kv[0])):
             try:
                 if managed(e):
                     continue
@@ -1166,6 +1196,8 @@ def m_branchNatMapsConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     names_only = sorted(k for k, v in data.items() if not isinstance(v, dict)) if isinstance(data, dict) else []
     if not rules and names_only:  # owner ruling, docs/decisions/0004: names-only means no rules
         ctx.note("branch-nat-maps", "default-omitted", "branchNatMapsConfig", "no branch NAT rules configured (/nat/maps lists map {} by name only, with no rules)".format(", ".join(names_only)))
+        return None
+    if not rules and ctx.failed("branchNatMapsConfig"):
         return None
     if not rules:
         ctx.note("branch-nat-maps", "default-omitted", "branchNatMapsConfig", "no branch NAT rules configured in /nat/maps")

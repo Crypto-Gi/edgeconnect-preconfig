@@ -555,7 +555,7 @@ class AuditRegressions(unittest.TestCase):
     def test_disabled_ospf_segment_is_ledgered_when_no_segment_runs_ospf(self):
         from mappers import m_segmentOspfConfig
         dep = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}]), "modeIfs": DEP["modeIfs"]}
-        c, notes = ctx({"deployment": dep, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": False, "routerId": "192.0.2.1"}}})
+        c, notes = ctx({"deployment": dep, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": False, "routerId": "192.0.2.1"}}, "ospf-interfaces-all-vrfs": {}})
         self.assertIsNone(m_segmentOspfConfig(c))
         self.assertTrue(any(n["item"] == "ospf-system-all-vrfs[1]" and "corp" in n["note"] for n in notes))
 
@@ -825,7 +825,7 @@ class ItemIsolation(IsolationCheck, unittest.TestCase):
         from mappers import m_segmentBgpSystems
         dep = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}, {"id": "2", "name": "guest"}]), "modeIfs": DEP["modeIfs"]}
         systems = {"0": {"enable": True, "asn": 65000}, "1": {"enable": True, "asn": 65000}, "2": {"enable": True}}
-        self.check(m_segmentBgpSystems, {"deployment": dep, "bgp-system-all-vrfs": systems}, lambda o: [e["segment"] for e in o], ["Default", "corp"], "segmentBgpSystems")
+        self.check(m_segmentBgpSystems, {"deployment": dep, "bgp-system-all-vrfs": systems, "bgp-neighbors-all-vrfs": {}}, lambda o: [e["segment"] for e in o], ["Default", "corp"], "segmentBgpSystems")
 
     def test_bfd_segment(self):
         from mappers import m_segmentBfdConfigs
@@ -980,7 +980,7 @@ class LedgerAccuracy(unittest.TestCase):
         from mappers import m_segmentBfdConfigs, m_customApplianceTags
         for mapper, data in ((m_segmentBfdConfigs, {"deployment": DEP, "bfd-vrfs": {"0": {"enable": True}}}),
                              (m_customApplianceTags, {"custom-tags": {"1": {"name": "site"}}}),
-                             (m_segmentBgpSystems, {"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": {"enable": True, "asn": 1}, "2": {"enable": True}}})):
+                             (m_segmentBgpSystems, {"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": {"enable": True, "asn": 1}, "2": {"enable": True}}, "bgp-neighbors-all-vrfs": {}})):
             with self.subTest(mapper.__name__):
                 c, notes = ctx(data)
                 mapper(c)
@@ -1082,7 +1082,7 @@ class ReviewRoundTwo(unittest.TestCase):
     def test_null_segment_bgp_system_with_neighbors(self):
         c, notes = ctx({"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": None}, "bgp-neighbors-all-vrfs": {"1": {"192.0.2.1": NEIGHBOR}}})
         m_segmentBgpSystems(c)
-        self.assertTrue(errors(notes))
+        self.assertEqual([(n["item"], n["disposition"]) for n in notes if n["item"] == "bgp-system-all-vrfs[1]"], [("bgp-system-all-vrfs[1]", "not-readable")])
         self.assertFalse([n for n in notes if n["disposition"] == "default-omitted" and "0 non-default" in n["note"]])
 
     def test_default_ospf_values_are_not_kept_settings(self):
@@ -1142,6 +1142,88 @@ class ReviewRoundTwo(unittest.TestCase):
     def test_empty_multicast_list_kept(self):
         c, notes = ctx({"deployment": DEP, "multicast-config": []})
         self.assertEqual(m_multicast(c), [])
+
+
+
+class ReviewRoundThree(unittest.TestCase):
+    """Third independent review: reads that could not be done are never "nothing configured", and never an empty list."""
+
+    def unreadable(self, notes, item):
+        return [n for n in notes if n["item"].startswith(item) and n["disposition"] == "not-readable"]
+
+    def test_disabled_ospf_segment_with_null_interfaces(self):
+        data = {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}, "2": {"enable": False}},
+                "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF}, "1": {"lan0.71": OSPF_IF}, "2": None}}
+        c, notes = ctx(data)
+        self.assertEqual([e["segment"] for e in m_segmentOspfConfig(c)], ["Default", "corp"])
+        self.assertTrue([n for n in errors(notes) + self.unreadable(notes, "ospf") if n["item"] == "ospf-system-all-vrfs[2]"], notes)
+        self.assertFalse([n for n in notes if n["item"] == "ospf-system-all-vrfs[2]" and n["disposition"] in ("default-omitted", "mapped")])
+
+    def test_vni_maps_when_vxlan_says_no_vtep(self):
+        from mappers import m_vxlan
+        c, notes = ctx({"deployment": DEP3, "vxlan": {"port": 4789, "vtepIf": ""}, "vxlan-vni-map": {"1": {"vni": 100}}})
+        m_vxlan(c)
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "vxlan-vni-map"], ["outside-preconfig"])
+
+    def test_non_string_ospf_map_on_disabled_segment(self):
+        data = {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}, "2": {"enable": False, "redistMapToOSPF": 5}},
+                "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF}, "1": {"lan0.71": OSPF_IF}}}
+        c, notes = ctx(data)
+        self.assertEqual([e["segment"] for e in m_segmentOspfConfig(c)], ["Default", "corp"])
+
+    def test_digit_like_keys_fail_alone(self):
+        from mappers import m_customApplianceTags
+        c, notes = ctx({"custom-tags": {"1": {"name": "site", "value": "a"}, "²": {"name": "r", "value": "b"}}})
+        self.assertEqual([t["key"] for t in m_customApplianceTags(c)["customApplianceTagsInterfaces"]], ["site"])
+        maps = {"map1": {"prio": {"10": {"dir": "outbound", "match": {"intf": "lan0"}, "set": {}}, "²": {"dir": "outbound", "match": {}, "set": {}}}}}
+        c, notes = ctx({"deployment": DEP, "branch-nat-maps": maps})
+        self.assertEqual([r["priorityLevel"] for r in m_branchNatMapsConfig(c)["branchNatRules"]], [10])
+
+    def test_branch_nat_all_failed_no_none_configured_note(self):
+        c, notes = ctx({"deployment": DEP, "branch-nat-maps": {"map1": {"prio": {"x": {"match": {}}}}}})
+        self.assertIsNone(m_branchNatMapsConfig(c))
+        self.assertTrue(errors(notes))
+        self.assertFalse([n for n in notes if n["disposition"] == "default-omitted" and n["target"] == "branchNatMapsConfig"])
+
+    def test_routes_read_without_a_table(self):
+        from mappers import m_localRoutes, m_segmentLocalRoutes
+        for table in (None, "unexpected"):
+            data = {"deployment": DEP3, "subnets-all-vrfs": {"subnets": table}, "subnets": {"subnets": {"entries": [{"state": ROUTE}]}},
+                    "system-info": {"auto_subnet": {"vrf": {"0": SHARING, "1": SHARING}}}}
+            c, notes = ctx(data)
+            out = m_segmentLocalRoutes(c)
+            self.assertEqual([(e["segment"], [r["routeIpSubnet"] for r in e["routes"]]) for e in out], [("Default", ["198.51.100.0/24"])])
+            self.assertTrue(self.unreadable(notes, "subnets-all-vrfs"))
+        c, notes = ctx({"deployment": DEP, "subnets": {"subnets": None}, "system-info": {"auto_subnet": {"vrf": {"0": SHARING}}}})
+        self.assertIsNone(m_localRoutes(c))
+        self.assertTrue(self.unreadable(notes, "subnets"))
+
+    def test_unreadable_neighbor_and_interface_reads(self):
+        from mappers import m_ospfSystemConfig
+        cases = [
+            (m_segmentBgpSystems, {"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": {"enable": True, "asn": 2}}}, "neighbors"),
+            (m_bgpSystemConfig, {"deployment": DEP, "bgp-system": {"enable": True, "asn": 1}}, "neighbors"),
+            (m_segmentOspfConfig, {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}}}, "interfaces"),
+            (m_ospfSystemConfig, {"deployment": DEP, "ospf-system": {"enable": True}, "ospf-areas": {}}, "interfaces"),
+        ]
+        for mapper, data, key in cases:
+            with self.subTest(mapper.__name__):
+                c, notes = ctx(data)
+                out = mapper(c)
+                entries = out if isinstance(out, list) else [out] if out else []
+                self.assertEqual([e for e in entries if e.get(key) == []], [], out)
+                self.assertTrue([n for n in notes if n["disposition"] == "not-readable"], notes)
+
+    def test_null_segment_bgp_settings(self):
+        c, notes = ctx({"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": None}, "bgp-neighbors-all-vrfs": {}})
+        m_segmentBgpSystems(c)
+        self.assertTrue(self.unreadable(notes, "bgp-system-all-vrfs[1]"), notes)
+        self.assertFalse([n for n in notes if n["disposition"] == "default-omitted" and "corp" in n["note"]])
+
+    def test_default_bgp_settings_unread_with_neighbors(self):
+        c, notes = ctx({"deployment": DEP, "bgp-neighbors": {"192.0.2.1": NEIGHBOR}})
+        self.assertIsNone(m_bgpSystemConfig(c))
+        self.assertTrue(self.unreadable(notes, "bgp-system"), notes)
 
 
 if __name__ == "__main__":
