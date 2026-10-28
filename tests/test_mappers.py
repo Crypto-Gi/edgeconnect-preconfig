@@ -1436,5 +1436,47 @@ class SegmentNeverNull(unittest.TestCase):
                 self.unresolved(notes)
 
 
+class DhcpRemotePoolOptions(unittest.TestCase):
+    """Remote pool options: the API returns each option's value without its code; the code is the key of the stored backup's
+    /cn/dhcpd/config/subnet/<pool>/dhcp_options/<code> line, so an option is written only when the backup names its code."""
+    POOL = {"subnet": "192.168.8.0/24", "scopeName": "GUEST", "ipRange": [], "gatewayIp": "192.168.8.1", "dnsServers": [], "ntpServers": [], "netbiosNameServers": [],
+            "netbiosNodeType": "B", "maxLeaseTime": 600, "defaultLeaseTime": 60, "options": [{"value": "255.255.255.255"}, {"value": "192.0.2.7"}]}
+    CLI = ("internal set modify - /cn/dhcpd/config/subnet/192.168.8.0\\\\/24/dhcp_options/42 value uint8 42\n"
+           "internal set modify - /cn/dhcpd/config/subnet/192.168.8.0\\\\/24/dhcp_options/42/value value string 192.0.2.7\n"
+           "internal set modify - /cn/dhcpd/config/subnet/192.168.8.0\\\\/24/dhcp_options/1 value uint8 1\n"
+           "internal set modify - /cn/dhcpd/config/subnet/192.168.8.0\\\\/24/dhcp_options/1/value value string 255.255.255.255\n"
+           "internal set modify - /cn/dhcpd/config/subnet/10.9.9.0\\\\/24/dhcp_options/3/value value string 192.0.2.7\n")
+
+    def test_codes_from_the_stored_backup(self):
+        c, notes = ctx({"dhcp-remote-subnets": [self.POOL], "running-config": {"runningConfig": self.CLI}})
+        self.assertEqual(m_dhcpRemoteAddressPoolConfig(c).get("options"), [{"option": 1, "value": "255.255.255.255"}, {"option": 42, "value": "192.0.2.7"}])
+        self.assertFalse([n for n in notes if n["disposition"] in ("unresolved", "unmapped-source-key")], notes)
+
+    def test_no_code_is_never_guessed(self):
+        for name, rc in (("no backup", None), ("backup without the pool's options", {"runningConfig": self.CLI.replace("192.168.8.0", "10.8.8.0")}),
+                         ("backup with other values", {"runningConfig": self.CLI.replace("192.0.2.7", "192.0.2.8")})):
+            with self.subTest(name):
+                c, notes = ctx({"dhcp-remote-subnets": [self.POOL], "running-config": rc})
+                out = m_dhcpRemoteAddressPoolConfig(c)
+                self.assertEqual(out["dhcpAddressMask"], "192.168.8.0/24")
+                self.assertNotIn("options", out)
+                gaps = [n["note"] for n in notes if n["disposition"] == "unresolved" and n["target"] == "dhcpRemoteAddressPoolConfig.options"]
+                self.assertEqual(len(gaps), 2, notes)
+                self.assertTrue("255.255.255.255" in gaps[0] and "192.0.2.7" in gaps[1], gaps)
+
+    def test_the_written_pool_mixed_codes_and_spaces(self):
+        cli = self.CLI + ("internal set modify - /cn/dhcpd/config/subnet/192.168.9.0\\\\/24/dhcp_options/15/value value string corp.example lab.example\n")
+        first = dict(self.POOL, options=[{"option": 1, "value": "255.255.255.255"}, {"value": "192.0.2.7"}])
+        second = dict(self.POOL, subnet="192.168.9.0/24", options=[{"value": "corp.example lab.example"}])
+        c, _ = ctx({"dhcp-remote-subnets": [first], "running-config": {"runningConfig": cli}})
+        self.assertEqual(m_dhcpRemoteAddressPoolConfig(c).get("options"), [{"option": 1, "value": "255.255.255.255"}, {"option": 42, "value": "192.0.2.7"}])
+        c, _ = ctx({"dhcp-remote-subnets": [first, second], "running-config": {"runningConfig": cli}})
+        self.assertEqual(m_dhcpRemoteAddressPoolConfig(c).get("options"), [{"option": 15, "value": "corp.example lab.example"}])  # the latest pool is the one written
+
+    def test_an_option_with_its_code_is_written_as_is(self):
+        c, notes = ctx({"dhcp-remote-subnets": [dict(self.POOL, options=[{"option": 6, "value": "192.0.2.53"}])]})
+        self.assertEqual(m_dhcpRemoteAddressPoolConfig(c).get("options"), [{"option": 6, "value": "192.0.2.53"}])
+
+
 if __name__ == "__main__":
     unittest.main()

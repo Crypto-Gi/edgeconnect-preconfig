@@ -814,12 +814,32 @@ def m_dhcpRemoteAddressPoolConfig(ctx: Ctx) -> Optional[Any]:
         return None
     pools = [{"dhcpAddressMask": p["subnet"], "scopeName": nul(p.get("scopeName")), "ipRange": p["ipRange"], "gatewayIp": p["gatewayIp"], "dnsServers": p["dnsServers"], "ntpServers": p["ntpServers"],
               "netbiosNameServers": p["netbiosNameServers"], "netbiosNodeType": p["netbiosNodeType"], "maxLeaseTime": p["maxLeaseTime"], "defaultLeaseTime": p["defaultLeaseTime"]} for p in source]
+    options = pool_options(ctx, source[-1])
+    if options:
+        pools[-1]["options"] = options
     for p in source:
-        ctx.unmapped("dhcp-remote-subnets", p, {"interface", "subnet", "scopeName", "ipRange", "gatewayIp", "dnsServers", "ntpServers", "netbiosNameServers", "netbiosNodeType", "maxLeaseTime", "defaultLeaseTime", "failover"}, "dhcpRemoteAddressPoolConfig")
+        ctx.unmapped("dhcp-remote-subnets", p, {"interface", "subnet", "scopeName", "ipRange", "gatewayIp", "dnsServers", "ntpServers", "netbiosNameServers", "netbiosNodeType", "maxLeaseTime", "defaultLeaseTime", "failover", "options"}, "dhcpRemoteAddressPoolConfig")
     ctx.note("dhcp-remote-subnets", "mapped", "dhcpRemoteAddressPoolConfig", "latest of {} remote pool(s)".format(len(pools)))
     if len(pools) > 1:
         ctx.note("dhcp-remote-subnets", "unresolved", "dhcpRemoteAddressPoolConfig", "{} more pool(s) not written: the validator rejects a list here (YAML format incorrect), so the preconfig holds one pool".format(len(pools) - 1))
     return pools[-1]
+
+
+def pool_options(ctx: Ctx, pool: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """[{option, value}] of a remote pool. The API returns each option's value without its code (ECOS 9.7); the code is the key of the stored
+    backup's /cn/dhcpd/config/subnet/<pool>/dhcp_options/<code> line, used only when the backup holds exactly the pool's option values."""
+    src = pool.get("options") or []
+    if all("option" in o for o in src):
+        return [{"option": int(o["option"]), "value": o["value"]} for o in src]
+    found = (re.match(r"^internal set modify - /cn/dhcpd/config/subnet/(\S+)/dhcp_options/(\d+)/value value string (.*)$", l) for l in cli_lines(ctx))
+    codes = sorted((int(m.group(2)), re.sub(r'^"(.*)"$', r"\1", m.group(3))) for m in found if m and m.group(1).replace("\\", "") == pool["subnet"])
+    if sorted(v for _, v in codes) == sorted(str(o["value"]) for o in src):
+        cli_note(ctx, "dhcpRemoteAddressPoolConfig.options", "DHCP option codes of pool {}".format(pool["subnet"]))
+        return [{"option": code, "value": value} for code, value in codes]
+    for o in src:
+        ctx.note("dhcp-remote-subnets", "unresolved", "dhcpRemoteAddressPoolConfig.options", "pool {} option value {!r}: the API returns no option code and the stored backup does not hold "
+                 "this pool's option values, so the pool's options are not written; set them by hand".format(pool["subnet"], o["value"]))
+    return []
 
 
 def m_interfaceConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
