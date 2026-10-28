@@ -31,8 +31,23 @@ _PEM = re.compile(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", re.S)
 _CRYPT = re.compile(r"\$(1|2[aby]?|5|6|y)\$[./A-Za-z0-9$]{8,}")
 # [ \t]: a keyword with an empty value must not reach across the line break and redact the next line's first word
 _CLI_SECRET = re.compile(r"(?im)(\b(?:password|passwd|secret|psk|pre-shared-key|passphrase|auth-key|authentication-key|md5|api-key|token)\b[ \t]+(?:\d[ \t]+)?)(?![:=])(\S+)")  # "password = x" is free text, below
-# free text (banners, comments, JSON in CLI lines): "pass: x", "password = x", "PW: x", "\"password\":\"x\""; the ':' or '=' keeps "pass-through"
-_TEXT_SECRET = re.compile(r"(?i)(\b(?:pass(?:word|wd|code|phrase)?|pwd|pw)(?:\\?\")?[ \t]*[:=][ \t]*(?:\\?\")?)([^\s\\\",}]+)")  # also "password":"x" in JSON text
+# free text (banners, comments, JSON in CLI lines): "pass: x", "secret = x", "\"password\":\"x\"". The ':' or '=' keeps
+# "pass-through" and "token-lifetime" untouched. A quoted value is taken up to its closing quote; a bare value after a quoted JSON key
+# ends at ',' or '}'; other free text ends at whitespace, a quote or a backslash. null/true/false are not secrets.
+_TEXT_KEY = r"(?<!<)\b(?:pass(?:word|wd|code|phrase)?|pwd|pw|secret|psk|pre-shared-key|auth-key|authentication-key|api-key|token)"
+_TEXT_QUOTED = re.compile(r"(?i)(" + _TEXT_KEY + r"(?:\\?\")?[ \t]*[:=][ \t]*(\\?\"))(.+?)(\2)")
+_TEXT_JSON_BARE = re.compile(r"(?i)(" + _TEXT_KEY + r"\\?\"[ \t]*:[ \t]*)([^\s\\\",}]+)")
+_TEXT_FREE = re.compile(r"(?i)(" + _TEXT_KEY + r"[ \t]*[:=][ \t]*)([^\s\\\"]+)")
+_NOT_SECRET = ("null", "true", "false")
+
+
+def _redact_text(text: str) -> str:
+    keep = lambda v: v.startswith("<SECRET:") or v.lower() in _NOT_SECRET
+    text = _TEXT_QUOTED.sub(lambda m: m.group(0) if keep(m.group(3)) else m.group(1) + "<SECRET:text>" + m.group(4), text)
+    text = _TEXT_JSON_BARE.sub(lambda m: m.group(0) if keep(m.group(2)) else m.group(1) + "<SECRET:text>", text)
+    return _TEXT_FREE.sub(lambda m: m.group(0) if keep(m.group(2)) else m.group(1) + "<SECRET:text>", text)
+
+
 _SERIAL_HEX = re.compile(r"^[0-9A-F]{12}$")
 
 
@@ -372,7 +387,7 @@ def redact_secrets(value: Any, path: str = "$") -> Tuple[Any, List[str]]:
                 found.append(where)
                 return "<SECRET:{}>".format(where)
             text = _CLI_SECRET.sub(lambda m: m.group(1) + "<SECRET:text>", _CRYPT.sub("<SECRET:hash>", _PEM.sub("<SECRET:pem>", item)))
-            text = _TEXT_SECRET.sub(lambda m: m.group(1) + "<SECRET:text>" if not m.group(2).startswith("<SECRET:") else m.group(0), text)
+            text = _redact_text(text)
             if text != item:
                 found.append(where)
             return text

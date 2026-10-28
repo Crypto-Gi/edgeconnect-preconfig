@@ -192,6 +192,22 @@ class RedactTest(unittest.TestCase):
         out, _ = redact_secrets({"note": '{"pwd":12345,"next":1}'})  # an unquoted value ends at the next JSON delimiter
         self.assertEqual(out["note"], '{"pwd":<SECRET:text>,"next":1}')
 
+    def test_free_text_credentials_whole_value(self):
+        cases = {
+            "password: ab,cd": "password: <SECRET:text>",
+            "pass: x,y}z": "pass: <SECRET:text>",
+            '{"password":"a,b c","x":1}': '{"password":"<SECRET:text>","x":1}',
+            '{"password":null,"pw":true}': '{"password":null,"pw":true}',
+            "secret = Alpha1x": "secret = <SECRET:text>",
+            "set psk = Bravo2x": "set psk = <SECRET:text>",
+            "token=Charlie3x api-key: Delta4x": "token=<SECRET:text> api-key: <SECRET:text>",
+            "pre-shared-key = Echo5x": "pre-shared-key = <SECRET:text>",
+            'x "{\\"password\\":\\"ab"cd\\"}"': 'x "{\\"password\\":\\"<SECRET:text>\\"}"',  # an escaped-quoted value ends at the escaped quote
+        }
+        for text, want in cases.items():
+            with self.subTest(text):
+                self.assertEqual(redact_secrets({"t": text})[0]["t"], want)
+
     def test_nac_server_key_is_secret_but_tag_key_is_not(self):
         out, paths = redact_secrets({"nac": {"server": [{"host": "192.0.2.5", "authport": 1812, "key": "radius-shared"}]},
                                      "tags": [{"key": "site", "value": "a"}]})
