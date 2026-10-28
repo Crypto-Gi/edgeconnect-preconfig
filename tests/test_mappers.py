@@ -820,3 +820,25 @@ class ItemIsolation(unittest.TestCase):
         data = {"deployment": dep, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}, "2": {"enable": True}},
                 "ospf-interfaces-all-vrfs": {"0": {"lan0": iface}, "1": {"lan0.71": iface}, "2": {"lan0.72": {"area": "0.0.0.0"}}}}
         self.check(m_segmentOspfConfig, data, lambda o: [e["segment"] for e in o], ["Default", "corp"], "segmentOspfConfig")
+
+    def test_bgp_segment(self):
+        from mappers import m_segmentBgpSystems
+        dep = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}, {"id": "2", "name": "guest"}]), "modeIfs": DEP["modeIfs"]}
+        systems = {"0": {"enable": True, "asn": 65000}, "1": {"enable": True, "asn": 65000}, "2": {"enable": True}}
+        self.check(m_segmentBgpSystems, {"deployment": dep, "bgp-system-all-vrfs": systems}, lambda o: [e["segment"] for e in o], ["Default", "corp"], "segmentBgpSystems")
+
+    def test_bfd_segment(self):
+        from mappers import m_segmentBfdConfigs
+        bfd = {"0": {"enable": True, "minRxInterval": 300, "minTxInterval": 300, "detectMultiplier": 3}, "1": {"enable": True}}
+        self.check(m_segmentBfdConfigs, {"deployment": DEP, "bfd-vrfs": bfd}, lambda o: [e["segment"] for e in o], ["Default"], "segmentBfdConfigs")
+
+    def test_custom_tag(self):
+        from mappers import m_customApplianceTags
+        self.check(m_customApplianceTags, {"custom-tags": {"1": {"name": "site", "value": "a"}, "2": {"name": "region"}}}, lambda o: [t["key"] for t in o["customApplianceTagsInterfaces"]], ["site"], "customApplianceTags")
+
+    def test_multicast_segment(self):
+        from mappers import m_multicast
+        good = {"vrf_id": 0, "rp": "192.0.2.9", "pim": {}, "igmp": {}, "filter_name": None}
+        bad = {"vrf_id": 1, "pim": "unexpected"}
+        data = {"deployment": DEP, "multicast-config": [good, bad], "multicast-enable": [{"vrf_id": 0, "enable": True}]}
+        self.check(m_multicast, data, lambda o: [e["segment"] for e in o], ["Default"], "multicast")

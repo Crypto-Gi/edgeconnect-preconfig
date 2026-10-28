@@ -247,9 +247,17 @@ def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str,
     return out
 
 
+def has_bgp(ctx: Ctx, system: Dict[str, Any], neighbors: Dict[str, Any]) -> bool:
+    """Whether a segment runs BGP; an unreadable segment counts as yes, so the per-segment pass writes the rest and ledgers it."""
+    try:
+        return bool(bgp_value(ctx, "check", system, neighbors))
+    except ITEM_ERRORS:
+        return True
+
+
 def m_bgpSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     systems, neighbors = ctx.data("bgp-system-all-vrfs") or {}, ctx.data("bgp-neighbors-all-vrfs") or {}
-    if any(vrf != "0" and bgp_value(ctx, "check", systems[vrf], neighbors.get(vrf, {})) for vrf in systems):
+    if any(vrf != "0" and has_bgp(ctx, systems[vrf], neighbors.get(vrf, {})) for vrf in systems):
         ctx.note("bgp-system, bgp-neighbors", "default-omitted", "bgpSystemConfig", "non-default segment BGP exists, so Default segment BGP is included in segmentBgpSystems (Orchestrator ignores bgpSystemConfig when segmentBgpSystems is present)")
         return None
     out = bgp_value(ctx, "bgp-system", ctx.data("bgp-system"), ctx.data("bgp-neighbors"))
@@ -259,7 +267,7 @@ def m_bgpSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
 
 def m_segmentBgpSystems(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     systems, neighbors = ctx.data("bgp-system-all-vrfs") or {}, ctx.data("bgp-neighbors-all-vrfs") or {}
-    non_default = [vrf for vrf in sorted(systems) if vrf != "0" and bgp_value(ctx, "check", systems[vrf], neighbors.get(vrf, {}))]
+    non_default = [vrf for vrf in sorted(systems) if vrf != "0" and has_bgp(ctx, systems[vrf], neighbors.get(vrf, {}))]
     if not non_default:
         ctx.note("bgp-system-all-vrfs", "default-omitted", "segmentBgpSystems", "0 non-default segments with BGP")
         return None
