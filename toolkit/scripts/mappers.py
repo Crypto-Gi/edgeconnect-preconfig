@@ -103,9 +103,14 @@ class Ctx:
             cli_note(self, target, "route label names from /cn/rtlabels")
         return name
 
-    def segment(self, vrf: Any) -> Optional[str]:
+    def segment(self, vrf: Any, strict: bool = True) -> Optional[str]:
+        """Segment name of a vrf id. strict (for written values): an id that names no segment raises Unresolved, since a null segment
+        applies to the Default segment; strict=False gives None, for ledger text only."""
         self.readable("vrfs")
-        return self.vrfs.get(str(vrf))
+        name = self.vrfs.get(str(vrf))
+        if name is None and strict:
+            raise Unresolved("vrf id {} names no segment".format(vrf))
+        return name
 
     def zone(self, vrf: Any, zone: Any) -> Optional[str]:
         self.readable("vrfZonesMap")
@@ -118,7 +123,7 @@ class Ctx:
 
     def failed(self, target: str, item: str = "") -> bool:
         """Whether an item under target (and starting with item) was ledgered as unreadable; a default-omitted note would contradict it."""
-        return any(n["disposition"] in ("toolkit-error", "not-readable") and (n["target"] == target or n["target"].startswith(target + ".")) and n["item"].startswith(item) for n in self.notes)
+        return any(n["disposition"] in ("toolkit-error", "not-readable", "unresolved") and (n["target"] == target or n["target"].startswith(target + ".")) and n["item"].startswith(item) for n in self.notes)
 
     def unmapped(self, item: str, source: Dict[str, Any], used: set, target: str) -> None:
         left = sorted(k for k in source if k not in used and k not in ("gms_marked", "gmsMarked", "self"))
@@ -137,10 +142,17 @@ class Unreadable(ValueError):
     """A capture read the item depends on was not readable: nothing can be said about the item, so it is not written."""
 
 
+class Unresolved(ValueError):
+    """An id in the item names nothing the capture knows (a vrf id of a deleted segment): the item is not written, never with a null name."""
+
+
 def item_failed(ctx: Ctx, item: str, section: str, err: Exception) -> None:
     """One source item the mapper could not read: ledgered and skipped, so the rest of its section is still written."""
     if isinstance(err, Unreadable):
         ctx.note(item, "not-readable", section, "{} not written: {}; check it by hand".format(item, err))
+        return
+    if isinstance(err, Unresolved):
+        ctx.note(item, "unresolved", section, "{} not written: {}; set it by hand if it is still wanted".format(item, err))
         return
     ctx.note(item, "toolkit-error", section, "{} not written: the mapper could not read it ({}: {}); a toolkit bug to report".format(item, type(err).__name__, err))
 
@@ -370,9 +382,10 @@ def m_secureWebServicesConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
 BGP_NEIGHBOR_USED = {"remote_as", "type", "enable", "hold", "ka", "lcl_interface", "next_hop_self", "password", "rtmap_inbound", "rtmap_outbound", "evpn", "bfd_desired", "directly_connected", "store_received_routes"}
 
 
-def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str, Any], segment: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str, Any], vrf: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """BGP of the Default segment, or with vrf of that segment (segmentBgpSystems)."""
     live = [(ip, n) for ip, n in sorted((neighbors or {}).items()) if not managed(n)]
-    if system is None and segment is not None:
+    if system is None and vrf is not None:
         raise Unreadable("the segment's BGP settings could not be read")
     if not system and live:  # a non-dict system that is truthy fails on .get below
         raise Unreadable("BGP settings could not be read ({}) while {} neighbor(s) exist".format(type(system).__name__, len(live)))
@@ -382,8 +395,8 @@ def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str,
         raise Unreadable("BGP is enabled but its neighbors could not be read")
     rt = (system.get("route_target") or {}).get("0") or {}
     out: Dict[str, Any] = {}
-    if segment is not None:
-        out["segment"] = segment
+    if vrf is not None:
+        out["segment"] = ctx.segment(vrf)
     out.update({"enable": system["enable"], "asn": system["asn"], "routerId": nul(system.get("rtr_id")), "enableGracefulRestart": system.get("graceful_restart_en"),
                 "maxRestartTime": system.get("max_restart_time"), "maxStalePathTime": system.get("stale_path_time"), "propagateAsPath": system.get("remote_as_path_advertise")})
     if rt and (rt.get("import"), rt.get("export")) != ("0:0", "0:0"):
@@ -392,7 +405,7 @@ def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str,
         ctx.note(label, "default-omitted", "bgpSystemConfig.import/exportRouteTarget", "0:0 means no route target (the validator rejects ASN 0)")
     ctx.unmapped(label, system, {"enable", "asn", "rtr_id", "graceful_restart_en", "max_restart_time", "stale_path_time", "remote_as_path_advertise", "route_target", "neighbor", "enable_gms_marked", "log_nbr_msgs"}, "bgpSystemConfig")
     out["neighbors"] = []
-    target = "segmentBgpSystems.neighbors" if segment is not None else "bgpSystemConfig.neighbors"
+    target = "segmentBgpSystems.neighbors" if vrf is not None else "bgpSystemConfig.neighbors"
     failed = 0
     for ip, n in live:
         try:
@@ -443,10 +456,10 @@ def m_segmentBgpSystems(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         ctx.note("bgp-system-all-vrfs", "default-omitted", "segmentBgpSystems", "0 non-default segments with BGP")
         return None
     out = [v for v in each(ctx, "bgp-system-all-vrfs", "segmentBgpSystems", sorted(systems.items()),
-                           lambda vrf, s: bgp_value(ctx, "bgp-system-all-vrfs[{}]".format(vrf), s, block(neighbors, vrf), ctx.segment(vrf))) if v]
+                           lambda vrf, s: bgp_value(ctx, "bgp-system-all-vrfs[{}]".format(vrf), s, block(neighbors, vrf), vrf)) if v]
     for vrf in sorted(systems):
-        if not any(v.get("segment") == ctx.segment(vrf) for v in out) and not ctx.failed("segmentBgpSystems", "bgp-system-all-vrfs[{}]".format(vrf)):
-            ctx.note("bgp-system-all-vrfs[{}]".format(vrf), "default-omitted", "segmentBgpSystems", "segment {}: BGP disabled with no neighbors (ASN and router ID stay on the source only)".format(ctx.segment(vrf)))
+        if not any(v.get("segment") == ctx.segment(vrf, strict=False) for v in out) and not ctx.failed("segmentBgpSystems", "bgp-system-all-vrfs[{}]".format(vrf)):
+            ctx.note("bgp-system-all-vrfs[{}]".format(vrf), "default-omitted", "segmentBgpSystems", "segment {}: BGP disabled with no neighbors (ASN and router ID stay on the source only)".format(ctx.segment(vrf, strict=False)))
     if out:
         ctx.note("bgp-system-all-vrfs", "mapped", "segmentBgpSystems", "{} segments with BGP (includes Default when non-default segments use BGP)".format(len(out)))
     return out or None
@@ -485,8 +498,12 @@ def m_natPools(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     source = ctx.data("nat-pools") or {}
     if not source:
         return None
-    out = [{"name": v["name"], "segment": ctx.segment(v["segment"]), "direction": v["dir"], "poolIpSubnet": v["subnet"], "translatePorts": bool(v["pat"]), "comment": nul(v["comment"])}
-           for k, v in sorted(source.items(), key=lambda kv: int(kv[0]))]
+    try:
+        out = [{"name": v["name"], "segment": ctx.segment(v["segment"]), "direction": v["dir"], "poolIpSubnet": v["subnet"], "translatePorts": bool(v["pat"]), "comment": nul(v["comment"])}
+               for k, v in sorted(source.items(), key=lambda kv: int(kv[0]))]
+    except Unresolved as err:  # all or nothing: branch NAT rules refer to pools by list position
+        item_failed(ctx, "nat-pools", "natPools", err)
+        return None
     for k, v in source.items():
         ctx.unmapped("nat-pools[{}]".format(k), v, {"name", "segment", "dir", "subnet", "pat", "comment"}, "natPools")
     ctx.note("nat-pools", "mapped", "natPools", "{} pools; the numeric pool id (source key) is not part of the preconfig".format(len(out)))
@@ -533,11 +550,11 @@ def m_segmentOspfConfig(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
             kept = ["redistMapToOSPF {}".format(s["redistMapToOSPF"])] if s.get("redistMapToOSPF") not in (None, "", "default_rtmap_to_ospf") else []
             if kept:
                 ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "outside-preconfig", "segmentOspfConfig",
-                         "segment {}: OSPF switched off with no interfaces, but settings are kept ({}); such a segment is not written, so the target keeps its own".format(ctx.segment(vrf), ", ".join(kept)))
+                         "segment {}: OSPF switched off with no interfaces, but settings are kept ({}); such a segment is not written, so the target keeps its own".format(ctx.segment(vrf, strict=False), ", ".join(kept)))
             else:
-                ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "default-omitted", "segmentOspfConfig", "segment {}: OSPF disabled with no interfaces, not written".format(ctx.segment(vrf)))
+                ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "default-omitted", "segmentOspfConfig", "segment {}: OSPF disabled with no interfaces, not written".format(ctx.segment(vrf, strict=False)))
         elif runs[vrf] and s and not s.get("enable") and enabled and isinstance((interfaces or {}).get(vrf, {}), dict) and interfaces is not None:
-            ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "mapped", "segmentOspfConfig", "segment {}: OSPF switched off but configured on interfaces; written with enable false".format(ctx.segment(vrf)))
+            ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "mapped", "segmentOspfConfig", "segment {}: OSPF switched off but configured on interfaces; written with enable false".format(ctx.segment(vrf, strict=False)))
     if not enabled:
         ctx.note("ospf-system-all-vrfs", "default-omitted", "segmentOspfConfig", "0 non-default segments with OSPF")
         return None
@@ -676,7 +693,7 @@ def note_no_route_map(ctx: Ctx, vrf: str, entry: Dict[str, Any], target: str) ->
 
 def sharing_segments(ctx: Ctx) -> List[str]:
     """Segment IDs with subnet-sharing settings in /systemInfo/system auto_subnet."""
-    return [vrf for vrf in sharing_source(ctx) or {} if ctx.segment(vrf)]
+    return [vrf for vrf in sharing_source(ctx) or {} if ctx.segment(vrf, strict=False)]
 
 
 def per_segment(ctx: Ctx) -> bool:
@@ -742,7 +759,7 @@ def m_segmentLocalRoutes(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     if raw is None:  # routes replace on apply: a segment whose routes were not read is left out, never written with an empty list
         default = routes_table(ctx, "subnets")  # the Default segment's configured routes, the same table localRoutes reads
         data = {"0": default} if default is not None else {}
-        unread = [ctx.segment(v) or v for v in sorted(sharing_segments(ctx)) if v not in data]
+        unread = [ctx.segment(v, strict=False) or v for v in sorted(sharing_segments(ctx)) if v not in data]
         ctx.note("subnets-all-vrfs", "not-readable", "segmentLocalRoutes.routes", "the per-segment routes read (/subnets/all) could not be read, so the routes of segment(s) {} are unknown and those segments are not written{}; check them by hand".format(
             ", ".join(unread) or "-", "; Default routes come from /subnets" if default is not None else ""))
         source = "subnets"
@@ -758,11 +775,12 @@ def m_segmentLocalRoutes(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
             continue
         flags = subnet_sharing(ctx, vrf, "segmentLocalRoutes")
         if routes or (flags and (vrf == "0" or own_sharing(flags))):
-            out.append(dict({"segment": ctx.segment(vrf)}, **flags, routes=routes))
-            note_no_route_map(ctx, vrf, flags, "segmentLocalRoutes")
+            with guarded(ctx, "subnets-all-vrfs[{}]".format(vrf), "segmentLocalRoutes"):
+                out.append(dict({"segment": ctx.segment(vrf)}, **flags, routes=routes))
+                note_no_route_map(ctx, vrf, flags, "segmentLocalRoutes")
         elif flags:
             ctx.note("system-info.auto_subnet.vrf[{}]".format(vrf), "default-omitted", "segmentLocalRoutes",
-                     "segment {} has no routes and its subnet-sharing settings are the ECOS defaults; writing it would add default_rtmap_to_subsh".format(ctx.segment(vrf)))
+                     "segment {} has no routes and its subnet-sharing settings are the ECOS defaults; writing it would add default_rtmap_to_subsh".format(ctx.segment(vrf, strict=False)))
     if out:
         ctx.note(source, "mapped", "segmentLocalRoutes", "{} segments with configured routes or subnet-sharing settings (Default included)".format(len(out)))
     return out or None
@@ -1091,19 +1109,22 @@ def m_vxlan(ctx: Ctx) -> Optional[Dict[str, Any]]:
             vni_val = (v or {}).get("vni")
             if str(vni_val) in ("None", "", "0", "-1", "4294967295"):
                 continue
-            maps.append({
-                "vni": int(vni_val),
-                "segment": ctx.segment(seg_id),
-                "zone": ctx.zone(seg_id, v.get("zoneId", 0)),
-                "role": ctx.role(v.get("role", 0)) or "default",
-            })
+            try:
+                maps.append({
+                    "vni": int(vni_val),
+                    "segment": ctx.segment(seg_id),
+                    "zone": ctx.zone(seg_id, v.get("zoneId", 0)),
+                    "role": ctx.role(v.get("role", 0)) or "default",
+                })
+            except Unresolved as err:
+                item_failed(ctx, "vxlan-vni-map[{}]".format(seg_id), "vxlan", err)
         maps.sort(key=lambda x: int(x["vni"]))
         ctx.note("vxlan, vxlan-vni-map", "mapped", "vxlan", "vtep interface {} and {} VNI map(s)".format(live["vtepIf"], len(maps)))
         return {"destinationUdpPort": int(live.get("port", 4789)), "vtepSrcInterface": live["vtepIf"], "vniVrfMaps": maps}
     lines = cli_lines(ctx)
     vtep = next((m.group(1) for l in lines for m in [re.match(r"^vxlan vtep-interface (\S+)$", l)] if m), None)
     if not vtep:
-        dormant = ["{} {}".format(ctx.segment(k) or k, v.get("vni")) for k, v in sorted(seg_map.items(), key=lambda kv: str(kv[0]))
+        dormant = ["{} {}".format(ctx.segment(k, strict=False) or k, v.get("vni")) for k, v in sorted(seg_map.items(), key=lambda kv: str(kv[0]))
                    if isinstance(v, dict) and str(v.get("vni")) not in ("None", "", "0", "-1", "4294967295")] if isinstance(seg_map, dict) else []
         if dormant and not lines and not (isinstance(live, dict) and "vtepIf" in live):  # no readable backup: its VTEP line is unknown
             ctx.note("vxlan-vni-map", "not-readable", "vxlan", "VNI maps ({}), but the VTEP interface could not be read (no /vxlan and no running-config), so they are not written; check by hand".format(", ".join(dormant)))

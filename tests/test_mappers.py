@@ -911,7 +911,7 @@ class ItemIsolation(IsolationCheck, unittest.TestCase):
     def test_bfd_segment(self):
         from mappers import m_segmentBfdConfigs
         bfd = {"0": {"enable": True, "minRxInterval": 300, "minTxInterval": 300, "detectMultiplier": 3}, "1": {"enable": True}}
-        self.check(m_segmentBfdConfigs, {"deployment": DEP, "bfd-vrfs": bfd}, lambda o: [e["segment"] for e in o], ["Default"], "segmentBfdConfigs")
+        self.check(m_segmentBfdConfigs, {"deployment": DEP3, "bfd-vrfs": bfd}, lambda o: [e["segment"] for e in o], ["Default"], "segmentBfdConfigs")  # vrf 1 names a segment: its item is malformed, not unresolved
 
     def test_custom_tag(self):
         from mappers import m_customApplianceTags
@@ -1371,6 +1371,69 @@ class RouteLabelsAndContact(unittest.TestCase):
         info = self._build(ledger, **{"running-config": rc, "extra-info": {"contact": {"name": "NOC", "email": "noc@example.com"}}})["applianceInfo"]
         self.assertEqual(info["contact"], {"name": "NOC", "email": "noc@example.com"})
         self.assertEqual([e for e in ledger if e["target"] == "applianceInfo.contact"], [])
+
+
+def null_segments(value, path=""):
+    """Paths where a written value holds segment: null."""
+    if isinstance(value, dict):
+        return [path + ".segment"] * (value.get("segment", "") is None) + [p for k, v in value.items() for p in null_segments(v, path + "." + k)]
+    if isinstance(value, list):
+        return [p for i, v in enumerate(value) for p in null_segments(v, "{}[{}]".format(path, i))]
+    return []
+
+
+class SegmentNeverNull(unittest.TestCase):
+    """A vrf id that names no segment (a deleted segment) is never written as segment: null, which Orchestrator applies to the Default
+    segment: the item is skipped and ledgered unresolved, naming the id."""
+    BFD = {"enable": True, "minRxInterval": 300, "minTxInterval": 300, "detectMultiplier": 3}
+
+    def unresolved(self, notes):
+        self.assertEqual(errors(notes), [])
+        self.assertTrue([n for n in notes if n["disposition"] == "unresolved" and "vrf id 45 names no segment" in n["note"]], notes)
+
+    def test_bfd_in_a_deleted_segment(self):
+        from mappers import m_segmentBfdConfigs
+        c, notes = ctx({"deployment": DEP, "bfd-vrfs": {"0": self.BFD, "45": self.BFD}})
+        self.assertEqual([e["segment"] for e in m_segmentBfdConfigs(c)], ["Default"])
+        self.unresolved(notes)
+        self.assertEqual([n["item"] for n in notes if n["disposition"] == "unresolved"], ["bfd-vrfs[45]"])
+        c, notes = ctx({"deployment": DEP, "bfd-vrfs": {"0": dict(self.BFD, enable=False), "45": self.BFD}})
+        self.assertIsNone(m_segmentBfdConfigs(c))
+        self.unresolved(notes)
+        self.assertFalse([n for n in notes if n["disposition"] == "default-omitted"], "BFD is enabled in vrf 45: 'disabled in every segment' would be false")
+
+    def test_every_segment_field(self):
+        from mappers import m_inboundPortForwarding, m_loopbackInterface, m_natPools, m_segmentLocalRoutes, m_virtualTunnelInterface
+        pim = {"lan0": {"dr_priority": 1, "enable": True, "hello_interval": 30, "join_prune_interval": 30}}
+        nat_rule = {"dir": "inbound", "match": {"segment": 45, "intf": "any", "proto": "any"}, "set": {"trans_dst": "192.0.2.9"}}
+        cases = [
+            ("loopbacks", m_loopbackInterface, {"deployment": DEP, "loopbacks": {"lo1": {"admin": True, "ipaddr": "192.0.2.1", "nmask": 32, "label": "", "vrf_id": 45, "zone": 0},
+                                                                                "lo2": {"admin": True, "ipaddr": "192.0.2.2", "nmask": 32, "label": "", "vrf_id": 0, "zone": 0}}},
+             lambda o: [x["interfaceId"] for x in o["loopbacks"]], ["lo2"]),
+            ("port forwarding", m_inboundPortForwarding, {"deployment": DEP, "port-forwarding": [dict(PF, vrf_id=45), PF]}, lambda o: [x["segment"] for x in o["portForwardingRules"]], ["Default"]),
+            ("segment bgp", m_segmentBgpSystems, {"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 65000}, "1": {"enable": True, "asn": 65000}, "45": {"enable": True, "asn": 65000}},
+                                                  "bgp-neighbors-all-vrfs": {}}, lambda o: [x.get("segment", "(none)") for x in o], ["Default", "corp"]),
+            ("nat pools", m_natPools, {"deployment": DEP, "nat-pools": {"1": {"name": "p1", "segment": 45, "dir": "outbound", "subnet": "198.51.100.0/30", "pat": 1, "comment": ""}}}, lambda o: o, None),
+            ("segment ospf", m_segmentOspfConfig, {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}, "45": {"enable": True}},
+                                                   "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF}, "1": {"lan0.71": OSPF_IF}, "45": {"lan0.9": OSPF_IF}}}, lambda o: [x["segment"] for x in o], ["Default", "corp"]),
+            ("segment routes", m_segmentLocalRoutes, {"deployment": DEP3, "subnets-all-vrfs": {"subnets": {"0": {"entries": [{"state": ROUTE}]}, "45": {"entries": [{"state": ROUTE}]}}}},
+             lambda o: [x["segment"] for x in o], ["Default"]),
+            ("multicast", m_multicast, {"deployment": DEP, "multicast-enable": [{"vrf_id": 0, "enable": True}],
+                                        "multicast-config": [{"vrf_id": 0, "rp": "192.0.2.9", "pim": pim, "igmp": {}, "filter_name": None}, {"vrf_id": 45, "rp": "", "pim": {}, "igmp": {}, "filter_name": None}]},
+             lambda o: [x["segment"] for x in o], ["Default"]),
+            ("vxlan", m_vxlan, {"deployment": DEP, "vxlan": {"port": 4789, "vtepIf": "lo1"}, "vxlan-vni-map": {"0": {"vni": 1001, "zoneId": 0, "role": 0}, "45": {"vni": 1045, "zoneId": 0, "role": 0}}},
+             lambda o: [x["vni"] for x in o["vniVrfMaps"]], [1001]),
+            ("vti", m_virtualTunnelInterface, {"deployment": DEP, "vtis": {"vti1": dict(VTI, vrf_id=45), "vti2": VTI}}, lambda o: [x["interfaceId"] for x in o["vtis"]], ["vti2"]),
+            ("branch nat", m_branchNatMapsConfig, {"deployment": DEP, "branch-nat-maps": {"map1": {"prio": {"10": nat_rule, "20": dict(nat_rule, match={"segment": 0})}}}},
+             lambda o: [x["priorityLevel"] for x in o["branchNatRules"]], [20]),
+        ]
+        for name, mapper, data, pick, good in cases:
+            with self.subTest(name):
+                c, notes = ctx(data)
+                out = mapper(c)
+                self.assertEqual(null_segments(out), [])
+                self.assertEqual(pick(out) if out is not None else None, good)
+                self.unresolved(notes)
 
 
 if __name__ == "__main__":
