@@ -247,6 +247,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     ha_mode_entries: List[Dict[str, Any]] = []
     interfaces: List[Dict[str, Any]] = []
     dhcp: List[Dict[str, Any]] = []
+    relay_leases: List[str] = []
     ras: List[Dict[str, Any]] = []
     ra_skipped: List[str] = []
     failover = dep.get("dhcpFailover") or {}
@@ -314,6 +315,9 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
                         entry["dhcpHA"]["foRelationshipName"] = fo["dhcp_fo_rel_name"]
                 dhcp.append(entry)
             elif relay:
+                idle = dhcp_cfg.get("server") or {}  # a relay interface keeps an inactive server block; the format's relay entry has no lease fields
+                if (idle.get("defaultLease"), idle.get("maxLease")) not in ((None, None), (600, 7200)):
+                    relay_leases.append("{} (default {}, max {})".format(name, idle.get("defaultLease"), idle.get("maxLease")))
                 dhcp.append({
                     "dhcpInterfaceName": name, "dhcpType": "relay", "dhcpProxyServers": relay["dhcpserver"],
                     "enableOptions82": relay.get("option82", False), "options82Policy": relay.get("option82_policy"),
@@ -402,6 +406,9 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     if dhcp:
         di["dhcpInfo"] = dhcp
         note("deployment.modeIfs[].dhcpd", "mapped", "deploymentInfo.dhcpInfo", "{} DHCP servers; empty ntp/netbios lists omitted".format(len(dhcp)))
+    if relay_leases:
+        note("deployment.modeIfs[].dhcpd.server (relay)", "outside-preconfig", "deploymentInfo.dhcpInfo",
+             "relay interfaces keep lease times in an inactive DHCP server block, and the preconfig relay entry has no lease fields: {}".format(", ".join(relay_leases)))
     if ra_skipped:
         note("deployment.modeIfs[].ra", "runtime", "deploymentInfo.raInfo", "{} IPv4 interfaces carry a default router-advertisement block; the validator rejects raInfo on IPv4 interfaces".format(len(ra_skipped)))
     if ras:

@@ -420,6 +420,23 @@ class AuditRegressions(unittest.TestCase):
         nac["applyPolicies"] = {"if": {"lan0.71": {"profile": "none", "auth_type": 0}}}
         self.assertIsNone(m_nac(ctx({"deployment": dep, "nac": nac})[0]))
 
+    def test_relay_lease_times_are_ledgered_not_dropped_silently(self):
+        # a relay interface keeps an inactive server block with its own lease times; the format's relay entry has no lease fields
+        inactive = {"prefix": "0.0.0.0/0", "ipStart": "0.0.0.0", "ipEnd": "0.0.0.0", "gw": [], "dns": [], "netbiosNodeType": "H", "maxLease": 172800, "defaultLease": 86400}
+        relay = {"vlan": 0, "label": "4", "wanSide": False, "ip": "10.0.0.1", "mask": 24, "vrf": 0, "zone": 0,
+                 "dhcpd": {"type": "relay", "server": inactive, "relay": {"dhcpserver": ["10.9.9.9"], "option82": False, "option82_policy": "append"}}}
+        ledger = []
+        entry = self._build([relay], ledger=ledger)["deploymentInfo"]["dhcpInfo"][0]
+        self.assertNotIn("defaultLease", entry)
+        notes = [e for e in ledger if e["disposition"] == "outside-preconfig" and e["target"] == "deploymentInfo.dhcpInfo"]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("86400", notes[0]["note"])
+        self.assertIn("lan0", notes[0]["note"])
+        relay["dhcpd"]["server"] = dict(inactive, maxLease=7200, defaultLease=600)  # ECOS defaults: nothing to report
+        ledger = []
+        self._build([relay], ledger=ledger)
+        self.assertFalse([e for e in ledger if e["target"] == "deploymentInfo.dhcpInfo" and e["disposition"] == "outside-preconfig"])
+
     def test_translate_dhcp_relay_gateway_dual_stack_and_cluster_profile(self):
         relay = {"vlan": 0, "label": "4", "wanSide": False, "ip": "10.0.0.1", "mask": 24, "vrf": 0, "zone": 0,
                  "dhcpd": {"type": "relay", "relay": {"dhcpserver": ["10.9.9.9"], "option82": False, "option82_policy": "append"}}}  # ECOS < 9.5.1: no sub-option keys
@@ -540,6 +557,19 @@ class AuditRegressions(unittest.TestCase):
         c, notes = ctx({"deployment": dep, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": False, "routerId": "192.0.2.1"}}})
         self.assertIsNone(m_segmentOspfConfig(c))
         self.assertTrue(any(n["item"] == "ospf-system-all-vrfs[1]" and "corp" in n["note"] for n in notes))
+
+    def test_disabled_ospf_segment_with_interfaces_is_carried_disabled(self):
+        from mappers import m_ospfSystemConfig, m_segmentOspfConfig
+        dep = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}]), "modeIfs": DEP["modeIfs"]}
+        iface = {"area": "0.0.0.0", "cost": 10, "priority": 1, "adminStatus": True, "helloInterval": 10, "deadInterval": 40, "transmitDelay": 1, "retransmitInterval": 5,
+                 "authType": "None", "authKey": "", "md5Key": 0, "md5Password": "", "comment": "", "bfdDesired": False}
+        area = {"0.0.0.0": {"area_type": 0, "redist": False, "summary": False, "translator_role": 0}}
+        data = {"deployment": dep, "ospf-areas": {"0": area, "1": area}, "ospf-interfaces-all-vrfs": {"0": {"lan0": iface}, "1": {"lan0.72": iface}},
+                "ospf-system-all-vrfs": {"0": {"enable": True, "routerId": "192.0.2.1"}, "1": {"enable": False, "routerId": "192.0.2.2", "redistMapToOSPF": "corp_rtmap_to_ospf"}}}
+        out = {e["segment"]: e for e in m_segmentOspfConfig(ctx(data)[0]) or []}
+        self.assertEqual(sorted(out), ["Default", "corp"])  # the dormant corp OSPF is kept, switched off as on the source
+        self.assertEqual((out["corp"]["enable"], out["corp"]["routerId"], [i["interfaceName"] for i in out["corp"]["interfaces"]]), (False, "192.0.2.2", ["lan0.72"]))
+        self.assertIsNone(m_ospfSystemConfig(ctx(data)[0]))  # Orchestrator ignores ospfSystemConfig once segmentOspfConfig is present
 
     def test_segment_routes_take_comment_from_route_config_not_the_default_table(self):
         from mappers import m_segmentLocalRoutes

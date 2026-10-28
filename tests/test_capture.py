@@ -163,6 +163,12 @@ class RedactTest(unittest.TestCase):
         self.assertEqual(out["hash"], "<SECRET:hash>")
         self.assertEqual(len(paths), 4)
 
+    def test_an_empty_cli_secret_does_not_eat_the_next_line(self):
+        cli = "   ip ospf authentication-key \n   interface lan0 mtu 1500\n   md5\n   interface pass-through max-bandwidth 50000\n   password 0 s3cret"
+        out, _ = redact_secrets({"cli": cli})
+        self.assertEqual(out["cli"].splitlines()[:4], cli.splitlines()[:4])  # nothing to hide on those lines, so they stay byte for byte
+        self.assertEqual(out["cli"].splitlines()[4], "   password 0 <SECRET:text>")
+
     def test_nac_server_key_is_secret_but_tag_key_is_not(self):
         out, paths = redact_secrets({"nac": {"server": [{"host": "192.0.2.5", "authport": 1812, "key": "radius-shared"}]},
                                      "tags": [{"key": "site", "value": "a"}]})

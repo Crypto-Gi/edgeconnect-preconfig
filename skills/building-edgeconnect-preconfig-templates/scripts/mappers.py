@@ -66,8 +66,8 @@ def vrf_dict(ctx: Ctx, ident: str, default_only: bool = True) -> Any:
 
 
 def m_ospfSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
-    all_systems = ctx.data("ospf-system-all-vrfs") or {}
-    if any(vrf != "0" and s.get("enable") for vrf, s in all_systems.items()):
+    all_systems, all_ifs = ctx.data("ospf-system-all-vrfs") or {}, ctx.data("ospf-interfaces-all-vrfs") or {}
+    if any(vrf != "0" and ospf_kept(s, all_ifs.get(vrf)) for vrf, s in all_systems.items()):
         ctx.note("ospf-system", "default-omitted", "ospfSystemConfig", "non-default segment OSPF exists, so Default segment OSPF is included in segmentOspfConfig (Orchestrator ignores ospfSystemConfig when segmentOspfConfig is present)")
         return None
     system, areas, ifs = ctx.data("ospf-system"), ctx.data("ospf-areas"), ctx.data("ospf-interfaces")
@@ -281,18 +281,25 @@ def m_bridgeGroups(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     return out
 
 
+def ospf_kept(system: Dict[str, Any], interfaces: Any) -> bool:
+    """A segment's OSPF is written when it runs, or when it is switched off but still configured on interfaces (kept with enable false)."""
+    return bool(system.get("enable") or interfaces)
+
+
 def m_segmentOspfConfig(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     systems, interfaces, areas = ctx.data("ospf-system-all-vrfs") or {}, ctx.data("ospf-interfaces-all-vrfs") or {}, ctx.data("ospf-areas") or {}
-    enabled = any(vrf != "0" and systems[vrf].get("enable") for vrf in systems)
+    enabled = any(vrf != "0" and ospf_kept(systems[vrf], interfaces.get(vrf)) for vrf in systems)
     for vrf in sorted(systems):
-        if not systems[vrf].get("enable") and (vrf != "0" or enabled):
-            ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "default-omitted", "segmentOspfConfig", "segment {}: OSPF disabled, not written".format(ctx.segment(vrf)))
+        if not ospf_kept(systems[vrf], interfaces.get(vrf)) and (vrf != "0" or enabled):
+            ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "default-omitted", "segmentOspfConfig", "segment {}: OSPF disabled with no interfaces, not written".format(ctx.segment(vrf)))
+        elif not systems[vrf].get("enable") and enabled:
+            ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "mapped", "segmentOspfConfig", "segment {}: OSPF switched off but configured on interfaces; written with enable false".format(ctx.segment(vrf)))
     if not enabled:
         ctx.note("ospf-system-all-vrfs", "default-omitted", "segmentOspfConfig", "0 non-default segments with OSPF")
         return None
     out = []
     for vrf in sorted(systems):
-        if not systems[vrf].get("enable"):
+        if not ospf_kept(systems[vrf], interfaces.get(vrf)):
             continue
         s = systems[vrf]
         bfd = sorted(n for n, i in interfaces.get(vrf, {}).items() if i.get("bfdDesired"))

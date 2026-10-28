@@ -29,7 +29,8 @@ _SECRET_KEY = re.compile(r"(?i)(passw|passphrase|secret|psk|pre_?shared|private_
 _SERVER_SIBLINGS = ("host", "address", "authport", "acctport", "server", "serverIp")
 _PEM = re.compile(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", re.S)
 _CRYPT = re.compile(r"\$(1|2[aby]?|5|6|y)\$[./A-Za-z0-9$]{8,}")
-_CLI_SECRET = re.compile(r"(?im)(\b(?:password|passwd|secret|psk|pre-shared-key|passphrase|auth-key|authentication-key|md5|api-key|token)\b\s+(?:\d\s+)?)(\S+)")
+# [ \t]: a keyword with an empty value must not reach across the line break and redact the next line's first word
+_CLI_SECRET = re.compile(r"(?im)(\b(?:password|passwd|secret|psk|pre-shared-key|passphrase|auth-key|authentication-key|md5|api-key|token)\b[ \t]+(?:\d[ \t]+)?)(\S+)")
 _SERIAL_HEX = re.compile(r"^[0-9A-F]{12}$")
 
 
