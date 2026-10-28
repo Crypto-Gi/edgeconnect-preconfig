@@ -41,13 +41,13 @@ _CLI_SECRET = re.compile(r"(?im)(\b(?:password|passwd|secret|psk|pre-shared-key|
 # unquoted name ending in one ("adminPassword", "private_key"; not "token-lifetime", "pskType", "md5sum"). A JSON number, true, false
 # or null is not a secret (fields skip non-strings); a number in prose is ("password: 12345"). A quoted value ends at its closing
 # quote; escapes are read as pairs. Inside a \"-quoted value \\\" is an escaped quote and a bare " is allowed only where it cannot
-# close a string; a '-quoted value holds no \" and a bare " only where it cannot close a string. After a quoted key ("password":) the
-# quote always opens the value; after an unquoted one a quote that closes a string (_NOT_A_CLOSE) never opens a value, so {"banner":
-# "Password: ", "motd": "x"} keeps its next key. After a quoted JSON key a bare value ends at ',' or '}', a secret array (one nesting
-# level) becomes one placeholder item and an object is left to its own keys. Other free text ends at whitespace, at a backslash run
-# before a quote, or at a quote followed by a delimiter. Every value pattern has disjoint alternatives so no input backtracks more than
-# linearly (Python 3.9 has no atomic groups); a key's secret word must sit within 64 characters of the name's start, which keeps one
-# long word from being rescanned per rule. null/true/false are not secrets.
+# close a string; a '-quoted value holds no \" and a bare " only where it cannot close a string. After a quoted key, a value quote of
+# the same kind ("password":", \"password\":\", 'password':') always opens the value; any other quote that closes a string
+# (_NOT_A_CLOSE) never opens a value, so {"banner": "Password: ", "motd": "x"} keeps its next key. After a quoted JSON key a bare value
+# ends at ',' or '}', a secret array (one nesting level) becomes one placeholder item and an object is left to its own keys. Other free
+# text ends at whitespace, at a backslash run before a quote, or at a quote followed by a delimiter. Every value pattern has disjoint
+# alternatives so no input backtracks more than linearly (Python 3.9 has no atomic groups); a key's secret word must sit within 64
+# characters of the name's start, which keeps one long word from being rescanned per rule. null/true/false are not secrets.
 _TEXT_WORD = (r"(?:\w{0,64}_)?(?:pass(?:word|wd|code|phrase)?|pwd|pw|secret|psk|pre[_-]?shared[_-]?key|auth(?:entication)?[_-]?key|api[_-]?key"
               r"|token)(?:[_-]key)?")
 _TEXT_END_WORDS = r"passw(?:or)?d|passphrase|secret|psk|pre[_-]?shared|(?:private|auth|authentication|api|ike|shared|md5)[_-]?key|token|md5"
@@ -60,7 +60,7 @@ _FREE_KEY = _KEY_START + _KEY_UNQUOTED + ")"  # skip the other key form's scan
 _TEXT_SEP = r"(?:[ \t]*(?:[:=]>?|-+>)[ \t]*|[ \t]+(?:is|-+)[ \t]+(?=\S*?[^\sA-Za-z.,;:!?]))"
 # a quote followed by ',' or ':' and then a JSON value, or by '}' or ']' and then more structure, closes a string
 _NOT_A_CLOSE = r"(?!\s*(?:[,:]\s*(?:\\?[\"'\[{]|-?\d|true|false|null|$)|[}\]]\s*(?:[,}\]\"]|$)))"
-_TEXT_QUOTED = re.compile(r"(?i)(?P<pre>" + _TEXT_KEY + r"(?P<kq>\\?[\"'])?" + _TEXT_SEP + r"(?P<esc>\\)?(?P<q>\"|'(?P<sq>))(?(kq)|"
+_TEXT_QUOTED = re.compile(r"(?i)(?P<pre>" + _TEXT_KEY + r"(?P<kq>\\?[\"'])?" + _TEXT_SEP + r"(?:(?=(?P=kq))(?P<same>)|)(?P<esc>\\)?(?P<q>\"|'(?P<sq>))(?(same)|"
                           + _NOT_A_CLOSE + r"))(?P<val>(?(esc)(?:\\\\(?:\\[^\n]|[^\\\n])|\\[^\\\n]|\"" + _NOT_A_CLOSE + r"|[^\\\n\"])*?"
                           r"|(?(sq)(?:\\[^\n\"]|\"" + _NOT_A_CLOSE + r"|[^\\\n\"])*?"
                           r"|(?:\\[^\n]|[^\\\n\"])*?)))(?P<end>(?(esc)\\)(?P=q))")

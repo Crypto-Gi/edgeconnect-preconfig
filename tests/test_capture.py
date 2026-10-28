@@ -339,6 +339,7 @@ class RedactTest(unittest.TestCase):
             {"note": "password: \"abc\" ok", "x": 1}, {"desc": "password: x\"", "x": 1}, {"desc": "password='a\"b'", "x": 1},
             {"secret": ["a]b", "c\"]d"]}, {"psk": ["a", "b"], "nest": {"token": ["c"]}}, {"psk": "a,b}c", "x": 1},
             {"passwordMinLength": 8, "tokenLifetime": 3600, "md5KeyId": 1}, {"secret": [["x"]], "pw": [1]},
+            {"hint": "Enter 'password': ", "x": 1}, {"hint": "type 'psk'=", "x": "y"}, {"hint": "Enter \"password\": ", "x": 1},
         ]
         for obj in objects:
             for text in (json.dumps(obj), json.dumps(obj, separators=(",", ":")), json.dumps(json.dumps(obj))):
