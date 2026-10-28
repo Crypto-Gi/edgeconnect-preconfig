@@ -63,6 +63,34 @@ class MapperRules(unittest.TestCase):
         src["serverGroup"]["1"]["server"] = {"2": {"self": 2, "name": "radius2"}, "10": {"self": 10, "name": "backup"}, "1": {"self": 1, "name": "default"}}
         self.assertEqual(m_nac(ctx({"nac": src, "deployment": DEP})[0])["serverGroup"][0]["server"], "default, radius2, backup")  # /validate rejects "a,b"
 
+    FACTORY_NAC = {"nacEnable": False, "server": {"1": {"self": 1, "address": "0.0.0.1", "authport": 1812, "key": "", "name": "default", "source_ip_interface": "any"}},
+                   "serverGroup": {"1": {"self": 1, "name": "default", "server": {"1": {"self": 1, "name": "default"}}}}, "aaaProfile": {"1": {"self": 1, "name": "default", "da_server": ""}},
+                   "dot1x": {"1": {"self": 1, "name": "default"}}, "macAuthProfile": {"1": {"self": 1, "name": "default"}}, "applyPolicies": {"if": {"lan0": {"profile": "none", "auth_type": 0}}}}
+
+    def test_disabled_nac_with_only_factory_objects_is_not_written(self):
+        for server in ({"address": "0.0.0.1"}, {"address": ""}):
+            with self.subTest(server=server):
+                src = copy.deepcopy(self.FACTORY_NAC)
+                src["server"]["1"].update(server)
+                c, notes = ctx({"nac": src, "deployment": DEP})
+                self.assertIsNone(m_nac(c))
+                self.assertEqual([(n["disposition"], n["note"]) for n in notes if n["target"] == "nac"],
+                                 [("default-omitted", "NAC is disabled and holds only its factory-default objects")])
+
+    def test_disabled_nac_with_any_own_object_is_written(self):
+        changes = {"enabled": lambda s: s.update(nacEnable=True), "enable unknown": lambda s: s.update(nacEnable=None),
+                   "trusted policy with a profile": lambda s: s["applyPolicies"]["if"]["lan0"].update(profile="default"),
+                   "policy auth type": lambda s: s["applyPolicies"]["if"]["lan0"].update(auth_type=1), "server address": lambda s: s["server"]["1"].update(address="192.0.2.5"),
+                   "server key": lambda s: s["server"]["1"].update(key="<SECRET:nac.server.1.key>"), "interface policy": lambda s: s["applyPolicies"]["if"]["lan0"].update(profile="default", auth_type=1),
+                   "own profile": lambda s: s["aaaProfile"]["1"].update(name="GUEST"), "own group": lambda s: s["serverGroup"]["1"].update(name="radius")}
+        for what, change in changes.items():
+            with self.subTest(what):
+                src = copy.deepcopy(self.FACTORY_NAC)
+                change(src)
+                c, notes = ctx({"nac": src, "deployment": DEP})
+                self.assertIsNotNone(m_nac(c))
+                self.assertFalse([n for n in notes if n["disposition"] == "default-omitted" and n["target"] == "nac"])
+
     def test_multicast_drops_stale_pim_entries_and_reads_list_shape(self):
         data = {"deployment": DEP, "multicast-enable": [{"vrf_id": 0, "enable": True}],
                 "multicast-config": [{"vrf_id": 0, "rp": "192.0.2.9", "pim": {"lan0": {"dr_priority": 1, "enable": True, "hello_interval": 30, "join_prune_interval": 30},

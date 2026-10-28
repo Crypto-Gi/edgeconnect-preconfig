@@ -1288,9 +1288,20 @@ def m_managementRoutes(ctx: Ctx) -> Optional[Dict[str, Any]]:
     return {"routes": routes}
 
 
+def factory_nac(src: Dict[str, Any]) -> bool:
+    """NAC off and holding only what ECOS creates: objects named "default", a server at 0.0.0.1 (or none) with no key, trusted interfaces only."""
+    objs = [o for k in ("server", "serverGroup", "aaaProfile", "dot1x", "macAuthProfile") for o in (src.get(k) or {}).values()]
+    return (src.get("nacEnable") is False and all(o.get("name") == "default" for o in objs)
+            and all(s.get("address") in ("0.0.0.1", "", None) and s.get("key") in ("", None) for s in src["server"].values())
+            and all(p.get("auth_type") == 0 and p.get("profile") == "none" for p in ((src.get("applyPolicies") or {}).get("if") or {}).values()))
+
+
 def m_nac(ctx: Ctx) -> Optional[Dict[str, Any]]:
     src = ctx.data("nac")
     if not src or not src.get("server"):
+        return None
+    if factory_nac(src):  # written, its empty server key fails /validate ("NAC - server key can not be empty"), and there is nothing to carry
+        ctx.note("nac", "default-omitted", "nac", "NAC is disabled and holds only its factory-default objects")
         return None
     def rows(block: Dict[str, Any], rename: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
         out = []
