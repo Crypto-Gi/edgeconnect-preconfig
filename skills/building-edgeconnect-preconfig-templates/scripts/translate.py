@@ -87,6 +87,8 @@ FIELD_TEMPLATES = {
             "unowned": {"ka", "hold", "next_hop_self", "password", "store_received_routes", "evpn"}},
     "vrrp": {"sections": ("vrrp",), "segments": None,
              "fields": {"admin": "admin", "advTimer": "advertisementTimer", "priority": "priority", "preempt": "preemption", "auth": "authenticationString"}},
+    # VNI maps are owned per segment from the template's vrfId; a template that sets the VTEP owns the whole section (vtepSrcInterface is required)
+    "vxlan": {"sections": ("vxlan",), "segments": None, "fields": {"vtepIf": "vtepSrcInterface", "port": "destinationUdpPort"}},
 }
 
 
@@ -94,7 +96,8 @@ def template_fields(cap: "Capture") -> Dict[str, Dict[Optional[str], set]]:
     """Preconfig fields each selected FIELD_TEMPLATES template sets, per segment id (None for flat templates).
 
     Fields from every associated group are combined: a field any group sets is template-owned whichever group wins.
-    A blank or "none" template value is taken to mean the template leaves the field alone (inferred from reference Orchestrator templates)."""
+    A blank or "none" template value is taken to mean the template leaves the field alone (inferred from reference Orchestrator templates),
+    and so is a route_target_template whose applyStatus is "none"; one without applyStatus still owns its route targets."""
     assoc = (cap.data("template-association") or {}).get("templateIds", [])
     owned: Dict[str, Dict[Optional[str], set]] = {}
     for group in cap.data("template-groups") or []:
@@ -116,9 +119,52 @@ def template_fields(cap: "Capture") -> Dict[str, Dict[Optional[str], set]]:
                 for key, field in spec["fields"].items():
                     head, _, tail = key.partition(".")
                     item = (src.get(head) or {}).get(tail) if tail else src.get(head)
+                    if tail and str((src.get(head) or {}).get("applyStatus", "")).lower() == "none":
+                        continue  # e.g. route_target_template {"applyStatus": "none", "import": "0:0"} applies no route targets
                     if item not in (None, "", "none"):
                         found.add(field)
+            if name == "vxlan":
+                for seg, vni_map in (value.get("vrfId") or {}).items():
+                    if isinstance(vni_map, dict) and str(vni_map.get("vni")) not in ("None", "", "0", "-1", "4294967295"):
+                        fields.setdefault(str(seg), set()).add("vniVrfMaps")
+    if "vtepSrcInterface" in owned.get("vxlan", {}).get(None, set()):
+        del owned["vxlan"]  # left in template_owned: the section is not written, as for any template that provides a whole section
     return owned
+
+
+NAC_LISTS = {"dot1x": "name", "macAuthProfile": "name", "server": "name", "serverGroup": "name", "aaaProfile": "name", "applyPolicies": "auth_interface"}
+
+
+def nac_merge_owned(cap: "Capture") -> Optional[Dict[str, Any]]:
+    """What the selected nac template(s) define when every one merges (merge true) with the appliance's own NAC; None otherwise.
+
+    Objects are identified by name; the template's applyPolicies are keyed by LAN label (the preconfig auth_interface)."""
+    assoc = (cap.data("template-association") or {}).get("templateIds", [])
+    values = [t.get("value") for g in cap.data("template-groups") or [] if g.get("name") in assoc and "nac" in g.get("selectedTemplateNames", [])
+              for t in g.get("templates") or [] if t.get("name") == "nac"]
+    if not values or not all(isinstance(v, dict) and v.get("merge") is True for v in values):
+        return None
+    owned: Dict[str, Any] = {key: set() for key in NAC_LISTS}
+    for v in values:
+        for key in NAC_LISTS:
+            block = v.get(key) or {}
+            if key == "applyPolicies":
+                owned[key] |= set(block.get("if") or {})
+            elif isinstance(block, dict):
+                owned[key] |= {o.get("name") for o in block.values() if isinstance(o, dict)}
+    return owned
+
+
+def ledger_local_nac(value: Optional[Dict[str, Any]], owned: Dict[str, Any], note: Any) -> None:
+    """Under a merge nac template the section is not written; the appliance's own NAC objects are ledgered, never the template's.
+
+    /validate answers HTTP 500 unless all six NAC lists are non-empty (semir_vlab, 2026-10-28), and the lists the template fills hold
+    only its objects: a section /validate accepts would write the template's own objects, which a template group's settings never are."""
+    note("template nac", "template-group", "nac", "the 'nac' template merges (merge: true) with the appliance's NAC: the section is not written")
+    mine = ["{} {}".format(key, e.get(ident)) for key, ident in NAC_LISTS.items() for e in (value or {}).get(key) or [] if e.get(ident) not in owned[key]]
+    if mine:
+        note("nac (local objects under a merge template)", "outside-preconfig", "nac", "local NAC objects under a merge template: {}; not carried: "
+             "/validate requires all six NAC lists non-empty (HTTP 500 otherwise) and the other lists hold only the template's objects; set them on the target by hand".format(", ".join(mine)))
 
 
 def drop_template_fields(out: Dict[str, Any], owned: Dict[str, Dict[Optional[str], set]], vrfs: Dict[str, str], note: Any) -> None:
@@ -135,14 +181,25 @@ def drop_template_fields(out: Dict[str, Any], owned: Dict[str, Dict[Optional[str
             value = out.get(section)
             if value is None:
                 continue
+            gone = set()
             if name == "vrrp":
                 targets = [(None, e) for e in value.get("vrrpEntries", [])]
+            elif name == "vxlan":
+                targets = [(None, value)]
+                ids = {n: i for i, n in vrfs.items()}
+                theirs = [m for m in value.get("vniVrfMaps") or [] if "vniVrfMaps" in by_segment.get(ids.get(m.get("segment")), set())]
+                if theirs:
+                    value["vniVrfMaps"] = [m for m in value["vniVrfMaps"] if m not in theirs]
+                    gone.add("vniVrfMaps ({})".format(", ".join(str(m.get("segment")) for m in theirs)))
+                if "destinationUdpPort" in by_segment.get(None, set()) and "destinationUdpPort" in value:
+                    by_segment = {**by_segment, None: by_segment[None] - {"destinationUdpPort"}}  # /validate: "VXLAN - Destination UDP port is required"
+                    note("vxlan destinationUdpPort", "mapped", "vxlan.destinationUdpPort", "the appliance's port {} is written although the 'vxlan' template sets the port: "
+                         "the format requires destinationUdpPort".format(value["destinationUdpPort"]))
             elif isinstance(value, list):
                 ids = {n: i for i, n in vrfs.items()}
                 targets = [(ids.get(e.get("segment")), e) for e in value]
             else:
                 targets = [("0", value)]
-            gone = set()
             for segment, entry in targets:
                 gone.update(strip(entry, by_segment.get(segment, set())))
             if section == "localRoutes" and not value.get("routes") and set(value) <= {"routes"}:
@@ -421,16 +478,22 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
         note("deployment.dhcpFailover", "runtime", "deploymentInfo.dhcpInfo[].dhcpHA",
              "{}: failover settings kept by the appliance but no DHCP server there has failover enabled".format(", ".join(sorted(set(failover) - fo_done))))
     owned_fields = {} if IGNORE_OWNERSHIP else template_fields(cap)
-    template_owned = selected_templates(cap) - set(owned_fields)
+    nac_owned = None if IGNORE_OWNERSHIP else nac_merge_owned(cap)
+    template_owned = selected_templates(cap) - set(owned_fields) - ({"nac"} if nac_owned is not None else set())
     ctx = Ctx(cap, ledger)
     for section, mapper in MAPPERS.items():
         if section in template_owned and not IGNORE_OWNERSHIP:
             note("template " + section, "template-group", section, "template '{}' is selected in an associated template group: the section is not written".format(section))
             continue
+        before = len(ledger)
         try:
             value = mapper(ctx)
         except Exception as err:
             note("mapper " + section, "toolkit-error", section, "the {} mapper failed ({}: {}), so the section was not written: a toolkit bug to report, not a limit of preconfig".format(section, type(err).__name__, err))
+            continue
+        if section == "nac" and nac_owned is not None:
+            del ledger[before:]  # the mapper's notes describe a section that is not written
+            ledger_local_nac(value, nac_owned, note)
             continue
         if value is not None:
             out[section] = value

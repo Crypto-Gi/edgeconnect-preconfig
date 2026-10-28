@@ -358,6 +358,73 @@ class AuditRegressions(unittest.TestCase):
         self.assertNotIn("admin", entry)
         self.assertNotIn("preemption", entry)
 
+    def _two_lans(self, **extra):
+        dep = copy.deepcopy(DEP)
+        dep["sysConfig"]["ifLabels"]["lan"].append({"id": "5", "name": "Data"})
+        dep["sysConfig"]["vrfs"].append({"id": "1", "name": "Guest"})
+        lan = {"vlan": 0, "wanSide": False, "vrf": 0, "zone": 0, "mask": 24}
+        dep["modeIfs"] = [{"ifName": "lan0", "applianceIPs": [dict(lan, label="4", ip="192.0.2.1")]}, {"ifName": "lan1", "applianceIPs": [dict(lan, label="5", ip="198.51.100.1")]}]
+        ledger = []
+        return self._build([], ledger=ledger, deployment=dep, **{"template-association": {"templateIds": ["G1"]}, **extra}), ledger
+
+    def test_nac_merge_template_ledgers_the_local_objects_without_writing_nac(self):
+        def obj(name):
+            return {"self": 1, "name": name}
+        nac = {"nacEnable": True, "server": {"1": {"address": "192.0.2.5", "authport": 1812, "key": "", "name": "default", "source_ip_interface": "any"}},
+               "serverGroup": {"1": {"name": "default", "server": "default"}}, "aaaProfile": {"1": dict(obj("default"), da_server="default"), "2": dict(obj("corp"), da_server="default")},
+               "dot1x": {"1": obj("default")}, "macAuthProfile": {"1": obj("default")},
+               "applyPolicies": {"if": {"lan0": {"profile": "default", "auth_type": 1}, "lan1": {"profile": "corp", "auth_type": 2}}}}
+        tpl = {"merge": True, "nacEnable": True, "server": {"1": {"name": "default"}}, "serverGroup": {"1": {"name": "default"}}, "aaaProfile": {"1": {"name": "default"}},
+               "dot1x": {"1": {"name": "default"}}, "macAuthProfile": {"1": {"name": "default"}}, "applyPolicies": {"if": {"Voice": {"auth_type": 1, "profile": "default", "self": "Voice"}}}}
+        groups = [{"name": "G1", "selectedTemplateNames": ["nac"], "templates": [{"name": "nac", "value": tpl}]}]
+        doc, ledger = self._two_lans(nac=nac, **{"template-groups": groups})
+        # /validate answers HTTP 500 unless all six lists are non-empty, and the other lists hold only the template's objects: nothing is written
+        self.assertNotIn("nac", doc)
+        local = [e for e in ledger if e["item"] == "nac (local objects under a merge template)"]
+        self.assertEqual([e["disposition"] for e in local], ["outside-preconfig"])
+        self.assertIn("aaaProfile corp, applyPolicies Data", local[0]["note"])
+        self.assertIn("/validate", local[0]["note"])
+        self.assertNotIn("aaaProfile default", local[0]["note"])  # the template's own objects are not listed as local
+        self.assertEqual([e for e in ledger if e["target"].startswith("nac") and e["disposition"] == "mapped"], [])  # nothing claims a NAC section
+        owned = next(e["note"] for e in ledger if e["item"] == "template nac" and e["disposition"] == "template-group")
+        self.assertIn("merge", owned)
+        self.assertIn("the section is not written", owned)
+        # without merge the template replaces the appliance's NAC: the section stays out, as before
+        groups[0]["templates"][0]["value"] = dict(tpl, merge=False)
+        doc, ledger = self._two_lans(nac=nac, **{"template-groups": groups})
+        self.assertNotIn("nac", doc)
+        self.assertIn("the section is not written", next(e["note"] for e in ledger if e["item"] == "template nac"))
+
+    def test_bgp_route_targets_with_apply_status_none_are_not_template_owned(self):
+        rt = {"import": "0:0", "export": "0:0"}
+        bgp = {"name": "bgp", "value": {"vrf": {"0": {"max_restart_time": 120, "route_target_template": dict(rt, applyStatus="none")},
+                                               "1": {"route_target_template": dict(rt, applyStatus="NONE")},
+                                               "2": {"route_target_template": rt}}}}  # no applyStatus: owned, as before
+        groups = [{"name": "G1", "selectedTemplateNames": ["bgp"], "templates": [bgp]}]
+        owned = template_fields(FakeCap({"template-association": {"templateIds": ["G1"]}, "template-groups": groups}))
+        self.assertEqual(owned["bgp"], {"0": {"maxRestartTime"}, "1": set(), "2": {"importRouteTarget", "exportRouteTarget"}})
+
+    def test_vxlan_template_without_a_vtep_leaves_the_vtep_to_the_appliance(self):
+        live = {"vxlan": {"port": 4789, "vtepIf": "lo1"}, "vxlan-vni-map": {"0": {"vni": 1001}, "1": {"vni": 1002}}}
+        def run(tpl):
+            groups = [{"name": "G1", "selectedTemplateNames": ["vxlan"], "templates": [{"name": "vxlan", "value": tpl}]}]
+            return self._two_lans(**live, **{"template-groups": groups})
+        doc, ledger = run({"port": "4789", "vrfId": {"1": {"role": "0", "vni": 5000, "zoneId": 0}}, "vtepIf": "none"})
+        got = doc.get("vxlan") or {}
+        self.assertEqual(got.get("vtepSrcInterface"), "lo1")
+        self.assertEqual(got.get("destinationUdpPort"), 4789)  # the template sets it too, but /validate requires it
+        port = [e for e in ledger if e["item"] == "vxlan destinationUdpPort"]
+        self.assertEqual([e["disposition"] for e in port], ["mapped"])
+        self.assertIn("requires", port[0]["note"])
+        self.assertEqual([m["vni"] for m in got.get("vniVrfMaps", [])], [1001])  # Guest's VNI map is the template's
+        self.assertIn("vniVrfMaps", next(e["note"] for e in ledger if e["item"] == "template vxlan"))
+        doc, _ = run({"port": "4789", "vrfId": {}, "vtepIf": ""})
+        self.assertEqual([m["vni"] for m in doc["vxlan"]["vniVrfMaps"]], [1001, 1002])
+        # a template that sets the VTEP owns the section, as before
+        doc, ledger = run({"port": "4789", "vrfId": {}, "vtepIf": "lo5"})
+        self.assertNotIn("vxlan", doc)
+        self.assertIn("the section is not written", next(e["note"] for e in ledger if e["item"] == "template vxlan"))
+
     def test_bgp_neighbor_without_evpn_key_before_ecos_9_4_1(self):
         nb = {"192.0.2.2": {"remote_as": 65002, "type": "PE-router", "enable": True, "hold": 180, "ka": 60, "lcl_interface": "", "next_hop_self": False,
                             "password": "", "store_received_routes": False, "bfd_desired": False, "directly_connected": True}}
