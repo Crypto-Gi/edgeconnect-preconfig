@@ -1339,6 +1339,8 @@ class RouteLabelsAndContact(unittest.TestCase):
             self.assertEqual(len(gaps), 1, notes)
             self.assertIn("203.0.113.0/24", gaps[0]["note"])
             self.assertIn("7", gaps[0]["note"])
+            # the reason must say why: no stored running-config is not "a label the running-config does not name"
+            self.assertIn("no stored running-config" if rc is None else "do not name", gaps[0]["note"])
 
     def test_ip_sla_route_label_comes_from_route_labels(self):
         from mappers import m_ipSlaRule

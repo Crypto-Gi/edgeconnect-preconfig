@@ -55,7 +55,9 @@ class Ctx:
             found = (re.match(r"^internal set modify - /cn/rtlabels/config/(\d+)/name value string (.+)$", l) for l in cli_lines(self))
             self.route_labels = {m.group(1): re.sub(r'^"(.*)"$', r"\1", m.group(2)) for m in found if m}
         name = self.route_labels.get(str(ident))
-        if name is None:
+        if name is None and not self.route_labels and not cli_lines(self):
+            self.note(item, "unresolved", target, "{} has route label id {}, but no stored running-config could be read, so route label names are unknown; routeLabel written as null, set it by hand".format(what, ident))
+        elif name is None:
             self.note(item, "unresolved", target, "{} has route label id {}, which the running-config's route labels (/cn/rtlabels) do not name; routeLabel written as null, set it by hand".format(what, ident))
         else:
             cli_note(self, target, "route label names from /cn/rtlabels")
