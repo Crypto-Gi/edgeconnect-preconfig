@@ -1507,5 +1507,21 @@ class MulticastOneObject(unittest.TestCase):
         self.assertEqual(m_multicast(c)[0]["enable"], "true")  # switched on with nothing else set is still a setting
 
 
+class ManagedBgpNeighbors(unittest.TestCase):
+    """BGP neighbors Orchestrator services create (gms_marked) are skipped as before, and the ledger names them."""
+
+    def test_skipped_neighbors_are_ledgered(self):
+        neighbors = {"192.0.2.2": NEIGHBOR, "192.0.2.9": dict(NEIGHBOR, gms_marked=True)}
+        c, notes = ctx({"deployment": DEP, "bgp-system": {"enable": True, "asn": 65000}, "bgp-neighbors": neighbors})
+        self.assertEqual([n["peerIpAddress"] for n in m_bgpSystemConfig(c)["neighbors"]], ["192.0.2.2"])
+        self.assertEqual([(n["item"], n["target"], "192.0.2.9" in n["note"]) for n in notes if n["disposition"] == "orchestrator-managed"],
+                         [("bgp-system", "bgpSystemConfig.neighbors", True)])
+        c, notes = ctx({"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 65000}, "1": {"enable": True, "asn": 65000}},
+                        "bgp-neighbors-all-vrfs": {"1": {"192.0.2.9": dict(NEIGHBOR, gmsMarked=True), "192.0.2.10": dict(NEIGHBOR, gms_marked=True)}}})
+        self.assertEqual([s["neighbors"] for s in m_segmentBgpSystems(c)], [[], []])
+        self.assertEqual([(n["item"], n["target"], "192.0.2.10, 192.0.2.9" in n["note"]) for n in notes if n["disposition"] == "orchestrator-managed"],
+                         [("bgp-system-all-vrfs[1]", "segmentBgpSystems.neighbors", True)])
+
+
 if __name__ == "__main__":
     unittest.main()

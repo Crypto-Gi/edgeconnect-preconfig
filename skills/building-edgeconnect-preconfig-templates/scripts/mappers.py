@@ -385,6 +385,10 @@ BGP_NEIGHBOR_USED = {"remote_as", "type", "enable", "hold", "ka", "lcl_interface
 def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str, Any], vrf: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """BGP of the Default segment, or with vrf of that segment (segmentBgpSystems)."""
     live = [(ip, n) for ip, n in sorted((neighbors or {}).items()) if not managed(n)]
+    skipped = sorted(ip for ip, n in (neighbors or {}).items() if managed(n))
+    if skipped and label != "check":
+        ctx.note(label, "orchestrator-managed", "segmentBgpSystems.neighbors" if vrf is not None else "bgpSystemConfig.neighbors",
+                 "{} BGP neighbor(s) created by Orchestrator services (gms_marked) not written: {}".format(len(skipped), ", ".join(skipped)))
     if system is None and vrf is not None:
         raise Unreadable("the segment's BGP settings could not be read")
     if not system and live:  # a non-dict system that is truthy fails on .get below
