@@ -1,3 +1,4 @@
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -750,19 +751,18 @@ class AuditRegressions(unittest.TestCase):
         self.assertTrue(load_constraints())
 
 
-if __name__ == "__main__":
-    unittest.main()
 
-
-class ItemIsolation(unittest.TestCase):
-    """One malformed item is ledgered as toolkit-error and skipped; the rest of its section is still written."""
-
+class IsolationCheck:
     def check(self, mapper, data, pick, good, section):
         c, notes = ctx(data)
         out = mapper(c)
         self.assertIsNotNone(out, "the whole section was dropped")
         self.assertEqual(pick(out), good)
         self.assertEqual([n["target"] for n in notes if n["disposition"] == "toolkit-error"], [section])
+
+
+class ItemIsolation(IsolationCheck, unittest.TestCase):
+    """One malformed item is ledgered as toolkit-error and skipped; the rest of its section is still written."""
 
     def test_vrrp_group(self):
         from mappers import m_vrrp
@@ -817,8 +817,8 @@ class ItemIsolation(unittest.TestCase):
         dep = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}, {"id": "2", "name": "guest"}]), "modeIfs": DEP["modeIfs"]}
         iface = {"area": "0.0.0.0", "cost": 1, "priority": 1, "adminStatus": True, "helloInterval": 10, "deadInterval": 40, "transmitDelay": 1, "retransmitInterval": 5,
                  "authType": "None", "authKey": "", "md5Key": 0, "md5Password": "", "comment": "", "bfdDesired": False}
-        data = {"deployment": dep, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}, "2": {"enable": True}},
-                "ospf-interfaces-all-vrfs": {"0": {"lan0": iface}, "1": {"lan0.71": iface}, "2": {"lan0.72": {"area": "0.0.0.0"}}}}
+        data = {"deployment": dep, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}, "2": "unexpected"},
+                "ospf-interfaces-all-vrfs": {"0": {"lan0": iface}, "1": {"lan0.71": iface}, "2": {"lan0.72": iface}}}
         self.check(m_segmentOspfConfig, data, lambda o: [e["segment"] for e in o], ["Default", "corp"], "segmentOspfConfig")
 
     def test_bgp_segment(self):
@@ -842,3 +842,161 @@ class ItemIsolation(unittest.TestCase):
         bad = {"vrf_id": 1, "pim": "unexpected"}
         data = {"deployment": DEP, "multicast-config": [good, bad], "multicast-enable": [{"vrf_id": 0, "enable": True}]}
         self.check(m_multicast, data, lambda o: [e["segment"] for e in o], ["Default"], "multicast")
+
+
+DEP3 = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}, {"id": "2", "name": "guest"}]), "modeIfs": DEP["modeIfs"]}
+OSPF_IF = {"area": "0.0.0.0", "cost": 1, "priority": 1, "adminStatus": True, "helloInterval": 10, "deadInterval": 40, "transmitDelay": 1, "retransmitInterval": 5,
+           "authType": "None", "authKey": "", "md5Key": 0, "md5Password": "", "comment": "", "bfdDesired": False}
+NEIGHBOR = {"remote_as": 65001, "type": "Branch", "enable": True, "hold": 180, "ka": 60, "next_hop_self": False, "store_received_routes": True, "directly_connected": True}
+ROUTE = {"configured": True, "local": True, "automatic": False, "prefix": "198.51.100.0/24", "nextHop": "192.0.2.254", "ifName": "lan0", "metric": 50, "advert": True, "advert_bgp": False, "advert_ospf": False}
+VTI = {"ipaddr": "192.0.2.1", "nmask": 30, "admin": True, "tunnel": "pt1", "side": "lan", "label": "", "vrf_id": 0, "zone": 0, "auto_distribute": False, "behindNAT": "none"}
+PF = {"srcSubnet": "0.0.0.0/0", "destSubnet": "192.0.2.10/32", "destPort": "443", "protocol": "tcp", "targetIp": "", "targetPort": "", "srcIf": "any", "vrf_id": 0, "comment": ""}
+QUIET_DISPOSITIONS = {"mapped", "default-omitted", "runtime", "empty-or-absent", "context", "from-default-template"}  # translate.QUIET
+
+
+def errors(notes):
+    return [n for n in notes if n["disposition"] == "toolkit-error"]
+
+
+class NoEmptySection(unittest.TestCase):
+    """When every item of a list section fails, the section is not written: an empty list replaces the target's items on apply."""
+
+    def check_dropped(self, name, mapper, data):
+        c, notes = ctx(data)
+        try:
+            out = mapper(c)
+        except Exception as err:  # translate's section-level catch also leaves it unwritten
+            out = "raised {}".format(err)
+        self.assertIsNone(out, name)
+        self.assertTrue(errors(notes), name + ": the failure is not ledgered")
+
+    def test_every_list_mapper(self):
+        from mappers import (m_customApplianceTags, m_inboundPortForwarding, m_ipSlaRule, m_linkAggregation, m_localRoutes, m_loopbackInterface, m_ospfSystemConfig,
+                             m_segmentBfdConfigs, m_segmentLocalRoutes, m_virtualTunnelInterface, m_bridgeGroups)
+        bad_route = {k: v for k, v in ROUTE.items() if k != "metric"}
+        cases = [
+            ("multicast", m_multicast, {"deployment": DEP, "multicast-config": [{"vrf_id": 1, "pim": "unexpected"}]}),
+            ("multicast None", m_multicast, {"deployment": DEP, "multicast-config": [None]}),
+            ("bgp neighbors", m_bgpSystemConfig, {"deployment": DEP, "bgp-system": {"enable": True, "asn": 65000}, "bgp-neighbors": {"192.0.2.2": {"type": "Branch"}, "192.0.2.3": None}}),
+            ("segment bgp neighbors", m_segmentBgpSystems, {"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": False, "asn": 1}, "1": {"enable": True, "asn": 65000}},
+                                                            "bgp-neighbors-all-vrfs": {"1": {"192.0.2.2": {"type": "Branch"}}}}),
+            ("local routes", m_localRoutes, {"deployment": DEP, "subnets": {"subnets": {"entries": [{"state": bad_route}, None]}}}),
+            ("segment routes", m_segmentLocalRoutes, {"deployment": DEP3, "subnets-all-vrfs": {"subnets": {"1": {"entries": [{"state": bad_route}]}}}}),
+            ("vrrp", m_vrrp, {"vrrp": [None, {"groupId": 2}]}),
+            ("loopbacks", m_loopbackInterface, {"deployment": DEP, "loopbacks": {"lo1": None, "lo2": {"admin": True}}}),
+            ("lag", m_linkAggregation, {"link-aggregation": {"blan0": None, "blan1": {"mtu": 1500}}}),
+            ("bridge", m_bridgeGroups, {"bridge-groups": {"blan0": None, "blan1": {"mtu": 1500}}}),
+            ("bfd", m_segmentBfdConfigs, {"deployment": DEP, "bfd-vrfs": {"0": None, "1": {"enable": True}}}),
+            ("tags", m_customApplianceTags, {"custom-tags": {"1": None, "x": {"name": "a", "value": "b"}}}),
+            ("port forwarding", m_inboundPortForwarding, {"deployment": DEP, "port-forwarding": [None, {"srcIf": "any", "comment": ""}]}),
+            ("ip sla", m_ipSlaRule, {"deployment": DEP, "ipsla-managers": {"MGR_1": None}}),
+            ("branch nat", m_branchNatMapsConfig, {"deployment": DEP, "branch-nat-maps": {"map1": {"prio": {"10": None, "20": {"match": "x"}}}}}),
+            ("vti", m_virtualTunnelInterface, {"deployment": DEP, "vtis": {"vti1": None, "vti2": {"ipaddr": "192.0.2.5"}}}),
+            ("ospf system interfaces", m_ospfSystemConfig, {"deployment": DEP, "ospf-system": {"enable": True}, "ospf-areas": {}, "ospf-interfaces": {"lan0": None}}),
+            ("segment ospf", m_segmentOspfConfig, {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"1": None}, "ospf-interfaces-all-vrfs": {}}),
+            ("segment ospf interfaces", m_segmentOspfConfig, {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"1": {"enable": True}}, "ospf-interfaces-all-vrfs": {"1": {"lan0.71": None}}}),
+        ]
+        for name, mapper, data in cases:
+            with self.subTest(name):
+                self.check_dropped(name, mapper, data)
+
+
+class NonDictItems(IsolationCheck, unittest.TestCase):
+    """A null or non-dict item is skipped like any other unreadable item; the filters and ledger loops around it must not trip on it."""
+
+    def test_bridge_and_lag_null(self):
+        from mappers import m_bridgeGroups, m_linkAggregation
+        bg = {"portlist": "lan1,lan2", "mtu": 1500, "admin": True, "comments": ""}
+        self.check(m_bridgeGroups, {"bridge-groups": {"blan0": bg, "blan1": None}}, lambda o: [x["bridgeGroup"] for x in o], ["blan0"], "bridgeGroups")
+        lag = {"portlist": "lan0,lan1", "mtu": 1500, "mode": 4, "lacp_rate": "slow", "lacp_sys_prio": 65535, "comment": ""}
+        self.check(m_linkAggregation, {"link-aggregation": {"blan0": lag, "blan1": None}}, lambda o: [x["channelGroup"] for x in o["linkAggregationGroups"]], ["blan0"], "linkAggregation")
+
+    def test_bfd_null(self):
+        from mappers import m_segmentBfdConfigs
+        good = {"enable": True, "minRxInterval": 300, "minTxInterval": 300, "detectMultiplier": 3}
+        self.check(m_segmentBfdConfigs, {"deployment": DEP, "bfd-vrfs": {"0": good, "1": None}}, lambda o: [e["segment"] for e in o], ["Default"], "segmentBfdConfigs")
+
+    def test_tags_null_and_non_numeric_key(self):
+        from mappers import m_customApplianceTags
+        self.check(m_customApplianceTags, {"custom-tags": {"1": {"name": "site", "value": "a"}, "2": None}}, lambda o: [t["key"] for t in o["customApplianceTagsInterfaces"]], ["site"], "customApplianceTags")
+        self.check(m_customApplianceTags, {"custom-tags": {"1": {"name": "site", "value": "a"}, "x": {"name": "r", "value": "b"}}}, lambda o: [t["key"] for t in o["customApplianceTagsInterfaces"]], ["site"], "customApplianceTags")
+
+    def test_segment_ospf_null_segment_and_interface(self):
+        data = {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}, "2": None},
+                "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF}, "1": {"lan0.71": OSPF_IF}}}
+        self.check(m_segmentOspfConfig, data, lambda o: [e["segment"] for e in o], ["Default", "corp"], "segmentOspfConfig")
+
+    def test_port_forwarding_and_vrrp_null(self):
+        from mappers import m_inboundPortForwarding
+        self.check(m_inboundPortForwarding, {"deployment": DEP, "port-forwarding": [PF, None]}, lambda o: len(o["portForwardingRules"]), 1, "inboundPortForwarding")
+        g = {"groupId": 1, "interface": "lan0", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 1, "priority": 100, "version": 2, "preempt": True, "pkt_trace": False, "holddown": 10}
+        self.check(m_vrrp, {"vrrp": [g, None]}, lambda o: [e["groupId"] for e in o["vrrpEntries"]], [1], "vrrp")
+
+
+class PerItemLists(IsolationCheck, unittest.TestCase):
+    """Lists that used to be built in one expression: one bad entry is skipped, the rest are written."""
+
+    def test_vti(self):
+        from mappers import m_virtualTunnelInterface
+        bad = {k: v for k, v in VTI.items() if k != "auto_distribute"}
+        self.check(m_virtualTunnelInterface, {"deployment": DEP, "vtis": {"vti1": VTI, "vti2": bad}}, lambda o: [v["interfaceId"] for v in o["vtis"]], ["vti1"], "virtualTunnelInterface")
+
+    def test_ospf_system_interface(self):
+        from mappers import m_ospfSystemConfig
+        bad = {k: v for k, v in OSPF_IF.items() if k != "cost"}
+        data = {"deployment": DEP, "ospf-system": {"enable": True}, "ospf-areas": {}, "ospf-interfaces": {"lan0": OSPF_IF, "lan1": bad}}
+        self.check(m_ospfSystemConfig, data, lambda o: [i["interfaceName"] for i in o["interfaces"]], ["lan0"], "ospfSystemConfig.interfaces")
+
+    def test_segment_ospf_interface(self):
+        bad = {k: v for k, v in OSPF_IF.items() if k != "cost"}
+        data = {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"1": {"enable": True}}, "ospf-interfaces-all-vrfs": {"1": {"lan0.71": OSPF_IF, "lan0.72": bad}}}
+        self.check(m_segmentOspfConfig, data, lambda o: [(e["segment"], [i["interfaceName"] for i in e["interfaces"]]) for e in o], [("corp", ["lan0.71"])], "segmentOspfConfig.interfaces")
+
+
+class LedgerAccuracy(unittest.TestCase):
+    def test_port_forwarding_names_the_captured_index(self):
+        from mappers import m_inboundPortForwarding
+        c, notes = ctx({"deployment": DEP, "port-forwarding": [dict(PF, comment="HA rule"), PF, {"srcIf": "any", "comment": ""}]})
+        m_inboundPortForwarding(c)
+        self.assertEqual([n["item"] for n in errors(notes)], ["port-forwarding[2]"])
+
+    def test_branch_nat_failures_in_two_maps_are_two_lines(self):
+        c, notes = ctx({"deployment": DEP, "branch-nat-maps": {"map1": {"prio": {"10": {"match": "x"}}}, "map2": {"prio": {"10": {"match": "x"}}}}})
+        m_branchNatMapsConfig(c)
+        self.assertEqual(len(errors(notes)), 2)
+
+    def test_segment_failures_ledgered_under_their_section(self):
+        from mappers import m_segmentLocalRoutes
+        bad_route = {k: v for k, v in dict(ROUTE, prefix="203.0.113.0/24").items() if k != "metric"}
+        c, notes = ctx({"deployment": DEP3, "subnets-all-vrfs": {"subnets": {"1": {"entries": [{"state": ROUTE}, {"state": bad_route}]}}}})
+        m_segmentLocalRoutes(c)
+        self.assertEqual({n["target"] for n in errors(notes)}, {"segmentLocalRoutes.routes"})
+        c, notes = ctx({"deployment": DEP3, "bgp-system-all-vrfs": {"1": {"enable": True, "asn": 65000}},
+                        "bgp-neighbors-all-vrfs": {"1": {"192.0.2.1": NEIGHBOR, "192.0.2.2": {"type": "Branch"}}}})
+        m_segmentBgpSystems(c)
+        self.assertEqual({n["target"] for n in errors(notes)}, {"segmentBgpSystems.neighbors"})
+
+    def test_no_contradicting_default_note_for_failed_items(self):
+        from mappers import m_segmentBfdConfigs, m_customApplianceTags
+        for mapper, data in ((m_segmentBfdConfigs, {"deployment": DEP, "bfd-vrfs": {"0": {"enable": True}}}),
+                             (m_customApplianceTags, {"custom-tags": {"1": {"name": "site"}}}),
+                             (m_segmentBgpSystems, {"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": {"enable": True, "asn": 1}, "2": {"enable": True}}})):
+            with self.subTest(mapper.__name__):
+                c, notes = ctx(data)
+                mapper(c)
+                self.assertTrue(errors(notes))
+                self.assertEqual([n["note"] for n in notes if n["disposition"] == "default-omitted"
+                                  and re.search(r"disabled|no tag has a name|guest", n["note"])], [])
+
+    def test_dormant_ospf_segment_with_settings_is_visible(self):
+        data = {"deployment": DEP3, "ospf-areas": {}, "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF}},
+                "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": False, "routerId": "10.0.0.1", "redistMapToOSPF": "map1"}, "2": {"enable": False, "routerId": "0.0.0.0", "redistMapToOSPF": ""}}}
+        c, notes = ctx(data)
+        m_segmentOspfConfig(c)
+        lines = [n for n in notes if n["item"] == "ospf-system-all-vrfs[1]"]
+        self.assertTrue(lines and all(n["disposition"] not in QUIET_DISPOSITIONS for n in lines), lines)
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "ospf-system-all-vrfs[2]"], ["default-omitted"])
+
+
+if __name__ == "__main__":
+    unittest.main()

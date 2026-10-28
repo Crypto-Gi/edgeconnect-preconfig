@@ -55,6 +55,10 @@ class Ctx:
         name = self.roles.get(str(ident))
         return None if name in (None, "default") else name
 
+    def failed(self, target: str, item: str = "") -> bool:
+        """Whether an item under target (and starting with item) was ledgered as unreadable; a default-omitted note would contradict it."""
+        return any(n["disposition"] == "toolkit-error" and (n["target"] == target or n["target"].startswith(target + ".")) and n["item"].startswith(item) for n in self.notes)
+
     def unmapped(self, item: str, source: Dict[str, Any], used: set, target: str) -> None:
         left = sorted(k for k in source if k not in used and k not in ("gms_marked", "gmsMarked", "self"))
         if left:
@@ -84,9 +88,22 @@ def each(ctx: Ctx, item: str, section: str, pairs: Any, build: Any) -> List[Any]
     return out
 
 
+OSPF_IF_USED = {"area", "cost", "priority", "adminStatus", "helloInterval", "deadInterval", "transmitDelay", "retransmitInterval", "authType", "authKey", "md5Key", "md5Password", "comment", "bfdDesired"}
+
+
+def ospf_area(area: str, a: Dict[str, Any]) -> Dict[str, Any]:
+    return {"areaId": area, "areaType": a["area_type"], "redist": a["redist"], "summary": a["summary"], "translatorRole": a["translator_role"]}
+
+
+def ospf_interface(name: str, i: Dict[str, Any]) -> Dict[str, Any]:
+    return {"interfaceName": name, "areaId": i["area"], "cost": i["cost"], "priority": i["priority"], "adminStatus": ADMIN[bool(i["adminStatus"])], "helloInterval": i["helloInterval"],
+            "deadInterval": i["deadInterval"], "transmitDelay": i["transmitDelay"], "retransmitInterval": i["retransmitInterval"], "authentication": i["authType"],
+            "authenticationKey": nul(i["authKey"]), "md5Key": i["md5Key"], "md5Password": nul(i["md5Password"]), "comment": nul(i["comment"])}
+
+
 def m_ospfSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     all_systems, all_ifs = ctx.data("ospf-system-all-vrfs") or {}, ctx.data("ospf-interfaces-all-vrfs") or {}
-    if any(vrf != "0" and ospf_kept(s, all_ifs.get(vrf)) for vrf, s in all_systems.items()):
+    if any(vrf != "0" and ospf_runs(all_systems, all_ifs, vrf) for vrf in all_systems):
         ctx.note("ospf-system", "default-omitted", "ospfSystemConfig", "non-default segment OSPF exists, so Default segment OSPF is included in segmentOspfConfig (Orchestrator ignores ospfSystemConfig when segmentOspfConfig is present)")
         return None
     system, areas, ifs = ctx.data("ospf-system"), ctx.data("ospf-areas"), ctx.data("ospf-interfaces")
@@ -95,16 +112,16 @@ def m_ospfSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
         return None
     out: Dict[str, Any] = {"enable": system["enable"], "routerId": nul(system.get("routerId")), "redistMapToOspf": nul(system.get("redistMapToOSPF")), "opaqueEnable": system.get("opaque_enable")}
     ctx.unmapped("ospf-system", system, {"enable", "routerId", "redistMapToOSPF", "opaque_enable"}, "ospfSystemConfig")
-    out["areas"] = [{"areaId": area, "areaType": a["area_type"], "redist": a["redist"], "summary": a["summary"], "translatorRole": a["translator_role"]}
-                    for area, a in sorted((areas or {}).get("0", {}).items())]
-    out["interfaces"] = []
-    for name, i in sorted((ifs or {}).items()):
-        out["interfaces"].append({"interfaceName": name, "areaId": i["area"], "cost": i["cost"], "priority": i["priority"], "adminStatus": ADMIN[bool(i["adminStatus"])],
-                                  "helloInterval": i["helloInterval"], "deadInterval": i["deadInterval"], "transmitDelay": i["transmitDelay"], "retransmitInterval": i["retransmitInterval"],
-                                  "authentication": i["authType"], "authenticationKey": nul(i["authKey"]), "md5Key": i["md5Key"], "md5Password": nul(i["md5Password"]),
-                                  "comment": nul(i["comment"]), "bfdEnabled": i["bfdDesired"]})
-        ctx.unmapped("ospf-interfaces[{}]".format(name), i, {"area", "cost", "priority", "adminStatus", "helloInterval", "deadInterval", "transmitDelay", "retransmitInterval",
-                                                            "authType", "authKey", "md5Key", "md5Password", "comment", "bfdDesired"}, "ospfSystemConfig.interfaces")
+    src_areas = sorted(((areas or {}).get("0") or {}).items())
+    out["areas"] = each(ctx, "ospf-areas", "ospfSystemConfig.areas", src_areas, ospf_area)
+
+    def interface(name: str, i: Dict[str, Any]) -> Dict[str, Any]:
+        entry = dict(ospf_interface(name, i), bfdEnabled=i["bfdDesired"])
+        ctx.unmapped("ospf-interfaces[{}]".format(name), i, OSPF_IF_USED, "ospfSystemConfig.interfaces")
+        return entry
+    out["interfaces"] = each(ctx, "ospf-interfaces", "ospfSystemConfig.interfaces", sorted((ifs or {}).items()), interface)
+    if (ifs and not out["interfaces"]) or (src_areas and not out["areas"]):  # every item failed: an empty list would replace the target's on apply
+        return None
     ctx.note("ospf-system, ospf-areas, ospf-interfaces", "mapped", "ospfSystemConfig", "default VRF only; interface adminStatus true/false written as Up/Down")
     return out
 
@@ -129,22 +146,25 @@ def m_linkAggregation(ctx: Ctx) -> Optional[Dict[str, Any]]:
     source = ctx.data("link-aggregation") or {}
     if not source:
         return None
-    groups = each(ctx, "link-aggregation", "linkAggregation", sorted(source.items()), lambda k, v: {"channelGroup": k, "interfaces": v["portlist"], "mtu": v["mtu"], "mode": v["mode"],
-                  "lacpRate": v["lacp_rate"], "lacpSystemPriority": v["lacp_sys_prio"], "lacpComment": nul(v["comment"])})
+
+    def group(k: str, v: Dict[str, Any]) -> Dict[str, Any]:
+        entry = {"channelGroup": k, "interfaces": v["portlist"], "mtu": v["mtu"], "mode": v["mode"], "lacpRate": v["lacp_rate"], "lacpSystemPriority": v["lacp_sys_prio"], "lacpComment": nul(v["comment"])}
+        ctx.unmapped("link-aggregation[{}]".format(k), v, {"portlist", "mtu", "mode", "lacp_rate", "lacp_sys_prio", "comment"}, "linkAggregation")
+        return entry
+    groups = each(ctx, "link-aggregation", "linkAggregation", sorted(source.items()), group)
     if not groups:
         return None
-    for k, v in source.items():
-        ctx.unmapped("link-aggregation[{}]".format(k), v, {"portlist", "mtu", "mode", "lacp_rate", "lacp_sys_prio", "comment"}, "linkAggregation")
     ctx.note("link-aggregation", "mapped", "linkAggregation", "{} bonded interfaces; isForceDelete has no source and is omitted".format(len(groups)))
     return {"linkAggregationGroups": groups}
 
 
 def m_segmentBfdConfigs(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     source = ctx.data("bfd-vrfs") or {}
-    out = each(ctx, "bfd-vrfs", "segmentBfdConfigs", [(k, v) for k, v in sorted(source.items()) if v.get("enable")],
-               lambda k, v: {"segment": ctx.segment(k), "enable": v["enable"], "minRxInterval": v["minRxInterval"], "minTxInterval": v["minTxInterval"], "detectMultiplier": v["detectMultiplier"]})
+    out = [b for b in each(ctx, "bfd-vrfs", "segmentBfdConfigs", sorted(source.items()), lambda k, v: {
+        "segment": ctx.segment(k), "enable": v["enable"], "minRxInterval": v["minRxInterval"], "minTxInterval": v["minTxInterval"], "detectMultiplier": v["detectMultiplier"]} if v.get("enable") else None) if b]
     if not out:
-        ctx.note("bfd-vrfs", "default-omitted", "segmentBfdConfigs", "BFD disabled in every segment")
+        if not ctx.failed("segmentBfdConfigs"):
+            ctx.note("bfd-vrfs", "default-omitted", "segmentBfdConfigs", "BFD disabled in every segment")
         return None
     ctx.note("bfd-vrfs", "mapped", "segmentBfdConfigs", "{} segments with BFD enabled".format(len(out)))
     return out
@@ -152,10 +172,11 @@ def m_segmentBfdConfigs(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
 
 def m_customApplianceTags(ctx: Ctx) -> Optional[Dict[str, Any]]:
     source = ctx.data("custom-tags") or {}
-    tags = each(ctx, "custom-tags", "customApplianceTags", [(k, v) for k, v in sorted(source.items(), key=lambda kv: int(kv[0])) if v.get("name")],
-                lambda k, v: {"tagId": int(k), "key": v["name"], "value": v["value"]})
+    ordered = sorted(source.items(), key=lambda kv: (0, int(kv[0]), "") if str(kv[0]).isdigit() else (1, 0, str(kv[0])))
+    tags = [t for t in each(ctx, "custom-tags", "customApplianceTags", ordered, lambda k, v: {"tagId": int(k), "key": v["name"], "value": v["value"]} if v.get("name") else None) if t]
     if not tags:
-        ctx.note("custom-tags", "default-omitted", "customApplianceTags", "no tag has a name")
+        if not ctx.failed("customApplianceTags"):
+            ctx.note("custom-tags", "default-omitted", "customApplianceTags", "no tag has a name")
         return None
     ctx.note("custom-tags", "mapped", "customApplianceTags", "{} named tags".format(len(tags)))
     return {"customApplianceTagsInterfaces": tags}
@@ -163,10 +184,10 @@ def m_customApplianceTags(ctx: Ctx) -> Optional[Dict[str, Any]]:
 
 def m_inboundPortForwarding(ctx: Ctx) -> Optional[Dict[str, Any]]:
     raw = ctx.data("port-forwarding") or []
-    ha_rules = [r for r in raw if r.get("comment") == "HA rule"]
+    ha_rules = [r for r in raw if isinstance(r, dict) and r.get("comment") == "HA rule"]
     if ha_rules:
         ctx.note("port-forwarding", "orchestrator-managed", "inboundPortForwarding", "{} rules with comment 'HA rule' generated by EdgeHA".format(len(ha_rules)))
-    source = [r for r in raw if not managed(r) and r.get("comment") != "HA rule"]
+    source = [(i, r) for i, r in enumerate(raw) if not managed(r) and r not in ha_rules]  # i: position in the captured list, which the ledger names
     if not source:
         return None
     wan_label_by_if = {}
@@ -178,7 +199,7 @@ def m_inboundPortForwarding(ctx: Ctx) -> Optional[Dict[str, Any]]:
                 wan_label_by_if[ifname] = ctx.label(a["label"])
     rules = []
     seen = set()
-    for i, r in enumerate(source):
+    for i, r in source:
         try:
             src_if = r["srcIf"] or "any"
             if str(src_if).isdigit():
@@ -232,6 +253,8 @@ def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str,
         ctx.note(label, "default-omitted", "bgpSystemConfig.import/exportRouteTarget", "0:0 means no route target (the validator rejects ASN 0)")
     ctx.unmapped(label, system, {"enable", "asn", "rtr_id", "graceful_restart_en", "max_restart_time", "stale_path_time", "remote_as_path_advertise", "route_target", "neighbor", "enable_gms_marked", "log_nbr_msgs"}, "bgpSystemConfig")
     out["neighbors"] = []
+    target = "segmentBgpSystems.neighbors" if segment is not None else "bgpSystemConfig.neighbors"
+    failed = 0
     for ip, n in live:
         try:
             nb = {"peerIpAddress": ip, "sourceIpInterface": nul(n.get("lcl_interface")), "peerAsn": n["remote_as"], "peerType": n["type"], "enableNeighbor": n["enable"],
@@ -239,11 +262,14 @@ def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str,
                                  "outboundRouteMap": nul(n.get("rtmap_outbound")), "keepAlive": n["ka"], "holdTime": n["hold"], "password": nul(n.get("password")),
                                  "enableEVPN": n.get("evpn", False), "bfdEnabled": n.get("bfd_desired", False), "peerAdjacency": "SINGLE_HOP" if n["directly_connected"] else "MULTI_HOP"}
         except ITEM_ERRORS as err:
+            failed += 1
             if label != "check":  # m_bgpSystemConfig/m_segmentBgpSystems probe each segment once with label "check" first
-                item_failed(ctx, "{} neighbor {}".format(label, ip), "bgpSystemConfig.neighbors", err)
+                item_failed(ctx, "{} neighbor {}".format(label, ip), target, err)
             continue
         out["neighbors"].append(nb)
-        ctx.unmapped("{} neighbor {}".format(label, ip), n, BGP_NEIGHBOR_USED, "bgpSystemConfig.neighbors")
+        ctx.unmapped("{} neighbor {}".format(label, ip), n, BGP_NEIGHBOR_USED, target)
+    if failed and not out["neighbors"]:  # neighbors replace on apply: an empty list would remove the target's
+        raise ValueError("no BGP neighbor could be read")
     return out
 
 
@@ -260,7 +286,11 @@ def m_bgpSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     if any(vrf != "0" and has_bgp(ctx, systems[vrf], neighbors.get(vrf, {})) for vrf in systems):
         ctx.note("bgp-system, bgp-neighbors", "default-omitted", "bgpSystemConfig", "non-default segment BGP exists, so Default segment BGP is included in segmentBgpSystems (Orchestrator ignores bgpSystemConfig when segmentBgpSystems is present)")
         return None
-    out = bgp_value(ctx, "bgp-system", ctx.data("bgp-system"), ctx.data("bgp-neighbors"))
+    try:
+        out = bgp_value(ctx, "bgp-system", ctx.data("bgp-system"), ctx.data("bgp-neighbors"))
+    except ITEM_ERRORS as err:
+        item_failed(ctx, "bgp-system", "bgpSystemConfig", err)
+        return None
     ctx.note("bgp-system, bgp-neighbors", "mapped" if out else "default-omitted", "bgpSystemConfig", "default segment" if out else "BGP disabled and no neighbors")
     return out
 
@@ -274,7 +304,7 @@ def m_segmentBgpSystems(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     out = [v for v in each(ctx, "bgp-system-all-vrfs", "segmentBgpSystems", sorted(systems.items()),
                            lambda vrf, s: bgp_value(ctx, "bgp-system-all-vrfs[{}]".format(vrf), s, neighbors.get(vrf, {}), ctx.segment(vrf))) if v]
     for vrf in sorted(systems):
-        if not any(v.get("segment") == ctx.segment(vrf) for v in out):
+        if not any(v.get("segment") == ctx.segment(vrf) for v in out) and not ctx.failed("segmentBgpSystems", "bgp-system-all-vrfs[{}]".format(vrf)):
             ctx.note("bgp-system-all-vrfs[{}]".format(vrf), "default-omitted", "segmentBgpSystems", "segment {}: BGP disabled with no neighbors (ASN and router ID stay on the source only)".format(ctx.segment(vrf)))
     ctx.note("bgp-system-all-vrfs", "mapped", "segmentBgpSystems", "{} segments with BGP (includes Default when non-default segments use BGP)".format(len(out)))
     return out or None
@@ -325,12 +355,14 @@ def m_bridgeGroups(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     source = ctx.data("bridge-groups") or {}
     if not source:
         return None
-    out = each(ctx, "bridge-groups", "bridgeGroups", sorted(source.items()), lambda k, v: {"bridgeGroup": k, "interfaces": v["portlist"], "mtu": v["mtu"], "adminStatus": ADMIN[bool(v["admin"])],
-               "comment": nul(v["comments"])})
+
+    def group(k: str, v: Dict[str, Any]) -> Dict[str, Any]:
+        entry = {"bridgeGroup": k, "interfaces": v["portlist"], "mtu": v["mtu"], "adminStatus": ADMIN[bool(v["admin"])], "comment": nul(v["comments"])}
+        ctx.unmapped("bridge-groups[{}]".format(k), v, {"portlist", "mtu", "admin", "comments"}, "bridgeGroups")
+        return entry
+    out = each(ctx, "bridge-groups", "bridgeGroups", sorted(source.items()), group)
     if not out:
         return None
-    for k, v in source.items():
-        ctx.unmapped("bridge-groups[{}]".format(k), v, {"portlist", "mtu", "admin", "comments"}, "bridgeGroups")
     ctx.note("bridge-groups", "mapped", "bridgeGroups", "{} groups".format(len(out)))
     return out
 
@@ -340,34 +372,51 @@ def ospf_kept(system: Dict[str, Any], interfaces: Any) -> bool:
     return bool(system.get("enable") or interfaces)
 
 
+def ospf_runs(systems: Dict[str, Any], interfaces: Dict[str, Any], vrf: str) -> bool:
+    """ospf_kept for one segment; an unreadable segment counts as yes, so the per-segment pass writes the rest and ledgers it."""
+    try:
+        return ospf_kept(systems[vrf], interfaces.get(vrf))
+    except ITEM_ERRORS:
+        return True
+
+
 def m_segmentOspfConfig(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     systems, interfaces, areas = ctx.data("ospf-system-all-vrfs") or {}, ctx.data("ospf-interfaces-all-vrfs") or {}, ctx.data("ospf-areas") or {}
-    enabled = any(vrf != "0" and ospf_kept(systems[vrf], interfaces.get(vrf)) for vrf in systems)
+    runs = {vrf: ospf_runs(systems, interfaces, vrf) for vrf in systems}
+    enabled = any(r for vrf, r in runs.items() if vrf != "0")
     for vrf in sorted(systems):
-        if not ospf_kept(systems[vrf], interfaces.get(vrf)) and (vrf != "0" or enabled):
-            ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "default-omitted", "segmentOspfConfig", "segment {}: OSPF disabled with no interfaces, not written".format(ctx.segment(vrf)))
-        elif not systems[vrf].get("enable") and enabled:
+        s = systems[vrf] if isinstance(systems[vrf], dict) else {}
+        if not runs[vrf] and (vrf != "0" or enabled):
+            kept = ["{} {}".format(k, s[k]) for k in ("routerId", "redistMapToOSPF") if s.get(k) not in (None, "", "0.0.0.0")]
+            if kept:
+                ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "outside-preconfig", "segmentOspfConfig",
+                         "segment {}: OSPF switched off with no interfaces, but settings are kept ({}); such a segment is not written, so the target keeps its own".format(ctx.segment(vrf), ", ".join(kept)))
+            else:
+                ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "default-omitted", "segmentOspfConfig", "segment {}: OSPF disabled with no interfaces, not written".format(ctx.segment(vrf)))
+        elif runs[vrf] and s and not s.get("enable") and enabled:
             ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "mapped", "segmentOspfConfig", "segment {}: OSPF switched off but configured on interfaces; written with enable false".format(ctx.segment(vrf)))
     if not enabled:
         ctx.note("ospf-system-all-vrfs", "default-omitted", "segmentOspfConfig", "0 non-default segments with OSPF")
         return None
     out = []
     for vrf in sorted(systems):
-        if not ospf_kept(systems[vrf], interfaces.get(vrf)):
+        if not runs[vrf]:
             continue
-        s = systems[vrf]
-        bfd = sorted(n for n, i in interfaces.get(vrf, {}).items() if i.get("bfdDesired"))
-        if bfd:
-            ctx.note("ospf-interfaces-all-vrfs[{}]".format(vrf), "unmapped-source-key", "segmentOspfConfig.interfaces", "BFD is enabled on {} but segmentOspfConfig has no bfdEnabled field".format(", ".join(bfd)))
         try:
-            out.append({"segment": ctx.segment(vrf), "enable": s["enable"], "routerId": nul(s.get("routerId")), "redistMapToOspf": nul(s.get("redistMapToOSPF")), "opaqueEnable": s.get("opaque_enable"),
-                        "areas": [{"areaId": a, "areaType": v["area_type"], "redist": v["redist"], "summary": v["summary"], "translatorRole": v["translator_role"]} for a, v in sorted(areas.get(vrf, {}).items())],
-                        "interfaces": [{"interfaceName": n, "areaId": i["area"], "cost": i["cost"], "priority": i["priority"], "adminStatus": ADMIN[bool(i["adminStatus"])], "helloInterval": i["helloInterval"],
-                                        "deadInterval": i["deadInterval"], "transmitDelay": i["transmitDelay"], "retransmitInterval": i["retransmitInterval"], "authentication": i["authType"],
-                                        "authenticationKey": nul(i["authKey"]), "md5Key": i["md5Key"], "md5Password": nul(i["md5Password"]), "comment": nul(i["comment"])}
-                                       for n, i in sorted(interfaces.get(vrf, {}).items())]})
+            s, ifs = systems[vrf], interfaces.get(vrf) or {}
+            src_areas = sorted((areas.get(vrf) or {}).items())
+            entry = {"segment": ctx.segment(vrf), "enable": s["enable"], "routerId": nul(s.get("routerId")), "redistMapToOspf": nul(s.get("redistMapToOSPF")), "opaqueEnable": s.get("opaque_enable"),
+                     "areas": each(ctx, "ospf-areas[{}]".format(vrf), "segmentOspfConfig.areas", src_areas, ospf_area),
+                     "interfaces": each(ctx, "ospf-interfaces-all-vrfs[{}]".format(vrf), "segmentOspfConfig.interfaces", sorted(ifs.items()), ospf_interface)}
+            if (ifs and not entry["interfaces"]) or (src_areas and not entry["areas"]):  # an empty list would replace the target's on apply
+                raise ValueError("no OSPF interface or area of the segment could be read")
+            bfd = sorted(n for n, i in ifs.items() if isinstance(i, dict) and i.get("bfdDesired"))
         except ITEM_ERRORS as err:
             item_failed(ctx, "ospf-system-all-vrfs[{}]".format(vrf), "segmentOspfConfig", err)
+            continue
+        if bfd:
+            ctx.note("ospf-interfaces-all-vrfs[{}]".format(vrf), "unmapped-source-key", "segmentOspfConfig.interfaces", "BFD is enabled on {} but segmentOspfConfig has no bfdEnabled field".format(", ".join(bfd)))
+        out.append(entry)
     ctx.note("ospf-system-all-vrfs", "mapped", "segmentOspfConfig", "{} segments with OSPF (includes Default when non-default segments use OSPF)".format(len(out)))
     return out or None
 
@@ -379,16 +428,19 @@ def configured_route(ctx: Ctx, prefix: Any, next_hop: Any, if_name: Any) -> Tupl
     return entry, ((((entry.get("nhop") or {}).get(next_hop or "") or {}).get("interface") or {}).get(if_name or "") or {})
 
 
-def route_list(ctx: Ctx, entries: List[Dict[str, Any]], vrf: str) -> List[Dict[str, Any]]:
-    out = []
+def route_list(ctx: Ctx, entries: List[Dict[str, Any]], vrf: str, target: str = "localRoutes.routes") -> List[Dict[str, Any]]:
+    out, failed = [], 0
     for e in entries:
         try:
             route = one_route(ctx, e, vrf)
         except ITEM_ERRORS as err:
-            item_failed(ctx, "subnets[{}] route {}".format(vrf, ((e.get("state") or {}) if isinstance(e, dict) else {}).get("prefix")), "localRoutes.routes", err)
+            failed += 1
+            item_failed(ctx, "subnets[{}] route {}".format(vrf, ((e.get("state") or {}) if isinstance(e, dict) else {}).get("prefix")), target, err)
             continue
         if route:
             out.append(route)
+    if failed and not out:  # routes replace on apply: an empty list would remove the target's
+        raise ValueError("no route of segment {} could be read".format(vrf))
     return sorted(out, key=lambda r: (str(r.get("routeIpSubnet")), str(r.get("nextHop") or "")))
 
 
@@ -470,14 +522,26 @@ def sharing_segments(ctx: Ctx) -> List[str]:
 def per_segment(ctx: Ctx) -> bool:
     """Routes go in segmentLocalRoutes when a non-Default segment has routes or subnet-sharing settings of its own."""
     all_vrfs = (ctx.data("subnets-all-vrfs") or {}).get("subnets") or {}
-    return any(vrf != "0" for vrf in sharing_segments(ctx)) or any(vrf != "0" and route_list(ctx, block.get("entries", []), vrf) for vrf, block in all_vrfs.items())
+    return any(vrf != "0" for vrf in sharing_segments(ctx)) or any(vrf != "0" and has_routes(ctx, block, vrf) for vrf, block in all_vrfs.items())
+
+
+def has_routes(ctx: Ctx, block: Any, vrf: str) -> bool:
+    """Whether a segment has routes to write; an unreadable one counts as yes, so the per-segment pass writes the rest and ledgers it."""
+    try:
+        return bool(route_list(ctx, block.get("entries", []), vrf, "segmentLocalRoutes.routes"))
+    except ITEM_ERRORS:
+        return True
 
 
 def m_localRoutes(ctx: Ctx) -> Optional[Dict[str, Any]]:
     if per_segment(ctx):
         ctx.note("subnets", "default-omitted", "localRoutes", "non-default segments have routes or subnet-sharing settings, so the Default segment is written in segmentLocalRoutes (Orchestrator ignores localRoutes when segmentLocalRoutes is present)")
         return None
-    routes = route_list(ctx, ((ctx.data("subnets") or {}).get("subnets") or {}).get("entries", []), "0")
+    try:
+        routes = route_list(ctx, ((ctx.data("subnets") or {}).get("subnets") or {}).get("entries", []), "0")
+    except ITEM_ERRORS as err:
+        item_failed(ctx, "subnets", "localRoutes", err)
+        return None
     flags = subnet_sharing(ctx, "0", "localRoutes")
     if not routes and not flags:
         ctx.note("subnets", "default-omitted", "localRoutes", "no locally configured routes")
@@ -495,7 +559,11 @@ def m_segmentLocalRoutes(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     out = []
     # A segment without routes still carries subnet-sharing settings of its own; one at the ECOS defaults is left out, since writing it adds default_rtmap_to_subsh
     for vrf in sorted(set(data) | set(sharing_segments(ctx))):
-        routes = route_list(ctx, (data.get(vrf) or {}).get("entries", []), vrf)
+        try:
+            routes = route_list(ctx, (data.get(vrf) or {}).get("entries", []), vrf, "segmentLocalRoutes.routes")
+        except ITEM_ERRORS as err:
+            item_failed(ctx, "subnets-all-vrfs[{}]".format(vrf), "segmentLocalRoutes", err)
+            continue
         flags = subnet_sharing(ctx, vrf, "segmentLocalRoutes")
         if routes or (flags and (vrf == "0" or own_sharing(flags))):
             out.append(dict({"segment": ctx.segment(vrf)}, **flags, routes=routes))
@@ -628,7 +696,7 @@ def m_multicast(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         if source:
             ctx.note("multicast-config", "unresolved", "multicast", "this release returns multicast as one object keyed pim0, pim1..., without interface names; the mapping to interfaces is unknown")
         return None
-    flags = {str(e["vrf_id"]): e["enable"] for e in (ctx.data("multicast-enable") or []) if isinstance(e, dict)}
+    flags = {str(e.get("vrf_id")): e.get("enable") for e in (ctx.data("multicast-enable") or []) if isinstance(e, dict)}
     known = set()
     for m in (ctx.data("deployment") or {}).get("modeIfs", []):
         for a in m["applianceIPs"]:
@@ -649,6 +717,8 @@ def m_multicast(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         except ITEM_ERRORS as err:
             item_failed(ctx, "multicast-config[{}]".format(seg.get("vrf_id") if isinstance(seg, dict) else seg), "multicast", err)
             continue
+    if not out:  # every segment failed (ledgered above), or none configured
+        return None
     ctx.note("multicast-config", "mapped", "multicast", "{} segment(s); igmpEnable true when the interface is listed under igmp (assumption); enable written as a string true/false/none".format(len(out)))
     return out
 
@@ -995,9 +1065,12 @@ def m_virtualTunnelInterface(ctx: Ctx) -> Optional[Dict[str, Any]]:
         ctx.note("vtis", "orchestrator-managed", "virtualTunnelInterface", "{} interfaces created by Orchestrator services (gms_marked, third-party cloud tunnels)".format(len(source) - len(mine)))
     if not mine:
         return None
-    out = [{"interfaceId": k, "ipAddressMask": "{}/{}".format(v["ipaddr"], v["nmask"]), "ipAddressAliasMask": "{}/{}".format(v["ipaddr_alias"], v["nmask_alias"]) if v.get("ipaddr_alias") not in (None, "", "0.0.0.0") else None,
-            "adminStatus": ADMIN[bool(v["admin"])], "passthroughTunnel": nul(v["tunnel"]), "interfaceType": v["side"], "interfaceLabel": ctx.label(v["label"]), "interfaceLabelAlias": ctx.label(v.get("label_alias")),
-            "zone": ctx.zone(v["vrf_id"], v["zone"]), "role": ctx.role(v.get("role_id", 0)), "segment": ctx.segment(v["vrf_id"]), "autoDistribute": v["auto_distribute"], "behindNat": v["behindNAT"]} for k, v in sorted(mine.items())]
+    out = each(ctx, "vtis", "virtualTunnelInterface", sorted(mine.items()), lambda k, v: {
+        "interfaceId": k, "ipAddressMask": "{}/{}".format(v["ipaddr"], v["nmask"]), "ipAddressAliasMask": "{}/{}".format(v["ipaddr_alias"], v["nmask_alias"]) if v.get("ipaddr_alias") not in (None, "", "0.0.0.0") else None,
+        "adminStatus": ADMIN[bool(v["admin"])], "passthroughTunnel": nul(v["tunnel"]), "interfaceType": v["side"], "interfaceLabel": ctx.label(v["label"]), "interfaceLabelAlias": ctx.label(v.get("label_alias")),
+        "zone": ctx.zone(v["vrf_id"], v["zone"]), "role": ctx.role(v.get("role_id", 0)), "segment": ctx.segment(v["vrf_id"]), "autoDistribute": v["auto_distribute"], "behindNat": v["behindNAT"]})
+    if not out:
+        return None
     ctx.note("vtis", "mapped", "virtualTunnelInterface", "{} user interfaces (no user-defined sample was available: shape verified against the validator only on synthetic data)".format(len(out)))
     return {"vtis": out}
 
@@ -1007,7 +1080,7 @@ def m_branchNatMapsConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     pools = ctx.data("nat-pools") or {}
     pool_index = {str(k): i for i, k in enumerate(sorted(pools, key=int))}  # natPools is written in this order (m_natPools)
     rules = []
-    for mp in data.values() if isinstance(data, dict) else []:
+    for map_name, mp in data.items() if isinstance(data, dict) else []:
         if not isinstance(mp, dict):  # names only ({"map1": "map1"}): the map is left with no rules (references/lessons.md)
             continue
         for prio, e in sorted((mp.get("prio") or {}).items(), key=lambda kv: int(kv[0])):
@@ -1044,7 +1117,7 @@ def m_branchNatMapsConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
                     rule["translateDestinationPort"] = str(st["trans_dport"])
                 rules.append(rule)
             except ITEM_ERRORS as err:
-                item_failed(ctx, "branch-nat-maps rule {}".format(prio), "branchNatMapsConfig", err)
+                item_failed(ctx, "branch-nat-maps[{}] rule {}".format(map_name, prio), "branchNatMapsConfig", err)
                 continue
     names_only = sorted(k for k, v in data.items() if not isinstance(v, dict)) if isinstance(data, dict) else []
     if not rules and names_only:  # owner ruling, docs/decisions/0004: names-only means no rules
