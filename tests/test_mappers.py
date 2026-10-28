@@ -1516,6 +1516,17 @@ class MulticastOneObject(unittest.TestCase):
         self.assertEqual([n["note"] for n in notes if n["disposition"] == "runtime"], ["pim entry 'pimlan' matches no interface or label of this appliance (stale); the validator rejects it"])
         self.assertTrue([n for n in notes if n["disposition"] == "mapped" and "written as the Default segment (assumption" in n["note"]], notes)
 
+    def test_unknown_enable_is_not_called_disabled(self):
+        empty = {"rp": "", "pim": {}, "igmp": {}, "filter_name": ""}
+        for enable in (None, "odd", {"enable": "maybe"}, {}):
+            with self.subTest(enable=enable):
+                c, notes = ctx({"deployment": DEP, "multicast-enable": enable, "multicast-config": empty})
+                self.assertIsNone(m_multicast(c))
+                self.assertEqual([(n["disposition"], n["target"]) for n in notes if n["item"].startswith("multicast")], [("not-readable", "multicast")])
+        c, notes = ctx({"deployment": DEP, "multicast-config": dict(empty, rp="192.0.2.9")})
+        self.assertEqual(m_multicast(c)[0]["enable"], "none")
+        self.assertEqual([n["target"] for n in notes if n["disposition"] == "not-readable"], ["multicast.enable"])
+
     def test_unconfigured_object_is_default_omitted(self):
         c, notes = ctx({"deployment": DEP, "multicast-enable": {"enable": False}, "multicast-config": {"rp": "", "pim": {}, "igmp": {}, "filter_name": ""}})
         self.assertIsNone(m_multicast(c))

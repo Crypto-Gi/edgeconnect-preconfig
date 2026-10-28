@@ -975,8 +975,14 @@ def m_multicast(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     source, enable = ctx.data("multicast-config"), ctx.data("multicast-enable")
     one = isinstance(source, dict)  # ECOS before 9.7 (seen on 9.5.7 and 9.6.4): one object without vrf_id, and enable as {"enable": ...}
     if one:
-        on = enable.get("enable") if isinstance(enable, dict) else None
-        if not on and not any(source.get(k) for k in ("rp", "pim", "igmp", "filter_name")):
+        on = enable.get("enable") if isinstance(enable, dict) and isinstance(enable.get("enable"), bool) else None
+        configured = any(source.get(k) for k in ("rp", "pim", "igmp", "filter_name"))
+        if on is None:  # a missing or odd enable read is not "disabled"
+            ctx.note("multicast-enable", "not-readable", "multicast" if not configured else "multicast.enable", "the multicast enable read is missing or has an unexpected shape, so whether "
+                     "multicast is on is unknown; {}; check it by hand".format("multicast is not written" if not configured else "enable is written as none"))
+            if not configured:
+                return None
+        elif not on and not configured:
             ctx.note("multicast-config", "default-omitted", "multicast", "multicast disabled and not configured")
             return None
         source, enable = [dict(source, vrf_id=0)], [{"vrf_id": 0, "enable": on}]
