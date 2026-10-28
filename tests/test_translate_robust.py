@@ -505,6 +505,17 @@ class FailedReads(unittest.TestCase):
                 self.assertFalse(any(e["disposition"] == "outside-preconfig" and e["target"] == "vxlan" for e in ledger))
                 self.assertTrue(any(e["disposition"] == "not-readable" and e["target"] == "vxlan" for e in ledger))
 
+    def test_a_null_or_odd_sharing_read_is_not_no_settings(self):
+        for name, info in (("ok but null", None), ("auto_subnet a list", {"auto_subnet": []})):
+            with self.subTest(name):
+                data = copy.deepcopy(DATA)
+                data["subnets"] = {"subnets": {"entries": [{"state": dict(ROUTE)}]}}
+                data["system-info"] = info
+                cap = FakeCap(data)
+                cap.index.append({"id": "system-info", "label": "live", "status": "ok"})
+                ledger = []
+                build(cap, ledger)
+                self.assertTrue(any(e["item"] == "system-info" and e["disposition"] == "not-readable" for e in ledger))
 
 if __name__ == "__main__":
     unittest.main()
