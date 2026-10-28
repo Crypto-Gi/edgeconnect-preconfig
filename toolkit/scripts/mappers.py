@@ -1128,6 +1128,8 @@ def m_flowRedirection(ctx: Ctx) -> Optional[Dict[str, Any]]:
     # ECOS prints no wait-time line at its default; 50 is the base template default (lab: pushed 50, backup had no line)
     wait = next((int(m.group(1)) for l in lines for m in [re.match(r"^flow-redirection wait-time (\d+)$", l)] if m), 50)
     if not peers:
+        if iface:
+            ctx.note("running-config", "default-omitted", "flowRedirection", "cluster interface {} without peers (dormant)".format(iface))
         return None
     if iface and "." in iface:
         ctx.note("running-config", "orchestrator-managed", "flowRedirection", "cluster subinterface '{}' is the EdgeHA sync interface (created by haConfig), not standalone flowRedirection".format(iface))

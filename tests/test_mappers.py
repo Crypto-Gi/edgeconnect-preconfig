@@ -1523,5 +1523,15 @@ class ManagedBgpNeighbors(unittest.TestCase):
                          [("bgp-system-all-vrfs[1]", "segmentBgpSystems.neighbors", True)])
 
 
+class DormantFlowRedirection(unittest.TestCase):
+    def test_cluster_interface_without_peers_is_ledgered(self):
+        c, notes = ctx({"running-config": {"fileName": "b", "backupTime": "1", "runningConfig": "cluster interface wan0\n"}})
+        self.assertIsNone(m_flowRedirection(c))
+        self.assertEqual([(n["disposition"], n["target"], n["note"]) for n in notes], [("default-omitted", "flowRedirection", "cluster interface wan0 without peers (dormant)")])
+        c, notes = ctx({"running-config": {"fileName": "b", "backupTime": "1", "runningConfig": "system hostname h1\n"}})
+        self.assertIsNone(m_flowRedirection(c))
+        self.assertEqual(notes, [])
+
+
 if __name__ == "__main__":
     unittest.main()
