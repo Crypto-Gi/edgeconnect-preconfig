@@ -389,6 +389,13 @@ class AuditRegressions(unittest.TestCase):
         owned = next(e["note"] for e in ledger if e["item"] == "template nac" and e["disposition"] == "template-group")
         self.assertIn("merge", owned)
         self.assertIn("the section is not written", owned)
+        # a trusted policy is the appliance default, not a local setting to redo by hand
+        trusted = dict(nac, applyPolicies={"if": {"lan0": {"profile": "default", "auth_type": 1}, "lan1": {"profile": "none", "auth_type": 0}}})
+        doc, ledger = self._two_lans(nac=trusted, **{"template-groups": groups})
+        self.assertNotIn("applyPolicies", next(e["note"] for e in ledger if e["item"] == "nac (local objects under a merge template)"))
+        # the NAC read failed: what is local is unknown, so it is not-readable, never silently "nothing local"
+        doc, ledger = self._two_lans(**{"template-groups": groups})
+        self.assertEqual([e["disposition"] for e in ledger if e["item"].startswith("nac (local")], ["not-readable"])
         # without merge the template replaces the appliance's NAC: the section stays out, as before
         groups[0]["templates"][0]["value"] = dict(tpl, merge=False)
         doc, ledger = self._two_lans(nac=nac, **{"template-groups": groups})

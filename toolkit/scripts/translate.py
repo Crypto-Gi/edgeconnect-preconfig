@@ -155,13 +155,17 @@ def nac_merge_owned(cap: "Capture") -> Optional[Dict[str, Any]]:
     return owned
 
 
-def ledger_local_nac(value: Optional[Dict[str, Any]], owned: Dict[str, Any], note: Any) -> None:
+def ledger_local_nac(value: Optional[Dict[str, Any]], owned: Dict[str, Any], note: Any, read: bool = True) -> None:
     """Under a merge nac template the section is not written; the appliance's own NAC objects are ledgered, never the template's.
 
     /validate answers HTTP 500 unless all six NAC lists are non-empty (semir_vlab, 2026-10-28), and the lists the template fills hold
     only its objects: a section /validate accepts would write the template's own objects, which a template group's settings never are."""
     note("template nac", "template-group", "nac", "the 'nac' template merges (merge: true) with the appliance's NAC: the section is not written")
-    mine = ["{} {}".format(key, e.get(ident)) for key, ident in NAC_LISTS.items() for e in (value or {}).get(key) or [] if e.get(ident) not in owned[key]]
+    if not read:
+        note("nac (local objects under a merge template)", "not-readable", "nac", "the NAC read failed, so the appliance's own NAC objects under the merge template are unknown; check them by hand")
+        return
+    mine = ["{} {}".format(key, e.get(ident)) for key, ident in NAC_LISTS.items() for e in (value or {}).get(key) or []
+            if e.get(ident) not in owned[key] and e.get("auth_type") != "trusted"]  # trusted is the appliance default, nothing to redo
     if mine:
         note("nac (local objects under a merge template)", "outside-preconfig", "nac", "local NAC objects under a merge template: {}; not carried: "
              "/validate requires all six NAC lists non-empty (HTTP 500 otherwise) and the other lists hold only the template's objects; set them on the target by hand".format(", ".join(mine)))
@@ -493,7 +497,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
             continue
         if section == "nac" and nac_owned is not None:
             del ledger[before:]  # the mapper's notes describe a section that is not written
-            ledger_local_nac(value, nac_owned, note)
+            ledger_local_nac(value, nac_owned, note, cap.data("nac") is not None)
             continue
         if value is not None:
             out[section] = value
