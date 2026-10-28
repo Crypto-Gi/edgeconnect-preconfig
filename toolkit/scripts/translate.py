@@ -236,6 +236,12 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     def note(item: str, disposition: str, target: str = "", why: str = "") -> None:
         ledger.append({"item": item, "disposition": disposition, "target": target, "note": why})
 
+    di_notes: List[Dict[str, Any]] = []  # deploymentInfo lines written before it is known whether deploymentInfo is written
+
+    def di_note(*args: str) -> None:
+        note(*args)
+        di_notes.append(ledger[-1])
+
     app = cap.data("appliance")
     app = app if isinstance(app, dict) else {}
     dep = cap.data("deployment")
@@ -335,8 +341,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
             if extra_ipsec.get("isUserDefinedIPSecUDPPort"):
                 di["ipsecUdpPort"] = int(extra_ipsec["ipsecUdpPort"])
             else:
-                note("extra-info.overlaySettings.ipsecUdpPort", "default-omitted", "deploymentInfo.ipsecUdpPort", "not user defined ({} assigned by Orchestrator per appliance)".format(extra_ipsec.get("ipsecUdpPort", "port")))
-    note("deployment.sysConfig", "mapped", "deploymentInfo", "mode, serverPerSegment, system bandwidths (maxBW, maxInBW)")
+                di_note("extra-info.overlaySettings.ipsecUdpPort", "default-omitted", "deploymentInfo.ipsecUdpPort", "not user defined ({} assigned by Orchestrator per appliance)".format(extra_ipsec.get("ipsecUdpPort", "port")))
+    di_note("deployment.sysConfig", "mapped", "deploymentInfo", "mode, serverPerSegment, system bandwidths (maxBW, maxInBW)")
     with guarded(ctx, "security-maps", ""):
         firewall = local_firewall_rules(cap)
         if firewall:
@@ -356,9 +362,9 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     pt_bw = passthrough_max_bandwidth(cli)
     if pt_bw is not None and pt_bw != 10000000:
         di["passThroughShapedTraffic"] = {"outboundMaxBandwidth": pt_bw}
-        note("running-config", "mapped", "deploymentInfo.passThroughShapedTraffic", "outboundMaxBandwidth from 'interface pass-through max-bandwidth' in the stored backup")
+        di_note("running-config", "mapped", "deploymentInfo.passThroughShapedTraffic", "outboundMaxBandwidth from 'interface pass-through max-bandwidth' in the stored backup")
     elif cli or not any(e["item"] == "running-config" and e["disposition"] == "not-readable" for e in ledger):
-        note("running-config", "default-omitted", "deploymentInfo.passThroughShapedTraffic", "no pass-through cap in the stored backup, or the default 10000000")
+        di_note("running-config", "default-omitted", "deploymentInfo.passThroughShapedTraffic", "no pass-through cap in the stored backup, or the default 10000000")
 
     ha_if = sys_cfg.get("haIf") or ""
     ha_mode_entries: List[Dict[str, Any]] = []
@@ -372,7 +378,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
         unreadable_read(ctx, "deployment.dhcpFailover", "DHCP failover (dhcpHA) is not carried", "deploymentInfo.dhcpInfo[].dhcpHA")
         failover = {}
     fo_done: set = set()
-    fo_tried: set = set()  # attempted, so a failover block that failed to read is not reported as "no server has failover"
+    fo_tried: set = set()  # one failover block per physical interface
+    fo_wanted: set = set()  # so a server that failed to read is not reported as "no server has failover"
     if_failed, attempted, label_gaps = False, 0, []  # haConfig orders and pairs every WAN link: built only when all were read
     mode_ifs = dep.get("modeIfs")
     if not isinstance(mode_ifs, list):  # interfaces replace the target's on apply: never invented or written empty
@@ -431,6 +438,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
                 server = dhcp_cfg.get("server") if dhcp_cfg.get("type") == "server" else None
                 relay = dhcp_cfg.get("relay") if dhcp_cfg.get("type") == "relay" else None
                 if server:
+                    if server.get("failover") and failover.get(if_name):
+                        fo_wanted.add(if_name)
                     entry: Dict[str, Any] = {"dhcpInterfaceName": name, "dhcpType": "server", "dhcpAddressMask": server["prefix"], "startIpAddress": server["ipStart"],
                                              "endIpAddress": server["ipEnd"]}
                     if server.get("ip_range"):
@@ -503,8 +512,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     if write_di and ctx.unread_maps:
         unreadable_read(ctx, "deployment.sysConfig", "deploymentInfo is not written: its interfaces need the {} names".format(", ".join(sorted(ctx.unread_maps))), "deploymentInfo")
         write_di = False
-    elif write_di and attempted and not interfaces:
-        ctx.note("deployment.modeIfs", "not-readable", "deploymentInfo", "none of the {} interface entries could be read, so deploymentInfo is not written; check the interfaces by hand".format(attempted))
+    elif write_di and (attempted or if_failed) and not interfaces:
+        ctx.note("deployment.modeIfs", "not-readable", "deploymentInfo", "no interface entry could be read, so deploymentInfo is not written; check the interfaces by hand")
         write_di = False
     if write_di:
         note("deployment.modeIfs", "mapped", "deploymentInfo.deploymentInterfaces", "{} interfaces; interface = ifName.vlan; label/zone/segment ids resolved to names".format(len(interfaces)))
@@ -582,7 +591,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     if write_di and ha_if and ha_mode_entries and my_ha is None and not ctx.failed("deploymentInfo.haConfig"):
         ctx.note("ha-groups", "not-readable", "deploymentInfo.haConfig", "{} carries HA subinterfaces but no HA group read lists this appliance, so haConfig is not written; check EdgeHA by hand".format(ha_if))
     if not write_di:
-        dhcp, relay_leases, ra_skipped, ras, fo_done, fo_tried = [], [], [], [], set(), set()
+        dhcp, relay_leases, ra_skipped, ras, fo_done, fo_wanted = [], [], [], [], set(), set()
+        ledger[:] = [e for e in ledger if not any(e is d for d in di_notes)]
     if dhcp:
         di["dhcpInfo"] = dhcp
         note("deployment.modeIfs[].dhcpd", "mapped", "deploymentInfo.dhcpInfo", "{} DHCP servers; empty ntp/netbios lists omitted".format(len(dhcp)))
@@ -598,20 +608,23 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
         out["deploymentInfo"] = di
     if fo_done:
         note("deployment.dhcpFailover", "mapped", "deploymentInfo.dhcpInfo[].dhcpHA", "failover on {}".format(", ".join(sorted(fo_done))))
-    if set(failover) - fo_tried and write_di:
+    if set(failover) - fo_wanted and write_di:
         note("deployment.dhcpFailover", "runtime", "deploymentInfo.dhcpInfo[].dhcpHA",
-             "{}: failover settings kept by the appliance but no DHCP server there has failover enabled".format(", ".join(sorted(set(failover) - fo_tried))))
+             "{}: failover settings kept by the appliance but no DHCP server there has failover enabled".format(", ".join(sorted(set(failover) - fo_wanted))))
     try:
         owned_fields = {} if IGNORE_OWNERSHIP else template_fields(cap)
     except ITEM_ERRORS as err:  # every field template then counts as providing its whole section, which is not written
         item_failed(ctx, "template-groups templates", ", ".join(s for name in sorted(selected_templates(cap) & set(FIELD_TEMPLATES)) for s in FIELD_TEMPLATES[name]["sections"]), err)
         owned_fields = {}
+        template_owned = {s for name in selected_templates(cap) & set(FIELD_TEMPLATES) for s in FIELD_TEMPLATES[name]["sections"]}
+    else:
+        template_owned = set()
     try:
         nac_owned = None if IGNORE_OWNERSHIP else nac_merge_owned(cap)
     except ITEM_ERRORS as err:
         item_failed(ctx, "template-groups nac", "nac", err)
         nac_owned = None
-    template_owned = selected_templates(cap) - set(owned_fields) - ({"nac"} if nac_owned is not None else set())
+    template_owned |= selected_templates(cap) - set(owned_fields) - ({"nac"} if nac_owned is not None else set())
     # association unread: a section some template group selects may come from a template, so it is not written from the appliance
     maybe_owned = set() if isinstance(template_groups, list) or IGNORE_OWNERSHIP else {
         TEMPLATE_SECTION.get(t, t) for g in (group_reads if isinstance(group_reads, list) else []) if isinstance(g, dict) for t in selected_names(g)}

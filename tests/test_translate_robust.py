@@ -301,5 +301,74 @@ class MalformedReads(unittest.TestCase):
                 translate(change)
 
 
+ROUTE = {"prefix": "10.9.0.0/16", "nextHop": "10.0.0.254", "configured": True, "local": True, "metric": 1, "advert": True, "advert_bgp": False, "advert_ospf": False, "zone_id": 65534, "label": 0}
+NAC = {"nacEnable": True, "dot1x": {"1": {"a": 1}}, "macAuthProfile": {"1": {"a": 1}}, "server": {"1": {"address": "192.0.2.5", "source_ip_interface": "INET"}},
+       "serverGroup": {"1": {"name": "g", "server": "s"}}, "aaaProfile": {"1": {"a": 1}}, "applyPolicies": {"if": {"lan0": {"auth_type": 1, "profile": "p"}}}}
+
+
+class NamesAndOwnershipNotGuessed(unittest.TestCase):
+    """Second review: outputs that were still built from reads that could not be used."""
+    assertLedgered = MalformedReads.assertLedgered
+
+    def test_every_mode_interface_entry_failing_writes_no_deployment_info(self):
+        def all_null(d):
+            for m in d["deployment"]["modeIfs"]:
+                m["applianceIPs"] = None
+        for name, change in (("applianceIPs null", all_null), ("entries not objects", lambda d: d["deployment"].update(modeIfs=[None, "x"]))):
+            with self.subTest(name):
+                out, ledger = translate(change)
+                self.assertNotIn("deploymentInfo", out)
+                self.assertLedgered(ledger, "not-readable", "deployment.modeIfs")
+                self.assertFalse(any(e["disposition"] == "mapped" and e["target"].startswith("deploymentInfo") for e in ledger))
+
+    def test_a_dropped_deployment_info_has_no_mapped_lines(self):
+        out, ledger = translate(lambda d: d["deployment"]["sysConfig"].update(vrfs="x"))
+        self.assertNotIn("deploymentInfo", out)
+        self.assertFalse(any(e["disposition"] in ("mapped", "default-omitted") and e["target"].startswith("deploymentInfo") for e in ledger))
+
+    def test_nac_server_label_is_not_guessed_when_labels_cannot_be_read(self):
+        def nac(d, bad):
+            d["template-groups"][0].update(selectedTemplateNames=[])
+            d["nac"] = NAC
+            if bad:
+                d["deployment"]["sysConfig"]["ifLabels"].update(wan="x")
+        out, _ = translate(lambda d: nac(d, False))
+        self.assertEqual(out["nac"]["server"][0]["source_ip_interface"], "INET")
+        out, ledger = translate(lambda d: nac(d, True))
+        self.assertNotEqual(((out.get("nac") or {}).get("server") or [{}])[0].get("source_ip_interface"), "any")
+        self.assertFalse(any(e["disposition"] == "unresolved" and e["item"].startswith("nac.server") for e in ledger))  # not "has no interface label"
+        self.assertTrue(any(e["disposition"] == "not-readable" and e["target"] == "nac" for e in ledger))
+
+    def test_vxlan_zones_are_not_guessed_when_segment_names_cannot_be_read(self):
+        def vxlan(d, bad):
+            d["deployment"]["sysConfig"]["vrfZonesMap"] = {"0": {"a": {"id": 0, "name": "Trusted"}, "b": {"id": 3, "name": "DefZ3"}}, "5": {"c": {"id": 3, "name": "Blue"}}}
+            d["deployment"]["sysConfig"]["vrfs"] = "x" if bad else [{"id": "0", "name": "Default"}, {"id": "5", "name": "Seg5"}]
+            d["running-config"] = {"runningConfig": "vxlan vtep-interface lo1\nvxlan segment Seg5 vni 5005\nvxlan segment Seg5 zone 3\n"}
+        out, _ = translate(lambda d: vxlan(d, False))
+        self.assertEqual(out["vxlan"]["vniVrfMaps"][0]["zone"], "Blue")
+        out, ledger = translate(lambda d: vxlan(d, True))
+        self.assertNotIn("vxlan", out)
+        self.assertTrue(any(e["disposition"] == "not-readable" and e["target"] == "vxlan" for e in ledger))
+
+    def test_a_failover_server_that_fails_early_is_not_reported_as_without_failover(self):
+        def change(d):
+            d["deployment"]["dhcpFailover"] = {"lan0": {"role": "primary", "my_ip": "10.0.0.1", "my_port": 647, "peer_ip": "10.0.0.2", "peer_port": 647}}
+            srv = d["deployment"]["modeIfs"][1]["applianceIPs"][0]["dhcpd"]["server"]
+            srv["failover"] = True
+            del srv["ipEnd"]
+        out, ledger = translate(change)
+        self.assertLedgered(ledger, "toolkit-error", "deployment.modeIfs[lan0].dhcpd")
+        self.assertFalse(any(e["item"] == "deployment.dhcpFailover" for e in ledger))
+
+    def test_unreadable_route_templates_leave_their_sections_out(self):
+        def change(d):
+            d["template-groups"][0].update(selectedTemplateNames=["routes"], templates=["x"])
+            d["subnets"] = {"subnets": {"entries": [{"state": dict(ROUTE)}]}}
+        out, ledger = translate(lambda d: d.update(subnets={"subnets": {"entries": [{"state": dict(ROUTE)}]}}))
+        self.assertIn("localRoutes", out)  # the fixture's route is written without a template
+        out, ledger = translate(change)
+        self.assertNotIn("localRoutes", out)  # the routes template may set some of its fields
+        self.assertEqual([e["target"] for e in ledger if e["item"] == "template-groups templates"], ["localRoutes, segmentLocalRoutes"])
+
 if __name__ == "__main__":
     unittest.main()

@@ -1067,6 +1067,8 @@ def m_vxlan(ctx: Ctx) -> Optional[Dict[str, Any]]:
         m = re.match(r"^vxlan segment (\S+) (vni|zone|role-id) (\d+)$", l)
         if m and m.group(3) != "4294967295":
             vni.setdefault(m.group(1), {})[m.group(2)] = int(m.group(3))
+    if vni:
+        ctx.readable("vrfs")  # the CLI names segments: their zone ids resolve per segment id
     maps = sorted([{"vni": v["vni"], "segment": seg, "zone": ctx.zone(next((k for k, n in ctx.vrfs.items() if n == seg), "0"), v.get("zone", 0)), "role": ctx.role(v.get("role-id", 0)) or "default"} for seg, v in sorted(vni.items()) if "vni" in v], key=lambda x: int(x["vni"]))
     cli_note(ctx, "vxlan", "vtep interface and VNI maps")
     return {"destinationUdpPort": live.get("port", 4789), "vtepSrcInterface": vtep, "vniVrfMaps": maps}
@@ -1171,9 +1173,11 @@ def _nac_fix(out: Dict[str, Any], ctx: Optional[Ctx] = None, name_by_if: Optiona
             server["source_ip_interface"] = name_by_if[name]
         elif name in loops:  # the preconfig takes an interface *label*, the appliance reports the interface name
             server["source_ip_interface"] = ctx.label(loops[name]["label"]) or "any"
-        elif ctx and name not in (None, "", "any") and name not in ctx.labels.values():
-            # an unlabelled interface or one that no longer exists (dangling); the validator rejects anything but a label or "any"
-            server["source_ip_interface"] = "any"
+        elif ctx and name not in (None, "", "any"):
+            ctx.readable("ifLabels")
+            if name not in ctx.labels.values():
+                # an unlabelled interface or one that no longer exists (dangling); the validator rejects anything but a label or "any"
+                server["source_ip_interface"] = "any"
         if ctx and name not in (None, "", "any") and server["source_ip_interface"] == "any":
             ctx.note("nac.server[{}]".format(server.get("id")), "unresolved", "nac.server[].source_ip_interface", "{!r} has no interface label (unlabelled or no longer on the appliance); written as 'any'".format(name))
     return out
