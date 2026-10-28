@@ -15,7 +15,7 @@ import base64
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cells import cell_problems, interface_addresses, option_limits, subnet_problems  # noqa: E402
@@ -33,6 +33,62 @@ def fetch_existing_preconfigs(client: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def existing_names_serials(client: Any) -> Tuple[set, set]:
+    """Names and normalised serial numbers of the preconfigs already on the Orchestrator."""
+    existing = fetch_existing_preconfigs(client)
+    names = {str(p.get("name") or "").strip() for p in existing if p.get("name")}
+    serials = set()
+    for p in existing:
+        if p.get("serialNum"):
+            try:
+                norm = normalize_serial(str(p.get("serialNum")))
+                if norm:
+                    serials.add(norm)
+            except ValueError:
+                serials.add(str(p.get("serialNum")).strip().upper())
+    return names, serials
+
+
+def upload_ready(client: Any, ready_to_upload: List[Dict[str, Any]]) -> int:
+    """Upload each {"entry", "text"} (never applied: autoApply is always false), then read the list back; returns the number uploaded."""
+    uploaded_count = 0
+    for item in ready_to_upload:
+        entry = item["entry"]
+        payload: Dict[str, Any] = {
+            "name": entry["preconfig_name"],
+            "configData": base64.b64encode(item["text"].encode("utf-8")).decode("ascii"),
+            "autoApply": False,  # this toolkit never applies, not even later through Orchestrator (docs/decisions/0008)
+            "comment": "uploaded via building-edgeconnect-preconfig-templates",
+        }
+        if entry["serial_number"]:
+            payload["serialNum"] = entry["serial_number"]
+        try:
+            resp = client.request("POST", "/gms/appliance/preconfiguration", json_body=payload, expected_status=(200, 201, 204), expect_json=True)
+        except EdgeConnectError as err:  # one rejected upload must not hide the rows already uploaded or stop the rest
+            entry["status"] = "upload-failed"
+            entry["detail"] = "upload failed: {}".format(str(err)[:300])
+            print("UPLOAD FAILED | {:<24} | {}".format(entry["preconfig_name"], entry["detail"]), flush=True)
+            continue
+        preconfig_id = resp.get("id") if isinstance(resp, dict) else None
+        entry["status"] = "uploaded"
+        entry["preconfig_id"] = preconfig_id
+        entry["detail"] = "uploaded to Orchestrator (id={})".format(preconfig_id)
+        uploaded_count += 1
+        print("UPLOADED | {:<24} | serial={} | id={}".format(entry["preconfig_name"], entry["serial_number"] or "-", preconfig_id), flush=True)
+
+    # Readback verification
+    try:
+        after_names = {str(p.get("name") or "").strip() for p in fetch_existing_preconfigs(client)}
+    except EdgeConnectError as err:  # keep the report of what was uploaded even if the readback fails
+        print("READBACK FAILED: {}".format(err), flush=True)
+        after_names = None
+    for item in ready_to_upload:
+        entry = item["entry"]
+        if entry["status"] == "uploaded":
+            entry["verified_on_orchestrator"] = None if after_names is None else entry["preconfig_name"] in after_names
+    return uploaded_count
+
+
 def run_batch(
     template_path: Path,
     csv_path: Path,
@@ -47,17 +103,7 @@ def run_batch(
     rendered_dir = out_dir / "rendered"
     rendered_dir.mkdir(parents=True, exist_ok=True)
 
-    existing = fetch_existing_preconfigs(client)
-    existing_names = {str(p.get("name") or "").strip() for p in existing if p.get("name")}
-    existing_serials = set()
-    for p in existing:
-        if p.get("serialNum"):
-            try:
-                norm = normalize_serial(str(p.get("serialNum")))
-                if norm:
-                    existing_serials.add(norm)
-            except ValueError:
-                existing_serials.add(str(p.get("serialNum")).strip().upper())
+    existing_names, existing_serials = existing_names_serials(client)
 
     seen_files: Dict[str, int] = {}
     seen_serials: Dict[str, int] = {}
@@ -164,42 +210,7 @@ def run_batch(
         ready_to_upload.append({"entry": entry, "text": text})
         print("ROW {:2d} | VALID    | {:<24} | .yml written immediately -> {}".format(idx, pcfg_name, yml_path), flush=True)
 
-    uploaded_count = 0
-    if approve and ready_to_upload:
-        for item in ready_to_upload:
-            entry = item["entry"]
-            payload: Dict[str, Any] = {
-                "name": entry["preconfig_name"],
-                "configData": base64.b64encode(item["text"].encode("utf-8")).decode("ascii"),
-                "autoApply": False,  # this toolkit never applies, not even later through Orchestrator (docs/decisions/0008)
-                "comment": "uploaded via building-edgeconnect-preconfig-templates",
-            }
-            if entry["serial_number"]:
-                payload["serialNum"] = entry["serial_number"]
-            try:
-                resp = client.request("POST", "/gms/appliance/preconfiguration", json_body=payload, expected_status=(200, 201, 204), expect_json=True)
-            except EdgeConnectError as err:  # one rejected upload must not hide the rows already uploaded or stop the rest
-                entry["status"] = "upload-failed"
-                entry["detail"] = "upload failed: {}".format(str(err)[:300])
-                print("UPLOAD FAILED | {:<24} | {}".format(entry["preconfig_name"], entry["detail"]), flush=True)
-                continue
-            preconfig_id = resp.get("id") if isinstance(resp, dict) else None
-            entry["status"] = "uploaded"
-            entry["preconfig_id"] = preconfig_id
-            entry["detail"] = "uploaded to Orchestrator (id={})".format(preconfig_id)
-            uploaded_count += 1
-            print("UPLOADED | {:<24} | serial={} | id={}".format(entry["preconfig_name"], entry["serial_number"] or "-", preconfig_id), flush=True)
-
-        # Readback verification
-        try:
-            after_names = {str(p.get("name") or "").strip() for p in fetch_existing_preconfigs(client)}
-        except EdgeConnectError as err:  # keep the report of what was uploaded even if the readback fails
-            print("READBACK FAILED: {}".format(err), flush=True)
-            after_names = None
-        for item in ready_to_upload:
-            entry = item["entry"]
-            if entry["status"] == "uploaded":
-                entry["verified_on_orchestrator"] = None if after_names is None else entry["preconfig_name"] in after_names
+    uploaded_count = upload_ready(client, ready_to_upload) if approve and ready_to_upload else 0
 
     report = {
         "timestamp": utc_stamp(),
@@ -222,16 +233,127 @@ def run_batch(
     return report
 
 
+# ---------------------------------------------------------------- existing preconfig YAML files (upload --yaml, validate --yaml)
+
+def yaml_files(paths: List[Path]) -> List[Path]:
+    """The files named, and every *.yml / *.yaml directly in a folder named (sorted, not recursive)."""
+    out: List[Path] = []
+    for path in paths:
+        out += sorted(f for f in path.iterdir() if f.is_file() and f.suffix.lower() in (".yml", ".yaml")) if path.is_dir() else [path]
+    return out
+
+
+def secret_paths(value: Any, path: str = "") -> List[str]:
+    if isinstance(value, dict):
+        return [x for k, v in value.items() for x in secret_paths(v, "{}.{}".format(path, k) if path else str(k))]
+    if isinstance(value, list):
+        return [x for i, v in enumerate(value) for x in secret_paths(v, "{}[{}]".format(path, i))]
+    return [path] if isinstance(value, str) and "<SECRET:" in value else []
+
+
+def interface_route_warnings(doc: Dict[str, Any]) -> List[str]:
+    """Routes with next hop 0.0.0.0 or :: and an interface: /validate accepts them, ECOS 9.7+ rejects the routes step (docs/decisions/0016)."""
+    local = doc.get("localRoutes") if isinstance(doc.get("localRoutes"), dict) else {}
+    segments = doc.get("segmentLocalRoutes") if isinstance(doc.get("segmentLocalRoutes"), list) else []
+    routes = [("Default", r) for r in local.get("routes") or []] + [(s.get("segment"), r) for s in segments if isinstance(s, dict) for r in s.get("routes") or []]
+    return ["route {} (segment {}) has next hop {} and interface {}: passes /validate but ECOS 9.7+ rejects the whole routes step at apply; remove the interface - "
+            "see docs/decisions/0016".format(r.get("routeIpSubnet"), seg, r.get("nextHop"), r.get("interfaceName"))
+            for seg, r in routes if isinstance(r, dict) and r.get("nextHop") in ("0.0.0.0", "::") and r.get("interfaceName") not in (None, "", "default")]
+
+
+def yaml_refusal(path: Path) -> Tuple[Optional[str], str, str]:
+    """(refusal, detail, text) for one file; refusal None when the file is a preconfig YAML to send to /validate."""
+    try:
+        text = path.read_text(encoding="utf-8")
+        doc = None if "{{" in text else parse_yaml(text)
+    except Exception as err:  # unreadable or not YAML
+        return "refused: not a preconfig YAML", "{}: {}".format(type(err).__name__, str(err).splitlines()[0][:200] if str(err) else ""), ""
+    if "{{" in text:
+        return "refused: not a preconfig YAML", "it holds Jinja {{ }}: a template, not a rendered preconfig", text
+    if not isinstance(doc, dict) or not doc:
+        return "refused: not a preconfig YAML", "empty file" if doc is None else "the top level is not a mapping of sections", text
+    secrets = secret_paths(doc)
+    if secrets:
+        return "refused: secret placeholder", "fill these in: {}".format(", ".join(secrets)), text
+    for warning in interface_route_warnings(doc):
+        print("WARN {}: {}".format(path.name, warning), flush=True)
+    return None, "", text
+
+
+def run_yaml(files: List[Path], client: Any, send: bool, name: Optional[str] = None, serial: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Check each file like a CSV row (shape, placeholders, /validate, name and serial conflicts); with send, upload the ones that pass.
+    Without send nothing is written. A refused, invalid or conflicting file is skipped and the others continue."""
+    names, serials = existing_names_serials(client)
+    results: List[Dict[str, Any]] = []
+    ready: List[Dict[str, Any]] = []
+    for path in files:
+        entry = {"file": str(path), "preconfig_name": name or path.stem, "serial_number": serial or "", "status": "", "detail": ""}
+        results.append(entry)
+        refusal, detail, text = yaml_refusal(path)
+        if refusal:
+            entry.update(status=refusal, detail=detail)
+            continue
+        verdict = validate_text(client, text, serial)
+        if not verdict["accepted"]:
+            entry.update(status="validate failed", detail=verdict["error"])
+        elif entry["preconfig_name"] in names:
+            entry.update(status="skipped: name conflict", detail="{!r} already exists on Orchestrator or earlier in this batch".format(entry["preconfig_name"]))
+        elif serial and serial in serials:
+            entry.update(status="skipped: serial conflict", detail="{} already exists on Orchestrator".format(serial))
+        else:
+            names.add(entry["preconfig_name"])
+            entry.update(status="passed", detail="not uploaded (validate only)" if not send else "")
+            ready.append({"entry": entry, "text": text})
+    if send and ready:  # upload --yaml uploads what passed with no further confirmation (docs/decisions/0017)
+        upload_ready(client, ready)
+        for item in ready:
+            e = item["entry"]
+            if e["status"] == "uploaded":
+                e["detail"] = "{}, {}".format(e["detail"], {True: "verified on Orchestrator", False: "NOT found on readback", None: "readback failed"}[e.get("verified_on_orchestrator")])
+    return results
+
+
+def yaml_main(parser: argparse.ArgumentParser, paths: List[Path], nick: str, name: Optional[str], serial: Optional[str], send: bool, connect: Callable[[str], Any]) -> int:
+    files = yaml_files(paths)
+    if not files:
+        parser.error("no .yml or .yaml file in {}".format(", ".join(map(str, paths))))
+    if (name or serial) and len(files) != 1:
+        parser.error("--name and --serial need exactly one file ({} given)".format(len(files)))
+    try:
+        name = resolve_output_filename({"preconfig_name": name})[0] if name else None
+        serial = normalize_serial(serial) if serial else None
+    except ValueError as err:
+        parser.error(str(err))
+    try:
+        results = run_yaml(files, connect(nick), send, name, serial)
+    except Stop as stop:  # 401/403/network on /validate: every file would fail the same way
+        print("STOPPED: {}".format(stop), file=sys.stderr)
+        return 2
+    print("", flush=True)
+    for r in results:
+        print("{:<30} {:<24} {}{}".format(r["status"], Path(r["file"]).name, r["preconfig_name"], ": " + r["detail"] if r["detail"] else ""), flush=True)
+    print("\n{} file(s): {} {}".format(len(results), sum(1 for r in results if r["status"] in ("uploaded", "passed")), "uploaded" if send else "passed"), flush=True)
+    return 0 if all(r["status"] in ("uploaded", "passed") or r["status"].startswith("skipped") for r in results) else 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site-dir", type=Path, help="site folder (default: ./preconfig-output/<site>)")
     parser.add_argument("--template", type=Path, help="Jinja2 template path (overrides --site-dir)")
-    parser.add_argument("--csv", type=Path, help="CSV with one row per site to upload (required; example.csv holds the source appliance's own values)")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--csv", type=Path, help="CSV with one row per site to upload (example.csv holds the source appliance's own values)")
+    source.add_argument("--yaml", nargs="+", type=Path, metavar="FILE|DIR", help="existing preconfig YAML files, or folders of them: each is checked and, if it passes, uploaded (no --approve needed)")
+    parser.add_argument("--name", help="with --yaml and one file: the preconfig name (default: the file name without .yml)")
+    parser.add_argument("--serial", help="with --yaml and one file: the appliance serial number")
     parser.add_argument("--columns", type=Path, help="columns.json path (default: <site-dir>/columns.json)")
     parser.add_argument("--out", type=Path, help="output directory (default: ./preconfig-output/<site>)")
     parser.add_argument("--orchestrator", required=True, help="Orchestrator profile nickname")
-    parser.add_argument("--approve", action="store_true", help="upload valid non-conflicting rows after user approval")
+    parser.add_argument("--approve", action="store_true", help="with --csv: upload valid non-conflicting rows after user approval (accepted and ignored with --yaml)")
     args = parser.parse_args(argv)
+    if args.yaml:
+        return yaml_main(parser, args.yaml, args.orchestrator, args.name, args.serial, True, client_for)
+    if args.name or args.serial:
+        parser.error("--name and --serial go with --yaml")
 
     if args.site_dir:
         site_dir = args.site_dir

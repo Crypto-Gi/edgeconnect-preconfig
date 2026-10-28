@@ -55,6 +55,11 @@ class NoApply(unittest.TestCase):
             client = Client()
             upload.run_batch(out / "br.jinja2", out / "rows.csv", out, client, meta["columns"], approve=True)
         self.assertEqual([p["autoApply"] for p in client.posted], [False])
+        with tempfile.TemporaryDirectory() as tmp:  # upload --yaml goes through the same payload
+            (Path(tmp) / "br-3.yml").write_text("applianceInfo:\n  hostname: br-3\n")
+            client.request = lambda method, path, json_body=None, **kw: client.posted.append(json_body) or {"id": 2} if method == "POST" and path == "/gms/appliance/preconfiguration" else b""
+            upload.run_yaml([Path(tmp) / "br-3.yml"], client, send=True)
+        self.assertEqual([p["autoApply"] for p in client.posted], [False, False])
 
 
 if __name__ == "__main__":

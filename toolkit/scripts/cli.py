@@ -11,6 +11,9 @@
   validate   FOLDER --csv FILE [--orchestrator NICK]    render and /validate every CSV row
   upload     FOLDER --csv FILE [--orchestrator NICK]    show what would be uploaded; uploads only with --approve
              [--approve]
+  validate   --yaml FILE|DIR ... --orchestrator NICK    check existing preconfig YAML files; never writes
+  upload     --yaml FILE|DIR ... --orchestrator NICK    same checks, then upload every file that passes (no --approve)
+             [--name NAME] [--serial SERIAL]
 
 FOLDER is what build wrote (or a site-<name> folder inside it). Validation runs on the Orchestrator the appliance was read
 from, unless --validate-on names another; either way it must be listed in EC_VALIDATORS. Every Orchestrator read is a GET.

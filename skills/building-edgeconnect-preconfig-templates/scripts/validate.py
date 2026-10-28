@@ -90,8 +90,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--orchestrator", required=True)
     parser.add_argument("--out", type=Path, help="validation.json path (default: next to the first file's folder)")
-    parser.add_argument("files", nargs="+", type=Path)
+    parser.add_argument("files", nargs="*", type=Path, help="rendered YAML files: /validate only")
+    parser.add_argument("--yaml", nargs="+", type=Path, metavar="FILE|DIR", help="existing preconfig YAML files or folders: the checks upload --yaml makes, without uploading")
+    parser.add_argument("--name", help="with --yaml and one file: the preconfig name checked for conflicts")
+    parser.add_argument("--serial", help="with --yaml and one file: the serial number validated and checked for conflicts")
     args = parser.parse_args(argv)
+    if args.yaml:
+        from upload import yaml_main
+        return yaml_main(parser, args.yaml + args.files, args.orchestrator, args.name, args.serial, False, validator)  # never writes
+    if not args.files:
+        parser.error("give rendered files, or --yaml FILE|DIR")
     try:
         client = validator(args.orchestrator)
         results = []

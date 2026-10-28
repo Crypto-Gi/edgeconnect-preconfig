@@ -124,6 +124,8 @@ Run the same `upload` with `--approve` to stage the ready rows in Orchestrator.
 | `compare FOLDER SITE [SITE ...]` | Let other sites of the same design choose them; a CSV row per site |
 | `validate FOLDER --csv FILE` | Validates every row; writes `rendered/<preconfig_name>.yml` for those that pass |
 | `upload FOLDER --csv FILE [--approve]` | Validates again, skips conflicts, and uploads only with `--approve` |
+| `validate --yaml FILE\|DIR ... --orchestrator NICK` | Checks existing preconfig YAML files (shape, `<SECRET:` placeholders, `/validate`, name and serial conflicts); never writes |
+| `upload --yaml FILE\|DIR ... --orchestrator NICK [--name NAME] [--serial SERIAL]` | Makes the same checks and uploads every file that passes, without `--approve` ([decision 0017](docs/decisions/0017-upload-yaml-needs-no-approve.md)); the name is the file name unless `--name` (one file only) |
 
 Every option, the messages a command can stop with and what to do, the stage scripts and the output folders: [docs/COMMAND_LINE.md](docs/COMMAND_LINE.md).
 
@@ -140,7 +142,7 @@ Then ask in plain words, for example *"Read appliance `2.NE` from Orchestrator `
 ## Safety
 
 - **Read-only capture.** Appliances are read with `GET` only, and secrets are redacted before anything touches disk.
-- **Nothing applies.** The only write is `upload --approve`, to the Orchestrator you name, always with `autoApply` off. Applying a preconfig is done by a person in Orchestrator; no script here can do it ([decision 0008](docs/decisions/0008-the-toolkit-cannot-apply.md)).
+- **Nothing applies.** The only writes are `upload --approve` and `upload --yaml`, to the Orchestrator you name, always with `autoApply` off. Applying a preconfig is done by a person in Orchestrator; no script here can do it ([decision 0008](docs/decisions/0008-the-toolkit-cannot-apply.md)).
 - **Validators are named.** `/validate` runs only on Orchestrators listed exactly in `EC_VALIDATORS`.
 - It never writes a `.yml` for a row that fails, never overwrites an existing preconfig name or serial, and never changes Template Groups or Business Intent Overlays.
 
