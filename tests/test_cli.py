@@ -333,6 +333,14 @@ class Build(unittest.TestCase):
             self.assertEqual(len(list(out.glob("Br_1.previous-*"))), 1)
             self.assertEqual(list(out.glob(".building-*")), [])
 
+    def test_build_rejects_a_malformed_target_ecos_before_reading(self):
+        with mock.patch.object(cli, "VALIDATORS", {"lab"}), mock.patch("capture.capture", side_effect=SystemExit("read")) as cap, contextlib.redirect_stderr(io.StringIO()) as err:
+            for bad in ("abc", "", "latest", "9"):
+                with self.assertRaises(SystemExit, msg=bad):
+                    cli.cmd_build(["--orchestrator", "lab", "--appliance", "x", "--target-ecos", bad])
+        cap.assert_not_called()
+        self.assertIn("not an ECOS release", err.getvalue())
+
     def test_target_ecos_reaches_translate_and_build_json(self):
         calls = []
 

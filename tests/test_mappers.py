@@ -1622,6 +1622,27 @@ class InterfaceRouteNextHopZero(unittest.TestCase):
         self.assertTrue(gaps[0].startswith("target appliance ECOS unknown: ECOS 9.7+ rejects an interface with next hop 0.0.0.0 (route 10.14.32.0/21 on lan1, segment Default); "
                                            "on ECOS before 9.7 it applies as is: pass --target-ecos"), gaps)
 
+    def test_a_malformed_ecos_is_unknown(self):
+        for ecos in ("abc", "", "latest", "9", "9.7x"):
+            with self.subTest(ecos=ecos):
+                routes, gaps = self.routes(ecos)
+                self.assertEqual(routes, self.DROPPED)
+                self.assertTrue(gaps and gaps[0].startswith("target appliance ECOS unknown"), gaps)
+        self.assertEqual(self.routes("9.6.2.1_107093"), (self.KEPT, []))
+
+    def test_translate_rejects_a_malformed_target_ecos(self):
+        import contextlib, io, translate
+        from unittest import mock
+        seen = []
+        with mock.patch.object(translate, "build", side_effect=lambda cap, ledger, target_ecos=None: seen.append(target_ecos) or (_ for _ in ()).throw(translate.NothingToConvert("stop"))), \
+                mock.patch.object(translate, "Capture", side_effect=lambda folder: folder), contextlib.redirect_stderr(io.StringIO()) as err:
+            for bad in ("abc", "", "latest", "9"):
+                with self.assertRaises(SystemExit, msg=bad):
+                    translate.main(["--capture", "x", "--site-type", "t", "--target-ecos", bad])
+            translate.main(["--capture", "x", "--site-type", "t", "--target-ecos", "9.6.2.1_107093"])
+        self.assertEqual(seen, ["9.6.2.1_107093"])
+        self.assertIn("not an ECOS release", err.getvalue())
+
     def test_translate_passes_the_target_ecos(self):
         import contextlib, io, translate
         from unittest import mock

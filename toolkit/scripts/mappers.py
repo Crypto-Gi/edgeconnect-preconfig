@@ -14,6 +14,12 @@ from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 ADMIN = {True: "Up", False: "Down"}
+ECOS_RELEASE = re.compile(r"^\d+\.\d+(\.\d+)*(_\d+)?$")  # 9.7, 9.6.2.1, 9.6.2.1_107093
+
+
+def ecos_key(text: Any) -> Optional[Tuple[int, ...]]:
+    """(major, minor) of an ECOS release; None for anything else, which counts as unknown."""
+    return tuple(int(n) for n in str(text).split("_")[0].split("."))[:2] if text is not None and ECOS_RELEASE.match(str(text)) else None
 
 
 def nul(value: Any) -> Any:
@@ -676,11 +682,11 @@ def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.
     # apply on ECOS 9.7.1 rejects it ("Interface cannot be specified when Next Hop is 0.0.0.0"); ECOS 9.6.2.1 applies it, both under a 9.7.1 Orchestrator (lab, 2026-10-28)
     if next_hop == "0.0.0.0" and if_name:
         where = "route {} on {}, segment {}".format(st.get("prefix"), if_name, ctx.segment(vrf, strict=False) or vrf)
-        if ctx.target_ecos is None:
+        if ecos_key(ctx.target_ecos) is None:  # a malformed value (an edited build.json) is unknown, never "before 9.7"
             ctx.note("subnets", "unresolved", target, "target appliance ECOS unknown: ECOS 9.7+ rejects an interface with next hop 0.0.0.0 ({}); on ECOS before 9.7 it applies as is: "
                      "pass --target-ecos, or on 9.7 give it a next hop or interface default; not written".format(where))
             return None
-        if tuple(int(n) for n in re.findall(r"\d+", str(ctx.target_ecos)))[:2] >= (9, 7):
+        if ecos_key(ctx.target_ecos) >= (9, 7):
             ctx.note("subnets", "unresolved", target, "{} not written for target ECOS {}: ECOS 9.7+ rejects an interface with next hop 0.0.0.0; give the route a next hop or add it by hand".format(
                 where, ctx.target_ecos))
             return None

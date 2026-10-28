@@ -157,7 +157,8 @@ def cmd_build(argv: List[str]) -> int:
     p.add_argument("--out", type=Path, default=Path.cwd() / "preconfig-output", help="parent folder (default ./preconfig-output)")
     p.add_argument("--validate-on", metavar="NICK", help="validate on this Orchestrator instead of the source one")
     p.add_argument("--target-release", help="the validator's Orchestrator release, when its key may not read it")
-    p.add_argument("--target-ecos", help="ECOS release of the appliances the preconfig is for, e.g. 9.6.2.1 (unknown by default)")
+    from translate import ecos_arg
+    p.add_argument("--target-ecos", type=ecos_arg, help="ECOS release of the appliances the preconfig is for, e.g. 9.6.2.1 (unknown by default)")
     a = p.parse_args(argv)
     validator = a.validate_on or a.orchestrator
     check_validator(validator)

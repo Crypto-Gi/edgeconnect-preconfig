@@ -22,7 +22,7 @@ from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, WORK_DIR, find_default_temp
 from generate import generate  # noqa: E402
 from decisions import list_mode, make_decide, propose  # noqa: E402
 from variables import classify, read_sheet, sheet_items, write_sheet  # noqa: E402
-from mappers import ITEM_ERRORS, MAPPERS, Ctx, cli_lines, failed_read, guarded, id_names, item_failed, own_sharing, passthrough_max_bandwidth, Unreadable, unreadable_read  # noqa: E402  guard-ok: imported after the sys.path insert
+from mappers import ECOS_RELEASE, ITEM_ERRORS, MAPPERS, Ctx, cli_lines, failed_read, guarded, id_names, item_failed, own_sharing, passthrough_max_bandwidth, Unreadable, unreadable_read  # noqa: E402  guard-ok: imported after the sys.path insert
 
 HARDEN = {0: "All", 1: "harden", 2: "stateful", 3: "statefulSNAT"}  # verified via Swagger + live apply-and-diff
 NETWORK_ROLE = {0: "non-hub", 1: "hub"}  # verified across multiple Orchestrators: code 1 = overlay hub; code 0 = non-hub; nrhub: no sample, unresolved
@@ -922,6 +922,13 @@ def tag_unmapped(cap: Capture, ledger: List[Dict[str, Any]]) -> None:
     ledger.append({"item": "template ownership", "disposition": "context", "target": "", "note": "selected templates of associated groups: " + ", ".join(selected)})
 
 
+def ecos_arg(value: str) -> str:
+    """argparse type of --target-ecos: an ECOS release such as 9.6.2.1 or 9.6.2.1_107093."""
+    if not ECOS_RELEASE.match(value):
+        raise argparse.ArgumentTypeError("{!r} is not an ECOS release (for example 9.6.2.1 or 9.7.1.0_110338)".format(value))
+    return value
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     import yaml
     parser = argparse.ArgumentParser(description=__doc__)
@@ -930,7 +937,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--out", type=Path)
     parser.add_argument("--ignore-template-ownership", action="store_true", help="map sections even when an associated template group provides them (mapper testing only)")
     parser.add_argument("--target-release", default="9.7.1.42046", help="Orchestrator release whose preconfig format is written (default template must exist)")
-    parser.add_argument("--target-ecos", help="ECOS release of the target appliance(s), e.g. 9.6.2.1; unknown by default, which leaves out what some ECOS releases reject on apply")
+    parser.add_argument("--target-ecos", type=ecos_arg, help="ECOS release of the target appliance(s), e.g. 9.6.2.1; unknown by default, which leaves out what some ECOS releases reject on apply")
     parser.add_argument("--decisions", type=Path, help="decisions.yaml: include_from_default, or the older per-section modes (default_mode, sections, extra_variable, extra_fixed)")
     parser.add_argument("--variables", type=Path, help="variables.csv as edited by the owner (decision / column per field); without it a fresh sheet is written and used")
     parser.add_argument("--compare", nargs="+", type=Path, metavar="CAPTURE", help="capture folders of other appliances of this site type: a field that differs becomes a variable, one equal everywhere stays fixed")
