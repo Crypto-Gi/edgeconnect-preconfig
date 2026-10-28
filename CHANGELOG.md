@@ -24,4 +24,7 @@ Combines three changes that were open as separate pull requests (#4, #5, #6).
   - Virtual tunnel interfaces, default-segment OSPF interfaces and areas, and each segment's OSPF interfaces are isolated per item.
   - Ledger lines name the item exactly: port-forwarding rules by their position in the captured list, branch NAT rules with their map name, segment BGP neighbors and segment routes under their own section. No "disabled" or "no tag has a name" note is written for items that failed.
   - A segment whose OSPF is switched off with no interfaces but keeps a router ID or redistribution map is ledgered as outside-preconfig (visible in summary.md) instead of default-omitted.
+- **No silent drops found by the lab replicate**:
+  - VXLAN VNI maps on a source with no VTEP interface are ledgered as outside-preconfig, naming each segment and VNI (the format requires `vtepSrcInterface`). They used to vanish without a ledger line.
+  - Routes that could not be read are never written as an empty list (routes replace on apply). With `/subnets/all` unreadable (an unreachable appliance), the Default segment's routes come from `/subnets` and the other segments are left out and ledgered as not-readable. With `/subnets` unreadable too, `localRoutes` is not written and is ledgered the same way. A 403 still stops the capture (decision 0010).
 - **Missing PyYAML**: prints how to install it instead of a traceback.

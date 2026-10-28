@@ -537,8 +537,12 @@ def m_localRoutes(ctx: Ctx) -> Optional[Dict[str, Any]]:
     if per_segment(ctx):
         ctx.note("subnets", "default-omitted", "localRoutes", "non-default segments have routes or subnet-sharing settings, so the Default segment is written in segmentLocalRoutes (Orchestrator ignores localRoutes when segmentLocalRoutes is present)")
         return None
+    subnets = ctx.data("subnets")
+    if subnets is None:  # routes replace on apply: writing an empty list for an unread table would remove the target's routes
+        ctx.note("subnets", "not-readable", "localRoutes.routes", "the routes read (/subnets) could not be read, live or cached, so localRoutes is not written; check the site's static routes by hand")
+        return None
     try:
-        routes = route_list(ctx, ((ctx.data("subnets") or {}).get("subnets") or {}).get("entries", []), "0")
+        routes = route_list(ctx, (subnets.get("subnets") or {}).get("entries", []), "0")
     except ITEM_ERRORS as err:
         item_failed(ctx, "subnets", "localRoutes", err)
         return None
@@ -552,13 +556,24 @@ def m_localRoutes(ctx: Ctx) -> Optional[Dict[str, Any]]:
 
 
 def m_segmentLocalRoutes(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
-    data = (ctx.data("subnets-all-vrfs") or {}).get("subnets") or {}
+    raw = ctx.data("subnets-all-vrfs")
+    data = (raw or {}).get("subnets") or {}
     if not per_segment(ctx):
         ctx.note("subnets-all-vrfs", "default-omitted", "segmentLocalRoutes", "0 non-default segments with configured routes or subnet-sharing settings")
         return None
+    source = "subnets-all-vrfs"
+    if raw is None:  # routes replace on apply: a segment whose routes were not read is left out, never written with an empty list
+        default = ctx.data("subnets")  # the Default segment's configured routes, the same table localRoutes reads
+        data = {"0": default.get("subnets") or {}} if default is not None else {}
+        unread = [ctx.segment(v) or v for v in sorted(sharing_segments(ctx)) if v not in data]
+        ctx.note("subnets-all-vrfs", "not-readable", "segmentLocalRoutes.routes", "the per-segment routes read (/subnets/all) could not be read, so the routes of segment(s) {} are unknown and those segments are not written{}; check them by hand".format(
+            ", ".join(unread) or "-", "; Default routes come from /subnets" if default is not None else ""))
+        source = "subnets"
     out = []
     # A segment without routes still carries subnet-sharing settings of its own; one at the ECOS defaults is left out, since writing it adds default_rtmap_to_subsh
     for vrf in sorted(set(data) | set(sharing_segments(ctx))):
+        if raw is None and vrf not in data:
+            continue
         try:
             routes = route_list(ctx, (data.get(vrf) or {}).get("entries", []), vrf, "segmentLocalRoutes.routes")
         except ITEM_ERRORS as err:
@@ -571,7 +586,7 @@ def m_segmentLocalRoutes(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         elif flags:
             ctx.note("system-info.auto_subnet.vrf[{}]".format(vrf), "default-omitted", "segmentLocalRoutes",
                      "segment {} has no routes and its subnet-sharing settings are the ECOS defaults; writing it would add default_rtmap_to_subsh".format(ctx.segment(vrf)))
-    ctx.note("subnets-all-vrfs", "mapped", "segmentLocalRoutes", "{} segments with configured routes or subnet-sharing settings (Default included)".format(len(out)))
+    ctx.note(source, "mapped", "segmentLocalRoutes", "{} segments with configured routes or subnet-sharing settings (Default included)".format(len(out)))
     return out or None
 
 
@@ -903,6 +918,10 @@ def m_vxlan(ctx: Ctx) -> Optional[Dict[str, Any]]:
     lines = cli_lines(ctx)
     vtep = next((m.group(1) for l in lines for m in [re.match(r"^vxlan vtep-interface (\S+)$", l)] if m), None)
     if not vtep:
+        dormant = ["{} {}".format(ctx.segment(k) or k, v.get("vni")) for k, v in sorted(seg_map.items(), key=lambda kv: str(kv[0]))
+                   if isinstance(v, dict) and str(v.get("vni")) not in ("None", "", "0", "-1", "4294967295")] if isinstance(seg_map, dict) else []
+        if dormant:  # vtepSrcInterface is required by the format, so the maps cannot be written on their own
+            ctx.note("vxlan-vni-map", "outside-preconfig", "vxlan", "VNI maps ({}) but no VTEP interface: the format requires vtepSrcInterface, so they are not written; the target keeps its own".format(", ".join(dormant)))
         return None
     vni: Dict[str, Dict[str, Any]] = {}
     for l in lines:

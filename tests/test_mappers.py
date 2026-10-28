@@ -998,5 +998,49 @@ class LedgerAccuracy(unittest.TestCase):
         self.assertEqual([n["disposition"] for n in notes if n["item"] == "ospf-system-all-vrfs[2]"], ["default-omitted"])
 
 
+
+SHARING = {"add_local_lan": True, "add_local_wan": False, "add_local_metric": 50, "add_local_communities": False, "local_communities": "", "local_asn_filter": False, "rtmap_to_subshare": "map1"}
+
+
+class SilentGaps(unittest.TestCase):
+    """Source config the converter cannot carry is ledgered visibly, never dropped in silence or written as an empty list."""
+
+    def test_vni_maps_without_vtep_are_ledgered(self):
+        from mappers import m_vxlan
+        c, notes = ctx({"deployment": DEP3, "vxlan": {"ERROR": "NOT_AVAILABLE"}, "vxlan-vni-map": {"0": {"vni": 10000, "zoneId": 0, "role": 0}, "1": {"vni": 10010, "zoneId": 0, "role": 0}}})
+        self.assertIsNone(m_vxlan(c))
+        visible = [n for n in notes if n["target"].startswith("vxlan") and n["disposition"] not in QUIET_DISPOSITIONS]
+        self.assertEqual(len(visible), 1, notes)
+        self.assertIn("Default 10000", visible[0]["note"])
+        self.assertIn("corp 10010", visible[0]["note"])
+
+    def test_no_vni_maps_no_vxlan_note(self):
+        from mappers import m_vxlan
+        c, notes = ctx({"deployment": DEP3, "vxlan": {"ERROR": "NOT_AVAILABLE"}, "vxlan-vni-map": {"0": {"vni": 4294967295, "zoneId": 0, "role": 0}}})
+        self.assertIsNone(m_vxlan(c))
+        self.assertEqual([n for n in notes if n["target"].startswith("vxlan")], [])
+
+    def test_unreadable_segment_routes_read(self):
+        from mappers import m_segmentLocalRoutes
+        data = {"deployment": DEP3, "subnets": {"subnets": {"entries": [{"state": ROUTE}]}},
+                "system-info": {"auto_subnet": {"vrf": {"0": SHARING, "1": SHARING}}}}
+        c, notes = ctx(data)
+        out = m_segmentLocalRoutes(c)
+        self.assertEqual([(e["segment"], [r["routeIpSubnet"] for r in e["routes"]]) for e in out], [("Default", ["198.51.100.0/24"])])
+        lines = [n for n in notes if n["disposition"] == "not-readable"]
+        self.assertEqual(len(lines), 1, notes)
+        self.assertIn("corp", lines[0]["note"])
+        self.assertFalse([n for n in notes if n["disposition"] == "mapped" and n["item"] == "subnets-all-vrfs"])
+
+    def test_no_routes_read_at_all(self):
+        from mappers import m_localRoutes, m_segmentLocalRoutes
+        c, notes = ctx({"deployment": DEP, "system-info": {"auto_subnet": {"vrf": {"0": SHARING}}}})
+        self.assertIsNone(m_localRoutes(c))
+        self.assertEqual([n["target"] for n in notes if n["disposition"] == "not-readable"], ["localRoutes.routes"])
+        c, notes = ctx({"deployment": DEP3, "system-info": {"auto_subnet": {"vrf": {"0": SHARING, "1": SHARING}}}})
+        self.assertIsNone(m_segmentLocalRoutes(c))
+        self.assertTrue([n for n in notes if n["disposition"] == "not-readable"])
+
+
 if __name__ == "__main__":
     unittest.main()
