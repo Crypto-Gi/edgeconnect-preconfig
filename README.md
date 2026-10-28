@@ -118,7 +118,7 @@ Run the same `upload` with `--approve` to stage the ready rows in Orchestrator.
 | Command | What it does |
 |---|---|
 | `list --orchestrator NICK` | Tests the `.env` profile and lists the appliances |
-| `build --orchestrator NICK --appliance NAME\|nePk [--target-ecos ECOS]` | Reads the appliance (GET only), converts it, and keeps the folder only if `/validate` accepts it. Give `--target-ecos` (for example `9.6.2.1`), the ECOS of the appliances the preconfig is for: without it, interface routes with next hop `0.0.0.0` are left out and listed, because ECOS 9.7 rejects them |
+| `build --orchestrator NICK --appliance NAME\|nePk [--target-ecos ECOS]` | Reads the appliance (GET only), converts it, and keeps the folder only if `/validate` accepts it. `--target-ecos` (for example `9.6.2.1`), the ECOS of the appliances the preconfig is for, is optional: it is recorded in `build.json` and the summary, and no rule depends on it at present |
 | `variables FOLDER` | Choose the per-site settings: Top 10, Top 20 or all, by section |
 | `compare FOLDER SITE [SITE ...]` | Let other sites of the same design choose them; a CSV row per site |
 | `validate FOLDER --csv FILE` | Validates every row; writes `rendered/<preconfig_name>.yml` for those that pass |

@@ -1587,48 +1587,77 @@ class ManagementPorts(unittest.TestCase):
         self.assertEqual([n["item"] for n in notes if n["disposition"] == "outside-preconfig"], ["interface-state[mgmt0]"])  # lan0 down is carried, not ledgered
 
 
-class InterfaceRouteNextHopZero(unittest.TestCase):
-    """A route with next hop 0.0.0.0 and an interface: apply rejects it on ECOS 9.7.1 ("Interface cannot be specified when Next Hop is 0.0.0.0")
-    and applies it on ECOS 9.6.2.1, both under a 9.7.1 Orchestrator. The target appliance's ECOS decides (translate --target-ecos): 9.7+ and
-    unknown leave it out with a ledger line, before 9.7 keeps it. The Orchestrator release (--target-release) does not decide."""
-    IFROUTE = {"state": dict(ROUTE, prefix="10.14.32.0/21", nextHop="", ifName=""), "config": {"prefix": "10.14.32.0/21", "ifName": "lan1", "nextHop": "0.0.0.0"}}
-    ANY_IF = {"state": dict(ROUTE, prefix="10.15.0.0/16", nextHop="", ifName=""), "config": {"prefix": "10.15.0.0/16", "ifName": "default", "nextHop": "0.0.0.0"}}
-    KEPT = [("10.14.32.0/21", "lan1"), ("10.15.0.0/16", None), ("198.51.100.0/24", "lan0")]
-    DROPPED = [("10.15.0.0/16", None), ("198.51.100.0/24", "lan0")]
+DEPZ = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}],
+                         vrfZonesMap={"0": {"2": {"id": 2, "name": "Guest"}, "5": {"id": 5, "name": "DMZ"}}, "1": {"3": {"id": 3, "name": "Corp"}}}),
+        "modeIfs": [{"ifName": "lan0", "applianceIPs": [{"vlan": 0, "label": "4", "vrf": 0, "zone": 2}]},
+                    {"ifName": "lan1", "applianceIPs": [{"vlan": 0, "label": "4", "vrf": 0, "zone": 2}, {"vlan": 71, "label": "4", "vrf": 1, "zone": 3}]}]}
 
-    def routes(self, ecos, release="9.7.1.42046"):
+
+class InterfaceRouteNextHopZero(unittest.TestCase):
+    """A route with next hop 0.0.0.0 or :: and an interface: the interface has no effect, and apply on ECOS 9.7.1 rejects it ("Interface cannot be
+    specified when Next Hop is 0.0.0.0"). It is written without the interface for every source and target ECOS; its zone stays as the source has it
+    (ECOS ignores a zone on a route without an interface) (docs/decisions/0016). guard-ok: the old 9.7 drop/keep tests are replaced by that owner decision."""
+    IFROUTE = {"state": dict(ROUTE, prefix="10.14.32.0/21", nextHop="", ifName=""), "config": {"prefix": "10.14.32.0/21", "ifName": "lan1", "nextHop": "0.0.0.0", "zone_id": 65534}}
+    ANY_IF = {"state": dict(ROUTE, prefix="10.15.0.0/16", nextHop="", ifName=""), "config": {"prefix": "10.15.0.0/16", "ifName": "default", "nextHop": "0.0.0.0"}}
+    V6 = {"state": dict(ROUTE, prefix="2001:db8:1::/48", nextHop="", ifName=""), "config": {"prefix": "2001:db8:1::/48", "ifName": "lan1", "nextHop": "::"}}
+    WRITTEN = [("10.14.32.0/21", "0.0.0.0", None, None), ("10.15.0.0/16", "0.0.0.0", None, None), ("198.51.100.0/24", "192.0.2.254", "lan0", None),
+               ("2001:db8:1::/48", "::", None, None)]
+    TAIL = "; the route's zone shows as none on the appliance, ECOS ignores a zone on a route without an interface (docs/decisions/0016)"
+    STRIP = ["route 10.14.32.0/21 (segment Default): interface lan1 removed (next hop 0.0.0.0 with an interface has no effect; ECOS 9.7+ rejects it)" + TAIL,
+             "route 2001:db8:1::/48 (segment Default): interface lan1 removed (next hop :: with an interface has no effect; ECOS 9.7+ rejects it)" + TAIL]
+
+    def routes(self, ecos, entries=None, release="9.7.1.42046"):
         notes = []
-        c = Ctx(FakeCap({"deployment": DEP, "subnets": {"subnets": {"entries": [self.IFROUTE, self.ANY_IF, {"state": ROUTE}]}}}), notes)
+        c = Ctx(FakeCap({"deployment": DEPZ, "subnets": {"subnets": {"entries": entries or [self.IFROUTE, self.ANY_IF, {"state": ROUTE}, self.V6]}}}), notes)
         c.target_release, c.target_ecos = release, ecos  # what translate --target-release and --target-ecos set
         from mappers import m_localRoutes
-        return [(r["routeIpSubnet"], r["interfaceName"]) for r in m_localRoutes(c)["routes"]], [n["note"] for n in notes if n["disposition"] == "unresolved" and "next hop 0.0.0.0" in n["note"]]
+        return [(r["routeIpSubnet"], r["nextHop"], r["interfaceName"], r["zone"]) for r in m_localRoutes(c)["routes"]], notes
 
-    def test_ecos_97_and_later_drops(self):
-        for ecos in ("9.7.1.0", "10.0.0.1"):
-            with self.subTest(ecos):
-                routes, gaps = self.routes(ecos, release=None)
-                self.assertEqual(routes, self.DROPPED)
-                self.assertEqual(len(gaps), 1, gaps)
-                self.assertTrue(all(w in gaps[0] for w in ("10.14.32.0/21", "lan1", "Default", "target ECOS " + ecos, "ECOS 9.7+ rejects an interface with next hop 0.0.0.0")), gaps)
+    @staticmethod
+    def removed(notes):
+        return [(n["disposition"], n["note"]) for n in notes if "removed (next hop" in n["note"]]
 
-    def test_ecos_before_97_keeps_under_a_97_orchestrator(self):
-        routes, gaps = self.routes("9.6.2.1")
-        self.assertEqual((routes, gaps), (self.KEPT, []))
-
-    def test_unknown_ecos_drops_and_says_why(self):
-        routes, gaps = self.routes(None)
-        self.assertEqual(routes, self.DROPPED)
-        self.assertEqual(len(gaps), 1, gaps)
-        self.assertTrue(gaps[0].startswith("target appliance ECOS unknown: ECOS 9.7+ rejects an interface with next hop 0.0.0.0 (route 10.14.32.0/21 on lan1, segment Default); "
-                                           "on ECOS before 9.7 it applies as is: pass --target-ecos"), gaps)
-
-    def test_a_malformed_ecos_is_unknown(self):
-        for ecos in ("abc", "", "latest", "9", "9.7x"):
+    def test_interface_is_removed_for_every_target_ecos(self):
+        for ecos in ("9.6.2.1", "9.7.1.0", "10.0.0.1", None, "abc"):
             with self.subTest(ecos=ecos):
-                routes, gaps = self.routes(ecos)
-                self.assertEqual(routes, self.DROPPED)
-                self.assertTrue(gaps and gaps[0].startswith("target appliance ECOS unknown"), gaps)
-        self.assertEqual(self.routes("9.6.2.1_107093"), (self.KEPT, []))
+                routes, notes = self.routes(ecos)
+                self.assertEqual(routes, self.WRITTEN)
+                self.assertEqual(self.removed(notes), [("mapped", n) for n in self.STRIP])
+                self.assertEqual([n for n in notes if n["disposition"] == "unresolved"], [])
+
+    def test_the_zone_is_written_as_the_source_has_it(self):
+        own = {"state": self.IFROUTE["state"], "config": dict(self.IFROUTE["config"], zone_id=5)}  # the interface's zone (Guest) is never taken
+        routes, notes = self.routes("9.6.2.1", [own])
+        self.assertEqual(routes, [("10.14.32.0/21", "0.0.0.0", None, "DMZ")])
+        self.assertEqual(self.removed(notes), [("mapped", self.STRIP[0])])
+
+    def test_merged_when_removing_the_interface_makes_two_routes_the_same(self):
+        lan0 = {"state": self.IFROUTE["state"], "config": dict(self.IFROUTE["config"], ifName="lan0")}
+        routes, notes = self.routes("9.6.2.1", [self.IFROUTE, lan0, {"state": ROUTE}])
+        self.assertEqual(routes, [("10.14.32.0/21", "0.0.0.0", None, None), ("198.51.100.0/24", "192.0.2.254", "lan0", None)])
+        self.assertEqual([(n["disposition"], n["note"]) for n in notes if "written once" in n["note"]],
+                         [("mapped", "route 10.14.32.0/21 next hop 0.0.0.0, segment Default: two source routes are the same once the interface is removed; written once")])
+        other = {"state": dict(self.IFROUTE["state"], metric=10), "config": dict(self.IFROUTE["config"], ifName="lan0")}
+        routes, notes = self.routes("9.6.2.1", [self.IFROUTE, other])
+        self.assertEqual(routes, [("10.14.32.0/21", "0.0.0.0", None, None)])
+        self.assertEqual([n["note"] for n in notes if "written once" in n["note"]],
+                         ["route 10.14.32.0/21 next hop 0.0.0.0, segment Default: two source routes are the same once the interface is removed; written once "
+                          "with the first one's metric (assumption: confirm the merged route's settings)"])
+        on_lan1 = {"state": dict(ROUTE, ifName="lan1")}  # a real next hop keeps its interface: not merged with the lan0 route
+        routes, notes = self.routes("9.6.2.1", [{"state": ROUTE}, on_lan1])
+        self.assertEqual(routes, [("198.51.100.0/24", "192.0.2.254", "lan0", None), ("198.51.100.0/24", "192.0.2.254", "lan1", None)])
+        self.assertEqual([n for n in notes if "written once" in n["note"] or "removed (next hop" in n["note"]], [])
+
+    def test_segment_route(self):
+        from mappers import m_segmentLocalRoutes
+        notes = []
+        vlan = {"state": self.IFROUTE["state"], "config": dict(self.IFROUTE["config"], ifName="lan1.71")}
+        c = Ctx(FakeCap({"deployment": DEPZ, "subnets-all-vrfs": {"subnets": {"1": {"entries": [vlan, {"state": ROUTE}]}}}}), notes)
+        out = m_segmentLocalRoutes(c)
+        self.assertEqual([(e["segment"], [(r["routeIpSubnet"], r["interfaceName"], r["zone"]) for r in e["routes"]]) for e in out],
+                         [("corp", [("10.14.32.0/21", None, None), ("198.51.100.0/24", "lan0", None)])])
+        self.assertEqual(self.removed(notes), [("mapped", "route 10.14.32.0/21 (segment corp): interface lan1.71 removed (next hop 0.0.0.0 with an interface has no effect; "
+                                                           "ECOS 9.7+ rejects it)" + self.TAIL)])
 
     def test_translate_rejects_a_malformed_target_ecos(self):
         import contextlib, io, translate
@@ -1657,14 +1686,15 @@ class InterfaceRouteNextHopZero(unittest.TestCase):
             translate.main(["--capture", "x", "--site-type", "t"])
         self.assertEqual(seen, ["9.6.2.1", None])
 
-    def test_build_passes_the_target_ecos(self):
-        for ecos, dropped in (("9.6.2.1", False), ("9.7.1.0", True), (None, True)):
+    def test_build_writes_it_for_every_target_ecos(self):
+        for ecos in ("9.6.2.1", "9.7.1.0", None):
             cap = FakeCap({"appliance": {"hostName": "h1", "groupId": "1.Network", "site": "S1", "networkRole": "0"}, "deployment": dict(copy.deepcopy(DEP), modeIfs=[]),
                            "subnets": {"subnets": {"entries": [self.IFROUTE]}}})
             cap.folder = "fake"
             ledger = []
-            build(cap, ledger, target_ecos=ecos)
-            self.assertEqual(bool([e for e in ledger if "ECOS 9.7+ rejects" in e["note"]]), dropped, ecos)
+            out = build(cap, ledger, target_ecos=ecos)
+            self.assertEqual([(r["routeIpSubnet"], r["interfaceName"]) for r in out["localRoutes"]["routes"]], [("10.14.32.0/21", None)], ecos)
+            self.assertEqual([e["disposition"] for e in ledger if "removed (next hop" in e["note"]], ["mapped"], ecos)
 
 
 class InlineRouterOneSide(unittest.TestCase):

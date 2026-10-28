@@ -843,10 +843,10 @@ def apply_warnings(ledger: List[Dict[str, Any]]) -> List[str]:
 
 
 def ecos_line(target_ecos: Optional[str]) -> str:
-    """Which target appliance ECOS the ECOS-dependent rules used (one-route rule in mappers.one_route)."""
+    """The target appliance ECOS the translation was given (--target-ecos): recorded for the report; no rule depends on it at present."""
     if target_ecos:
         return "Target appliance ECOS: {} (from --target-ecos)".format(target_ecos)
-    return "Target appliance ECOS: unknown (pass --target-ecos; interface routes with next hop 0.0.0.0 are left out)"
+    return "Target appliance ECOS: unknown (--target-ecos not given; no rule depends on it at present)"
 
 
 def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: Dict[str, Any], release: str, target_ecos: Optional[str] = None) -> str:
@@ -945,7 +945,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--out", type=Path)
     parser.add_argument("--ignore-template-ownership", action="store_true", help="map sections even when an associated template group provides them (mapper testing only)")
     parser.add_argument("--target-release", default="9.7.1.42046", help="Orchestrator release whose preconfig format is written (default template must exist)")
-    parser.add_argument("--target-ecos", type=ecos_arg, help="ECOS release of the target appliance(s), e.g. 9.6.2.1; unknown by default, which leaves out what some ECOS releases reject on apply")
+    parser.add_argument("--target-ecos", type=ecos_arg, help="ECOS release of the target appliance(s), e.g. 9.6.2.1; recorded in ledger.json and summary.md (no rule depends on it at present)")
     parser.add_argument("--decisions", type=Path, help="decisions.yaml: include_from_default, or the older per-section modes (default_mode, sections, extra_variable, extra_fixed)")
     parser.add_argument("--variables", type=Path, help="variables.csv as edited by the owner (decision / column per field); without it a fresh sheet is written and used")
     parser.add_argument("--compare", nargs="+", type=Path, metavar="CAPTURE", help="capture folders of other appliances of this site type: a field that differs becomes a variable, one equal everywhere stays fixed")

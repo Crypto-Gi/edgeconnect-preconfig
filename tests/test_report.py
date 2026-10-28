@@ -111,7 +111,7 @@ class Report(unittest.TestCase):
         import json
         import tempfile
         for flag, ecos, line in ((["--target-ecos", "9.6.2.1"], "9.6.2.1", "Target appliance ECOS: 9.6.2.1 (from --target-ecos)"),
-                                 ([], None, "Target appliance ECOS: unknown (pass --target-ecos; interface routes with next hop 0.0.0.0 are left out)")):
+                                 ([], None, "Target appliance ECOS: unknown (--target-ecos not given; no rule depends on it at present)")):
             with self.subTest(ecos=ecos), tempfile.TemporaryDirectory() as tmp, mock.patch.object(translate, "Capture", return_value=FakeCap()), \
                     contextlib.redirect_stdout(io.StringIO()) as out:
                 self.assertEqual(translate.main(["--capture", "x", "--site-type", "t", "--out", tmp] + flag), 0)

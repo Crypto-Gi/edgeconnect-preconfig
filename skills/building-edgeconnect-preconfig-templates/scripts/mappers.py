@@ -17,11 +17,6 @@ ADMIN = {True: "Up", False: "Down"}
 ECOS_RELEASE = re.compile(r"^\d+\.\d+(\.\d+)*(_\d+)?$")  # 9.7, 9.6.2.1, 9.6.2.1_107093
 
 
-def ecos_key(text: Any) -> Optional[Tuple[int, ...]]:
-    """(major, minor) of an ECOS release; None for anything else, which counts as unknown."""
-    return tuple(int(n) for n in str(text).split("_")[0].split("."))[:2] if text is not None and ECOS_RELEASE.match(str(text)) else None
-
-
 def nul(value: Any) -> Any:
     return None if value in ("", None) else value
 
@@ -33,7 +28,7 @@ def managed(item: Any) -> bool:
 class Ctx:
     def __init__(self, cap: Any, notes: List[Dict[str, Any]], target_ecos: Optional[str] = None) -> None:
         self.cap, self.notes = cap, notes
-        self.target_ecos = target_ecos  # ECOS release of the target appliance (translate --target-ecos); None: unknown
+        self.target_ecos = target_ecos  # ECOS release of the target appliance (translate --target-ecos); None: unknown. No rule reads it at present
         self.nepk = cap.run["appliance"]["nePk"]
         dep = cap.data("deployment") or {}
         dep = dep if isinstance(dep, dict) else {}
@@ -657,7 +652,17 @@ def route_list(ctx: Ctx, entries: List[Dict[str, Any]], vrf: str, target: str = 
             out.append(route)
     if failed and not out:  # routes replace on apply: an empty list would remove the target's
         raise ValueError("no route of segment {} could be read".format(vrf))
-    return sorted(out, key=lambda r: (str(r.get("routeIpSubnet")), str(r.get("nextHop") or "")))
+    kept: List[Dict[str, Any]] = []
+    for r in sorted(out, key=lambda r: (str(r.get("routeIpSubnet")), str(r.get("nextHop") or ""))):
+        first = next((k for k in kept if (k["routeIpSubnet"], k["nextHop"], k["interfaceName"]) == (r["routeIpSubnet"], r["nextHop"], r["interfaceName"])), None)
+        if first is None:
+            kept.append(r)
+            continue
+        differ = sorted(k for k in set(r) | set(first) if r.get(k) != first.get(k))  # one route per prefix and next hop: the first in the source is written
+        ctx.note("subnets", "mapped", target, "route {} next hop {}, segment {}: two source routes are the same once the interface is removed; written once{}".format(
+            r["routeIpSubnet"], r["nextHop"], ctx.segment(vrf, strict=False) or vrf,
+            " with the first one's {} (assumption: confirm the merged route's settings)".format(", ".join(differ)) if differ else ""))
+    return kept
 
 
 def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.routes") -> Optional[Dict[str, Any]]:
@@ -679,17 +684,10 @@ def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.
     if not next_hop:  # apply rejects it: "Next Hop cannot be empty when interface is specified"
         ctx.note("subnets", "unresolved", target, "route {} on {} has no next hop; a preconfig route needs one, so it is not written".format(st.get("prefix"), if_name))
         return None
-    # apply on ECOS 9.7.1 rejects it ("Interface cannot be specified when Next Hop is 0.0.0.0"); ECOS 9.6.2.1 applies it, both under a 9.7.1 Orchestrator (lab, 2026-10-28)
-    if next_hop == "0.0.0.0" and if_name:
-        where = "route {} on {}, segment {}".format(st.get("prefix"), if_name, ctx.segment(vrf, strict=False) or vrf)
-        if ecos_key(ctx.target_ecos) is None:  # a malformed value (an edited build.json) is unknown, never "before 9.7"
-            ctx.note("subnets", "unresolved", target, "target appliance ECOS unknown: ECOS 9.7+ rejects an interface with next hop 0.0.0.0 ({}); on ECOS before 9.7 it applies as is: "
-                     "pass --target-ecos, or on 9.7 give it a next hop or interface default; not written".format(where))
-            return None
-        if ecos_key(ctx.target_ecos) >= (9, 7):
-            ctx.note("subnets", "unresolved", target, "{} not written for target ECOS {}: ECOS 9.7+ rejects an interface with next hop 0.0.0.0; give the route a next hop or add it by hand".format(
-                where, ctx.target_ecos))
-            return None
+    if next_hop in ("0.0.0.0", "::") and if_name:  # the interface has no effect and ECOS 9.7+ rejects it on apply: removed, zone left as the source has it (docs/decisions/0016)
+        ctx.note("subnets", "mapped", target, "route {} (segment {}): interface {} removed (next hop {} with an interface has no effect; ECOS 9.7+ rejects it); the route's zone "
+                 "shows as none on the appliance, ECOS ignores a zone on a route without an interface (docs/decisions/0016)".format(st.get("prefix"), ctx.segment(vrf, strict=False) or vrf, if_name, next_hop))
+        if_name = None
     zone_id = conf.get("zone_id", st.get("zone_id"))  # the state reports the zone of the interface in use
     zone = None if str(zone_id) in ("65534", "") else ctx.zone(vrf, zone_id)
     # subnets3/configured holds the Default segment only and ignores segment parameters (ECOS 9.6.2.1)

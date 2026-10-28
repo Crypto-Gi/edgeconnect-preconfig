@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.2 (2026-10-28)
+
+- **Routes with next hop 0.0.0.0 or :: lose their interface** (`docs/decisions/0016`): a local route (`localRoutes`, `segmentLocalRoutes`) with next hop `0.0.0.0` or `::` and a named interface is now written without `interfaceName`, whatever the source or target ECOS, and ledgered `mapped` with prefix, interface and segment. The interface has no effect, and ECOS 9.7+ rejects it on apply. The route's zone is written as the source has it; the appliance shows such a route with zone none (ECOS ignores a zone on a route without an interface), where the interface route showed the interface's zone. 1.3.0 left such routes out (ledgered unresolved) for a 9.7+ or unknown target ECOS, and kept the interface before 9.7. Two routes that become the same are written once, with a ledger line. `--target-ecos` is still accepted and recorded in `build.json`, `ledger.json` and `summary.md`, but no rule depends on it at present; the summary's unknown line says so.
+
 ## 1.3.1 (2026-10-28)
 
 Documentation only; the converter is unchanged from 1.3.0.
