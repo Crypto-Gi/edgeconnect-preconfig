@@ -752,3 +752,71 @@ class AuditRegressions(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ItemIsolation(unittest.TestCase):
+    """One malformed item is ledgered as toolkit-error and skipped; the rest of its section is still written."""
+
+    def check(self, mapper, data, pick, good, section):
+        c, notes = ctx(data)
+        out = mapper(c)
+        self.assertIsNotNone(out, "the whole section was dropped")
+        self.assertEqual(pick(out), good)
+        self.assertEqual([n["target"] for n in notes if n["disposition"] == "toolkit-error"], [section])
+
+    def test_vrrp_group(self):
+        from mappers import m_vrrp
+        g = {"groupId": 1, "interface": "lan0", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 1, "priority": 100, "version": 2, "preempt": True, "pkt_trace": False, "holddown": 10}
+        bad = {k: v for k, v in dict(g, groupId=2).items() if k != "priority"}
+        self.check(m_vrrp, {"vrrp": [g, bad]}, lambda o: [e["groupId"] for e in o["vrrpEntries"]], [1], "vrrp")
+
+    def test_loopback(self):
+        from mappers import m_loopbackInterface
+        lo = {"admin": True, "ipaddr": "192.0.2.9", "nmask": 32, "label": "", "vrf_id": 0, "zone": 0}
+        self.check(m_loopbackInterface, {"deployment": DEP, "loopbacks": {"lo1": lo, "lo2": {"admin": True}}}, lambda o: [x["interfaceId"] for x in o["loopbacks"]], ["lo1"], "loopbackInterface")
+
+    def test_bgp_neighbor(self):
+        from mappers import m_bgpSystemConfig
+        n = {"remote_as": 65001, "type": "Branch", "enable": True, "hold": 180, "ka": 60, "next_hop_self": False, "store_received_routes": True, "directly_connected": True}
+        data = {"deployment": DEP, "bgp-system": {"enable": True, "asn": 65000}, "bgp-neighbors": {"192.0.2.1": n, "192.0.2.2": {"type": "Branch"}}}
+        self.check(m_bgpSystemConfig, data, lambda o: [x["peerIpAddress"] for x in o["neighbors"]], ["192.0.2.1"], "bgpSystemConfig.neighbors")
+
+    def test_port_forwarding_rule(self):
+        from mappers import m_inboundPortForwarding
+        r = {"srcSubnet": "0.0.0.0/0", "destSubnet": "192.0.2.10/32", "destPort": "443", "protocol": "tcp", "targetIp": "", "targetPort": "", "srcIf": "any", "vrf_id": 0, "comment": ""}
+        self.check(m_inboundPortForwarding, {"deployment": DEP, "port-forwarding": [r, {"srcIf": "any", "comment": ""}]}, lambda o: len(o["portForwardingRules"]), 1, "inboundPortForwarding")
+
+    def test_ip_sla_rule(self):
+        from mappers import m_ipSlaRule
+        op = {"type": "ip-monitor", "ip-monitor-ip": "192.0.2.98"}
+        good = {"enable": True, "interval": "10", "comment": "", "upAction": "def-alarm", "downAction": "alarm", "operation": {"OPR_1": op}}
+        bad = dict(good, interval="every minute")
+        self.check(m_ipSlaRule, {"deployment": DEP, "ipsla-managers": {"MGR_1": good, "MGR_2": bad}}, lambda o: len(o["ruleEntries"]), 1, "ipSlaRule")
+
+    def test_local_route(self):
+        from mappers import m_localRoutes
+        st = {"configured": True, "local": True, "automatic": False, "prefix": "198.51.100.0/24", "nextHop": "192.0.2.254", "ifName": "lan0", "metric": 50, "advert": True, "advert_bgp": False, "advert_ospf": False}
+        bad = {k: v for k, v in dict(st, prefix="203.0.113.0/24").items() if k != "metric"}
+        data = {"deployment": DEP, "subnets": {"subnets": {"entries": [{"state": st}, {"state": bad}]}}}
+        self.check(m_localRoutes, data, lambda o: [r["routeIpSubnet"] for r in o["routes"]], ["198.51.100.0/24"], "localRoutes.routes")
+
+    def test_branch_nat_rule(self):
+        from mappers import m_branchNatMapsConfig
+        maps = {"map1": {"prio": {"10": {"dir": "outbound", "match": {"intf": "lan0"}, "set": {}}, "20": {"dir": "outbound", "match": "unexpected", "set": {}}}}}
+        self.check(m_branchNatMapsConfig, {"deployment": DEP, "branch-nat-maps": maps}, lambda o: [r["priorityLevel"] for r in o["branchNatRules"]], [10], "branchNatMapsConfig")
+
+    def test_bridge_group_and_link_aggregation(self):
+        from mappers import m_bridgeGroups, m_linkAggregation
+        bg = {"portlist": "lan1,lan2", "mtu": 1500, "admin": True, "comments": ""}
+        self.check(m_bridgeGroups, {"bridge-groups": {"blan0": bg, "blan1": {"mtu": 1500}}}, lambda o: [x["bridgeGroup"] for x in o], ["blan0"], "bridgeGroups")
+        lag = {"portlist": "lan0,lan1", "mtu": 1500, "mode": 4, "lacp_rate": "slow", "lacp_sys_prio": 65535, "comment": ""}
+        self.check(m_linkAggregation, {"link-aggregation": {"blan0": lag, "blan1": {"mtu": 1500}}}, lambda o: [x["channelGroup"] for x in o["linkAggregationGroups"]], ["blan0"], "linkAggregation")
+
+    def test_ospf_segment(self):
+        from mappers import m_segmentOspfConfig
+        dep = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}, {"id": "2", "name": "guest"}]), "modeIfs": DEP["modeIfs"]}
+        iface = {"area": "0.0.0.0", "cost": 1, "priority": 1, "adminStatus": True, "helloInterval": 10, "deadInterval": 40, "transmitDelay": 1, "retransmitInterval": 5,
+                 "authType": "None", "authKey": "", "md5Key": 0, "md5Password": "", "comment": "", "bfdDesired": False}
+        data = {"deployment": dep, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}, "2": {"enable": True}},
+                "ospf-interfaces-all-vrfs": {"0": {"lan0": iface}, "1": {"lan0.71": iface}, "2": {"lan0.72": {"area": "0.0.0.0"}}}}
+        self.check(m_segmentOspfConfig, data, lambda o: [e["segment"] for e in o], ["Default", "corp"], "segmentOspfConfig")
