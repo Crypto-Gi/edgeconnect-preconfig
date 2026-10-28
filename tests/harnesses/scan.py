@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "toolkit" / "scripts"))
 from common import CATALOGUE, WORK_DIR, client_for, load_yaml, utc_stamp, write_json  # noqa: E402
 
 SCAN_IDS = ["deployment", "bgp-system", "bgp-neighbors", "ospf-system", "ospf-interfaces", "vrrp", "loopbacks", "vtis", "pppoe", "port-forwarding",

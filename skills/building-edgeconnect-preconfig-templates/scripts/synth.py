@@ -23,6 +23,7 @@ def inventory(client: Any) -> Dict[str, List[str]]:
         "zones": sorted({v["name"] for v in client.get("/zones").values()}),
         "clusterProfiles": [p["name"] for p in (client.get("/cluster/profiles") or []) if isinstance(p, dict) and p.get("name")],
         "idsProfiles": [p["name"] for p in _optional(client, "/ids/signatures/profiles") if isinstance(p, dict) and p.get("name")],
+        "routeLabels": [v["name"] for v in (_optional(client, "/routeLabels") or {}).values() if isinstance(v, dict) and v.get("name")] if isinstance(_optional(client, "/routeLabels"), dict) else [],
     }
 
 
@@ -53,6 +54,7 @@ def substitute(doc: Dict[str, Any], inv: Dict[str, List[str]], notes: Optional[L
     doc = copy.deepcopy(doc)
     segment, zone = Mapper(inv["segments"], ["Default"]), Mapper(inv["zones"], ["Default"])
     lan, wan = Mapper(inv["lan"]), Mapper(inv["wan"])
+    route_label = Mapper(inv.get("routeLabels") or ["Internet"], [n for n in inv.get("routeLabels") or [] if n])  # names the validator has stay as they are
     def anyl(name: Any) -> Any:  # a label used without a side: reuse the mapping already made for it on either side, else map as a LAN label
         if name in (None, ""):
             return name
@@ -80,6 +82,8 @@ def substitute(doc: Dict[str, Any], inv: Dict[str, List[str]], notes: Optional[L
                     node[key] = segment(value)
                 elif key == "zone" and isinstance(value, str):
                     node[key] = zone(value)
+                elif key == "routeLabel" and isinstance(value, str):
+                    node[key] = route_label(value)
                 elif key in ("source_ip_interface", "auth_interface") and isinstance(value, str) and value != "any":
                     node[key] = lan(value)
                 elif key in ("dot1x_default_role", "mac_default_role") and isinstance(value, str):

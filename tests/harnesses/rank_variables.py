@@ -15,10 +15,10 @@ from collections import defaultdict
 from pathlib import Path
 from typing import List, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "toolkit" / "scripts"))
 from common import WORK_DIR  # noqa: E402
 from corpus import latest  # noqa: E402
-from translate import Capture, build, gated_paths, prune  # noqa: E402
+from translate import Capture, allowed_paths, build, prune  # noqa: E402  guard-ok: scripts are imported after the sys.path insert
 from variables import RANKING, labelled, setting_key, sheet_items  # noqa: E402
 
 LOCKED = {"applianceInfo.hostname"}  # always a column; ranking it adds nothing
@@ -63,7 +63,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         for appliance in sorted(p for p in orch.glob("*") if p.is_dir() and not p.name.startswith(".")):
             run = latest(appliance)
             try:
-                reference = prune(build(Capture(run), []), gated_paths(args.target_release), [])
+                reference = prune(build(Capture(run), []), allowed_paths(args.target_release), [])
             except Exception as error:  # offline appliance without a cache: nothing to rank
                 print("skip {}/{}: {}".format(orch.name, appliance.name, error), file=sys.stderr)
                 continue

@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(ROOT / "toolkit" / "scripts"))
 sys.path.insert(0, str(ROOT / "tests" / "harnesses"))
 import cli  # noqa: E402
 from generate import generate  # noqa: E402
@@ -332,6 +332,61 @@ class Build(unittest.TestCase):
             self.assertEqual((info["orchestrator"], info["validator"], info["site_type"]), ("lab", "lab", "br_1"))
             self.assertEqual(len(list(out.glob("Br_1.previous-*"))), 1)
             self.assertEqual(list(out.glob(".building-*")), [])
+
+    def test_build_rejects_a_malformed_target_ecos_before_reading(self):
+        with mock.patch.object(cli, "VALIDATORS", {"lab"}), mock.patch("capture.capture", side_effect=SystemExit("read")) as cap, contextlib.redirect_stderr(io.StringIO()) as err:
+            for bad in ("abc", "", "latest", "9"):
+                with self.assertRaises(SystemExit, msg=bad):
+                    cli.cmd_build(["--orchestrator", "lab", "--appliance", "x", "--target-ecos", bad])
+        cap.assert_not_called()
+        self.assertIn("not an ECOS release", err.getvalue())
+
+    INFO = {"orchestrator": "lab", "validator": "lab", "capture": "cap", "target_release": "9.7.1.42046"}
+    ECOS_CASES = (({"target_ecos": "9.6.2.1"}, "9.6.2.1"), ({"target_ecos": None}, None), ({}, None))  # build.json: present, null, key absent
+
+    def test_build_site_passes_target_ecos_from_build_json(self):
+        for extra_info, ecos in self.ECOS_CASES:
+            calls = []
+
+            def translate_into(out, capture, site, release, extra):
+                calls.append(extra)
+                raise cli.Fail("stop")
+            with self.subTest(ecos=ecos, info=extra_info), tempfile.TemporaryDirectory() as tmp, mock.patch.object(cli, "translate_into", side_effect=translate_into):
+                with self.assertRaises(cli.Fail):
+                    cli.build_site(Path(tmp), dict(self.INFO, **extra_info), "s1", [])
+                self.assertEqual(calls[0][2:], ["--target-ecos", ecos] if ecos else [])
+
+    def test_compare_builds_the_other_sites_with_target_ecos_from_build_json(self):
+        import translate
+        for extra_info, ecos in self.ECOS_CASES:
+            seen = []
+
+            def build(cap, ledger, target_ecos=None):
+                seen.append(target_ecos)
+                raise translate.NothingToConvert("stop")
+            with self.subTest(ecos=ecos, info=extra_info), tempfile.TemporaryDirectory() as tmp, mock.patch("capture.capture", return_value="cap2"), \
+                    mock.patch.object(translate, "build", side_effect=build), mock.patch.object(translate, "Capture", side_effect=lambda folder: folder), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                (Path(tmp) / "build.json").write_text(json.dumps(dict(self.INFO, **extra_info)))
+                with self.assertRaises(cli.Fail):
+                    cli.cmd_compare([tmp, "site2", "--yes"])
+                self.assertEqual(seen, [ecos])
+
+    def test_target_ecos_reaches_translate_and_build_json(self):
+        calls = []
+
+        def translate_into(out, capture, site, release, extra):
+            calls.append(extra)
+            out.mkdir(parents=True)
+            return "verdict: Complete for preconfig."
+        with tempfile.TemporaryDirectory() as tmp, self.fake_capture(tmp), mock.patch.object(cli, "VALIDATORS", {"lab"}), \
+                mock.patch.object(cli, "translate_into", side_effect=translate_into), mock.patch.object(cli, "checked", return_value=[]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            out = Path(tmp) / "out"
+            cli.cmd_build(["--orchestrator", "lab", "--appliance", "Br 1", "--out", str(out), "--target-ecos", "9.6.2.1"])
+            self.assertEqual(json.loads((out / "Br_1" / "build.json").read_text())["target_ecos"], "9.6.2.1")
+            cli.cmd_build(["--orchestrator", "lab", "--appliance", "Br 1", "--out", str(out)])
+        self.assertEqual(calls, [["--target-ecos", "9.6.2.1"], []])
 
 
 if __name__ == "__main__":

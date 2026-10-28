@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import ssl
 import subprocess
+import sys
 from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -17,16 +18,80 @@ from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_ope
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_TEMPLATES_DIR = SKILL_DIR / "references" / "default-templates"
-_DEFAULT_WORK = SKILL_DIR.parents[2] / "preconfig-work" if len(SKILL_DIR.parents) >= 3 and (SKILL_DIR.parents[2] / "preconfig-work").exists() else Path.cwd() / "preconfig-work"
+# SKILL_DIR is <repo>/toolkit, or <repo>/skills/<skill> for the copy the skill ships; the install folder holds the repo.
+_INSTALL = (SKILL_DIR.parents[1] if SKILL_DIR.parent.name == "skills" else SKILL_DIR.parent).parent
+_DEFAULT_WORK = _INSTALL / "preconfig-work" if (_INSTALL / "preconfig-work").exists() else Path.cwd() / "preconfig-work"
 WORK_DIR = Path(os.environ.get("PRECONFIG_WORK", _DEFAULT_WORK))
 CATALOGUE = SKILL_DIR / "references" / "endpoint-catalogue.yaml"
 
 # Key names whose non-empty string values are secrets. BGP "community" and tag "key" are deliberately absent.
-_SECRET_KEY = re.compile(r"(?i)(passw|passphrase|secret|psk|pre_?shared|private_?key|auth_?key|authentication_?key|api_?key|token|md5|ike_?key|enable_?pass)")
+_SECRET_WORDS = r"passw|passphrase|secret|psk|pre[_-]?shared|(?:private|auth|authentication|api|ike)[_-]?key|token|md5|enable[_-]?pass"
+_SECRET_KEY = re.compile(r"(?i)(" + _SECRET_WORDS + ")")
 _SERVER_SIBLINGS = ("host", "address", "authport", "acctport", "server", "serverIp")
 _PEM = re.compile(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", re.S)
 _CRYPT = re.compile(r"\$(1|2[aby]?|5|6|y)\$[./A-Za-z0-9$]{8,}")
-_CLI_SECRET = re.compile(r"(?im)(\b(?:password|passwd|secret|psk|pre-shared-key|passphrase|auth-key|authentication-key|md5|api-key|token)\b\s+(?:\d\s+)?)(\S+)")
+# [ \t]: a keyword with an empty value must not reach across the line break and redact the next line's first word.
+# A filler ("is", "-", "->"; "=>" is caught by (?![:=])) is never the value: the free-text rules below handle "password is Abc1!" and "password => x".
+_CLI_SECRET = re.compile(r"(?im)(\b(?:password|passwd|secret|psk|pre-shared-key|passphrase|auth-key|authentication-key|md5|api-key|token)\b[ \t]+"
+                         r"(?!(?:is|-+>?)[ \t])(?:\d[ \t]+)?)(?![:=])(\S+)")  # "password = x" is free text, below
+# free text (banners, comments, JSON in CLI lines): "pass: x", "secret = x", "adminPassword is x1", "\"apiKey\":\"x\"". The separator
+# (':', '=', an arrow, or "is"/"-" before a value holding a digit or a symbol other than .,;:!?, so "password is required." stays)
+# keeps "pass-through" untouched. A key is a secret word (_TEXT_WORD: an optional "x_" prefix, a "_key" suffix, a word key may start
+# after '-' as in "x-psk"), a quoted name holding a keyed-field word (_SECRET_WORDS, as for fields: "adminPassword", "tokenize"), or an
+# unquoted name ending in one ("adminPassword", "private_key"; not "token-lifetime", "pskType", "md5sum"). A JSON number, true, false
+# or null is not a secret (fields skip non-strings); a number in prose is ("password: 12345"). A quoted value ends at its closing
+# quote; escapes are read as pairs. Inside a \"-quoted value \\\" is an escaped quote and a bare " is allowed only where it cannot
+# close a string; a '-quoted value holds no \" and a bare " only where it cannot close a string. After a quoted key, a value quote of
+# the same kind ("password":", \"password\":\", 'password':') always opens the value; any other quote that closes a string
+# (_NOT_A_CLOSE) never opens a value, so {"banner": "Password: ", "motd": "x"} keeps its next key. After a quoted JSON key a bare value
+# ends at ',' or '}', a secret array (one nesting level) becomes one placeholder item and an object is left to its own keys. Other free
+# text ends at whitespace, at a backslash run before a quote, or at a quote followed by a delimiter. Every value pattern has disjoint
+# alternatives so no input backtracks more than linearly (Python 3.9 has no atomic groups); a key's secret word must sit within 64
+# characters of the name's start, which keeps one long word from being rescanned per rule. null/true/false are not secrets.
+_TEXT_WORD = (r"(?:\w{0,64}_)?(?:pass(?:word|wd|code|phrase)?|pwd|pw|secret|psk|pre[_-]?shared[_-]?key|auth(?:entication)?[_-]?key|api[_-]?key"
+              r"|token)(?:[_-]key)?")
+_TEXT_END_WORDS = r"passw(?:or)?d|passphrase|secret|psk|pre[_-]?shared|(?:private|auth|authentication|api|ike|shared|md5)[_-]?key|token|md5"
+_KEY_START = r"(?=\w)(?<![\w<])(?P<key>" + _TEXT_WORD
+_KEY_QUOTED = r"|(?<=[\"'])(?=[\w-]{0,64}?(?:" + _SECRET_WORDS + r"))[\w-]+(?=\\?[\"'])"
+_KEY_UNQUOTED = r"|(?<!-)[\w-]{0,64}?(?:" + _TEXT_END_WORDS + r")(?![\w-])"
+_TEXT_KEY = _KEY_START + _KEY_QUOTED + _KEY_UNQUOTED + ")"
+_JSON_KEY = _KEY_START + _KEY_QUOTED + ")"  # the rules below that need a quote after the key, and the one that cannot have one,
+_FREE_KEY = _KEY_START + _KEY_UNQUOTED + ")"  # skip the other key form's scan
+_TEXT_SEP = r"(?:[ \t]*(?:[:=]>?|-+>)[ \t]*|[ \t]+(?:is|-+)[ \t]+(?=\S*?[^\sA-Za-z.,;:!?]))"
+# a quote followed by ',' or ':' and then a JSON value, or by '}' or ']' and then more structure, closes a string
+_NOT_A_CLOSE = r"(?!\s*(?:[,:]\s*(?:\\?[\"'\[{]|-?\d|true|false|null|$)|[}\]]\s*(?:[,}\]\"]|$)))"
+_TEXT_QUOTED = re.compile(r"(?i)(?P<pre>" + _TEXT_KEY + r"(?P<kq>\\?[\"'])?" + _TEXT_SEP + r"(?:(?=(?P=kq))(?P<same>)|)(?P<esc>\\)?(?P<q>\"|'(?P<sq>))(?(same)|"
+                          + _NOT_A_CLOSE + r"))(?P<val>(?(esc)(?:\\\\(?:\\[^\n]|[^\\\n])|\\[^\\\n]|\"" + _NOT_A_CLOSE + r"|[^\\\n\"])*?"
+                          r"|(?(sq)(?:\\[^\n\"]|\"" + _NOT_A_CLOSE + r"|[^\\\n\"])*?"
+                          r"|(?:\\[^\n]|[^\\\n\"])*?)))(?P<end>(?(esc)\\)(?P=q))")
+_JSON_STR = r"(?:\\\"(?:\\\\(?:\\[^\n]|[^\\\n])|\\[^\\\n\"]|[^\\\n\"])*\\\"|\"(?:\\[^\n]|[^\\\"\n])*\")"  # \"-quoted: as in _TEXT_QUOTED
+_JSON_OTHER = r"[^\[\]{}\"\\\n]"
+_TEXT_JSON_ARRAY = re.compile(r"(?i)(?P<pre>" + _JSON_KEY + r"(?P<esc>\\?)\"[ \t]*:[ \t]*\[)(?P<val>(?:" + _JSON_STR + r"|\[(?:" + _JSON_STR
+                              + "|" + _JSON_OTHER + r")*\]|" + _JSON_OTHER + r")*)\]")
+_TEXT_JSON_BARE = re.compile(r"(?i)(?P<pre>" + _JSON_KEY + r"\\?\"[ \t]*:[ \t]*)(?P<val>[^\s\\\",}{\[][^\s\\\",}]*)")
+_TEXT_FREE = re.compile(r"(?i)(?P<pre>" + _FREE_KEY + _TEXT_SEP + r")(?P<val>(?:\\?[\"']" + _NOT_A_CLOSE + r")?(?:[^\s\\\"']|\\+(?![\\\"])|[\"'](?![\s,;:)}\]\"'\\]|$))+)")  # an unclosed quote is taken with the value
+_NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
+_NOT_SECRET = ("null", "true", "false")
+
+
+def _keep(value: str) -> bool:
+    """An empty value, a placeholder already written, or null/true/false: nothing to redact (leading quotes ignored)."""
+    v = value.lstrip("\\\"'")
+    return not v or v.startswith("<SECRET:") or v.lower() in _NOT_SECRET
+
+
+def _redact_text(text: str) -> str:
+    def sub(rule: Any, keep: Any, put: Any) -> None:
+        nonlocal text
+        text = rule.sub(lambda m: m.group(0) if _keep(m["val"]) or keep(m) else m["pre"] + put(m), text)
+
+    sub(_TEXT_QUOTED, lambda m: False, lambda m: "<SECRET:text>" + m["end"])
+    sub(_TEXT_JSON_ARRAY, lambda m: '"' not in m["val"], lambda m: m["esc"] + '"<SECRET:text>' + m["esc"] + '"]')
+    sub(_TEXT_JSON_BARE, lambda m: _NUMBER.fullmatch(m["val"]), lambda m: "<SECRET:text>")
+    sub(_TEXT_FREE, lambda m: False, lambda m: "<SECRET:text>")
+    return text
+
+
 _SERIAL_HEX = re.compile(r"^[0-9A-F]{12}$")
 
 
@@ -325,14 +390,30 @@ def resolve_output_filename(row: Mapping[str, Any], index: int = 1) -> Tuple[str
     return base, base + ".yml"
 
 
-def find_default_template(release: str) -> Optional[Path]:
-    """Locate orchestrator-<release>.yml in the skill's bundled references/default-templates/ or WORK_DIR."""
-    fname = "orchestrator-{}.yml".format(release)
-    for folder in (DEFAULT_TEMPLATES_DIR, WORK_DIR / "reference" / "default-templates"):
-        candidate = folder / fname
-        if candidate.is_file():
-            return candidate
-    return None
+def _release_key(release: str) -> Tuple[int, ...]:
+    return tuple(int(n) for n in re.findall(r"\d+", str(release)))
+
+
+def find_default_template(release: str) -> Tuple[Optional[Path], str]:
+    """(template, why) for an Orchestrator release (docs/decisions/0014): the exact build, else the newest template of the same
+    major.minor, else the nearest older release, else the nearest newer; never None only because the exact build is missing."""
+    have: Dict[str, Path] = {}
+    for folder in (WORK_DIR / "reference" / "default-templates", DEFAULT_TEMPLATES_DIR):  # bundled wins
+        for p in folder.glob("orchestrator-*.yml"):
+            have[p.stem[len("orchestrator-"):]] = p
+    if release in have:
+        return have[release], "the exact template for Orchestrator release {}".format(release)
+    key = _release_key(release)
+    family = [r for r in have if _release_key(r)[:2] == key[:2]]
+    if family:
+        r = max(family, key=_release_key)
+        return have[r], "no template for {}: using {}, the newest of the same {} family".format(release, r, ".".join(map(str, key[:2])))
+    older = [r for r in have if _release_key(r) < key]
+    newer = [r for r in have if _release_key(r) > key]
+    if older or newer:
+        r = max(older, key=_release_key) if older else min(newer, key=_release_key)
+        return have[r], "no template for {} or its family: using {}, the nearest {} release (release {} is untested)".format(release, r, "older" if older else "newer", release)
+    return None, "no default templates in {}".format(DEFAULT_TEMPLATES_DIR)
 
 
 def redact_secrets(value: Any, path: str = "$") -> Tuple[Any, List[str]]:
@@ -349,7 +430,7 @@ def redact_secrets(value: Any, path: str = "$") -> Tuple[Any, List[str]]:
             if secret_key:
                 found.append(where)
                 return "<SECRET:{}>".format(where)
-            text = _CLI_SECRET.sub(lambda m: m.group(1) + "<SECRET:text>", _CRYPT.sub("<SECRET:hash>", _PEM.sub("<SECRET:pem>", item)))
+            text = _CLI_SECRET.sub(lambda m: m.group(1) + "<SECRET:text>", _redact_text(_CRYPT.sub("<SECRET:hash>", _PEM.sub("<SECRET:pem>", item))))
             if text != item:
                 found.append(where)
             return text
@@ -385,7 +466,10 @@ def write_json(path: Path, value: Any) -> None:
 def parse_yaml(text: str) -> Any:
     """YAML 1.2 core-schema scalars. PyYAML's default (1.1) turns 1:1 into 61, 08034 into an octal error, and yes/no/on/off
     into booleans, whereas Orchestrator's parser reads `importRouteTarget: 1:1` and `zipCode: 08034` as strings."""
-    import yaml
+    try:
+        import yaml
+    except ImportError:
+        raise SystemExit("PyYAML is not installed for {}: run `{} -m pip install -r requirements.txt`".format(sys.executable, sys.executable))
 
     class Core(yaml.SafeLoader):
         pass

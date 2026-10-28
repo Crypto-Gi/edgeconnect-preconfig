@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import DEFAULT_TEMPLATES_DIR  # noqa: E402
+from common import find_default_template  # noqa: E402  guard-ok: imported after the sys.path insert
 from options import extract  # noqa: E402
 
 
@@ -37,8 +37,8 @@ def address_format(value: Any) -> Optional[str]:
 
 def option_limits(release: Optional[str]) -> Dict[Tuple[str, str], Dict[str, Any]]:
     """(section, key) -> enum/range documented once in the release's default template; keys defined twice are skipped."""
-    path = DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)
-    if not release or not path.exists():
+    path = find_default_template(release)[0] if release else None
+    if path is None:
         return {}
     items = extract(path.read_text(encoding="utf-8"))
     count: Dict[Tuple[str, str], int] = {}

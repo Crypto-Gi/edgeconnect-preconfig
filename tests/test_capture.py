@@ -2,14 +2,19 @@ import base64
 import contextlib
 import io
 import json
+import random
+import re
 import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "scripts"))
 import capture  # noqa: E402
 import translate  # noqa: E402  guard-ok: scripts are imported after the sys.path insert, like capture above
+import common  # noqa: E402  guard-ok: scripts are imported after the sys.path insert
 from common import redact_secrets  # noqa: E402
 
 
@@ -120,6 +125,12 @@ class CaptureTest(unittest.TestCase):
         self.assertIn(("reachability", "denied"), [(i["id"], i["status"]) for i in index])
         self.assertEqual([(i["label"], i["status"]) for i in index if i["id"] == "deployment"], [("cached", "ok"), ("live", "ok")])
 
+    def test_sync_in_progress_counts_as_reachable(self):
+        final = self.run_capture(FakeClient(state=5), ["deployment"])  # state 5: Orchestrator is re-syncing a reachable appliance
+        self.assertTrue(json.loads((final / "run.json").read_text())["reachable"])
+        index = json.loads((final / "capture-index.json").read_text())
+        self.assertEqual([(i["label"], i["status"]) for i in index if i["id"] == "deployment"], [("cached", "ok"), ("live", "ok")])
+
     def test_a_refused_routes_read_stops_the_capture(self):
         for path, only in (("/subnets", ["subnets"]), ("/subnets/all", ["subnets-all-vrfs"])):
             with self.assertRaises(capture.Stop) as stop:
@@ -155,6 +166,314 @@ class RedactTest(unittest.TestCase):
         self.assertEqual(out["hash"], "<SECRET:hash>")
         self.assertEqual(len(paths), 4)
 
+    def test_an_empty_cli_secret_does_not_eat_the_next_line(self):
+        cli = "   ip ospf authentication-key \n   interface lan0 mtu 1500\n   md5\n   interface pass-through max-bandwidth 50000\n   password 0 s3cret"
+        out, _ = redact_secrets({"cli": cli})
+        self.assertEqual(out["cli"].splitlines()[:4], cli.splitlines()[:4])  # nothing to hide on those lines, so they stay byte for byte
+        self.assertEqual(out["cli"].splitlines()[4], "   password 0 <SECRET:text>")
+
+    def test_free_text_credentials(self):
+        motd = "Monitor login (192.0.2.10:88)\nuser: demo  pass: Hunter2x\nPassword=Swordfish9 pwd: abc123"
+        out, paths = redact_secrets({"banners": {"motd": motd}, "cli": "   interface pass-through max-bandwidth 50000\n   bypass: on"})
+        self.assertEqual(out["banners"]["motd"], "Monitor login (192.0.2.10:88)\nuser: demo  pass: <SECRET:text>\nPassword=<SECRET:text> pwd: <SECRET:text>")
+        self.assertEqual(out["cli"], "   interface pass-through max-bandwidth 50000\n   bypass: on")
+        self.assertEqual(paths, ["$.banners.motd"])
+        out, _ = redact_secrets({"cli": 'web meta "{\\"note\\":\\"pass: abc\\"}"'})  # JSON inside a CLI line: the value ends at the escape
+        self.assertEqual(out["cli"], 'web meta "{\\"note\\":\\"pass: <SECRET:text>\\"}"')
+
+    def test_free_text_credentials_review_forms(self):
+        text = "password = Alpha1x\nPassword : Bravo2x\nPW: Charlie3x\npasscode=Delta4x\npassphrase: Echo5x"
+        out, paths = redact_secrets({"banners": {"issue": text}})
+        for value in ("Alpha1x", "Bravo2x", "Charlie3x", "Delta4x", "Echo5x"):
+            self.assertNotIn(value, out["banners"]["issue"])
+        self.assertEqual(paths, ["$.banners.issue"])
+        cli = 'web proxy-server "{\\"host\\":\\"192.0.2.8\\",\\"username\\":\\"u\\",\\"password\\":\\"Foxtrot6x\\"}"'
+        out, _ = redact_secrets({"cli": cli})
+        self.assertEqual(out["cli"], 'web proxy-server "{\\"host\\":\\"192.0.2.8\\",\\"username\\":\\"u\\",\\"password\\":\\"<SECRET:text>\\"}"')
+        out, _ = redact_secrets({"note": '{"password":"Golf7x"} and password="Hotel8x"'})
+        self.assertEqual(out["note"], '{"password":"<SECRET:text>"} and password="<SECRET:text>"')
+        out, _ = redact_secrets({"note": '{"pwd":12345,"next":1}'})  # guard-ok: a JSON number is left alone, like a keyed field (review of a3adc51)
+        self.assertEqual(out["note"], '{"pwd":12345,"next":1}')
+        out, _ = redact_secrets({"note": '{"pwd":abc12,"next":1}'})  # an unquoted word value ends at the next JSON delimiter
+        self.assertEqual(out["note"], '{"pwd":<SECRET:text>,"next":1}')
+
+    def test_free_text_credentials_whole_value(self):
+        cases = {
+            "password: ab,cd": "password: <SECRET:text>",
+            "pass: x,y}z": "pass: <SECRET:text>",
+            '{"password":"a,b c","x":1}': '{"password":"<SECRET:text>","x":1}',
+            '{"password":null,"pw":true}': '{"password":null,"pw":true}',
+            "secret = Alpha1x": "secret = <SECRET:text>",
+            "set psk = Bravo2x": "set psk = <SECRET:text>",
+            "token=Charlie3x api-key: Delta4x": "token=<SECRET:text> api-key: <SECRET:text>",
+            "pre-shared-key = Echo5x": "pre-shared-key = <SECRET:text>",
+            'x "{\\"password\\":\\"ab"cd\\"}"': 'x "{\\"password\\":\\"<SECRET:text>\\"}"',  # an escaped-quoted value ends at the escaped quote
+        }
+        for text, want in cases.items():
+            with self.subTest(text):
+                self.assertEqual(redact_secrets({"t": text})[0]["t"], want)
+
+    def test_free_text_credentials_quote_edges(self):
+        cases = {
+            'password: "Ab12 rest': 'password: <SECRET:text> rest',
+            'password: "ab\ncd"': 'password: <SECRET:text>\ncd"',
+            '{"password":"","user":"admin"}': '{"password":"","user":"admin"}',
+            "password: 'two words' x": "password: '<SECRET:text>' x",
+            "the secret password: Tango9x": "the secret <SECRET:text> <SECRET:text>",  # over-redacting the keyword is the safe side
+        }
+        for text, want in cases.items():
+            with self.subTest(text):
+                self.assertEqual(redact_secrets({"t": text})[0]["t"], want)
+
+    def assertRedacts(self, cases):
+        for text, want in cases.items():
+            with self.subTest(text):
+                out, paths = redact_secrets({"t": text})
+                self.assertEqual(out["t"], want)
+                self.assertEqual(paths, ["$.t"] if want != text else [])
+                try:
+                    json.loads(text)
+                except ValueError:
+                    continue
+                json.loads(out["t"])  # redaction never breaks JSON structure
+
+    def test_free_text_compound_key_names(self):
+        self.assertRedacts({
+            '{"adminPassword":"Alpha1x"}': '{"adminPassword":"<SECRET:text>"}',
+            '{"apiKey":"Bravo2x","x":1}': '{"apiKey":"<SECRET:text>","x":1}',
+            '{"clientSecret": "Charlie3x"}': '{"clientSecret": "<SECRET:text>"}',
+            '{"client_secret":"Delta4x"}': '{"client_secret":"<SECRET:text>"}',
+            '{"access_token":"Echo5x"}': '{"access_token":"<SECRET:text>"}',
+            '{"preSharedKey":"Foxtrot6x"}': '{"preSharedKey":"<SECRET:text>"}',
+            '{"authToken":"Golf7x"}': '{"authToken":"<SECRET:text>"}',
+            '{"ikePsk":"12345"}': '{"ikePsk":"<SECRET:text>"}',
+            'x "{\\"sharedSecret\\":\\"Hotel8x\\"}"': 'x "{\\"sharedSecret\\":\\"<SECRET:text>\\"}"',
+            "admin_password: India9x": "admin_password: <SECRET:text>",
+            "secret_key: Juliet1x": "secret_key: <SECRET:text>",
+            "api_key=Kilo2x": "api_key=<SECRET:text>",
+            "ike-pre-shared-key = Lima3x": "ike-pre-shared-key = <SECRET:text>",
+            "pre_shared_key: Lima4x authentication_key: Lima5x auth_key: Lima6x": "pre_shared_key: <SECRET:text> authentication_key: <SECRET:text> auth_key: <SECRET:text>",
+            '"adminPassword" = "Lima7x"': '"adminPassword" = "<SECRET:text>"',
+            '{"secretKeyId":"Mike4x"}': '{"secretKeyId":"<SECRET:text>"}',  # same as a keyed field of that name
+            # not secrets: a word that only contains "pass", a secret word with a suffix, booleans
+            '{"passThrough":"on","bypass":"Nov5x","md5Enabled":true}': '{"passThrough":"on","bypass":"Nov5x","md5Enabled":true}',
+            "token-lifetime: 3600 pass-through: on": "token-lifetime: 3600 pass-through: on",
+            "xpassword: Oscar6x": "xpassword: <SECRET:text>",  # guard-ok: any name holding a keyed-field word, as for quoted keys (review of a3adc51)
+        })
+
+    def test_free_text_value_with_quotes_and_backslashes(self):
+        self.assertRedacts({
+            "pass: P@ss'w0rd! next": "pass: <SECRET:text> next",
+            "password: Ab\\cd9 next": "password: <SECRET:text> next",
+            '{"password":"ab\\"cd9","x":1}': '{"password":"<SECRET:text>","x":1}',
+            "password: 'it\\'s9x' next": "password: '<SECRET:text>' next",
+            'password: \\"ab\\ncd9x\\" next': 'password: \\"<SECRET:text>\\" next',  # an escape inside a \\"-quoted value
+            'note "pass: Alpha1x" end': 'note "pass: <SECRET:text>" end',  # a quote before whitespace ends the value
+            "pass: (Bravo2x), next": "pass: <SECRET:text> next",
+            '{"x":"pass: Charlie3x","y":1}': '{"x":"pass: <SECRET:text>","y":1}',  # a quote before a delimiter ends the value
+            "note 'pass: Delta4x'": "note 'pass: <SECRET:text>'",
+            'x "{\\"password\\":\\"a\\\\\\"b9x\\"}"': 'x "{\\"password\\":\\"<SECRET:text>\\"}"',  # escaped JSON of "a\\"b9x"
+        })
+
+    def test_free_text_secret_with_a_nested_value(self):
+        self.assertRedacts({
+            '{"token":{"value":"Alpha1x","password":"Bravo2x"}}': '{"token":{"value":"Alpha1x","password":"<SECRET:text>"}}',
+            '{"secret":["Charlie3x", "Delta4x"],"x":[1]}': '{"secret":["<SECRET:text>"],"x":[1]}',
+            '{"psk":["a]b9x"]}': '{"psk":["<SECRET:text>"]}',
+            '{"secret":[],"pw":[{"user":"u"}]}': '{"secret":[],"pw":[{"user":"u"}]}',
+            'x "{\\"secret\\":[\\"Echo5x\\"]}"': 'x "{\\"secret\\":[\\"<SECRET:text>\\"]}"',
+        })
+
+    def test_free_text_filler_words(self):
+        self.assertRedacts({
+            "the password is Alpha1x": "the password is <SECRET:text>",
+            "Password - Bravo2x": "Password - <SECRET:text>",
+            "password => Charlie3x": "password => <SECRET:text>",
+            "password -> Delta4x": "password -> <SECRET:text>",
+            "admin_password is Echo5x": "admin_password is <SECRET:text>",
+            "admin_password -> Foxtrot6x": "admin_password -> <SECRET:text>",
+            "pass island": "pass island",
+            "md5 => Golf7x": "md5 => <SECRET:text>",
+        })
+
+    def test_free_text_json_numbers_are_left_alone(self):
+        self.assertRedacts({
+            '{"tokenLifetime":3600}': '{"tokenLifetime":3600}',
+            '{"passwordMinLength":8,"md5KeyId":1}': '{"passwordMinLength":8,"md5KeyId":1}',
+            '{"psk":12345,"secret":-1.5e3,"pw":null}': '{"psk":12345,"secret":-1.5e3,"pw":null}',
+            '{"secret":[1,2]}': '{"secret":[1,2]}',
+            "token-lifetime: 3600 tokenLifetime=3600": "token-lifetime: 3600 tokenLifetime=3600",
+            "password: 12345": "password: <SECRET:text>",  # a plain secret word in prose still takes a number
+        })
+
+    def test_free_text_unquoted_compound_keys(self):
+        self.assertRedacts({
+            "adminPassword: Echo5x": "adminPassword: <SECRET:text>",
+            "adminPassword=Echo5x": "adminPassword=<SECRET:text>",
+            "privateKey: Golf7x": "privateKey: <SECRET:text>",
+            "private_key=Golf7x": "private_key=<SECRET:text>",
+            "ike_key: Hotel8x": "ike_key: <SECRET:text>",
+            "md5: India9x": "md5: <SECRET:text>",
+            "md5=India9x": "md5=<SECRET:text>",
+            "md5: 12345": "md5: <SECRET:text>",
+            "admin_pwd: Papa1x pass_key: Quebec1x admin_password: 12345": "admin_pwd: <SECRET:text> pass_key: <SECRET:text> admin_password: <SECRET:text>",
+            "{'password': 'Juliet1x'}": "{'password': '<SECRET:text>'}",
+            "{'adminPassword': 'Juliet1x'}": "{'adminPassword': '<SECRET:text>'}",
+            '{"secret":[["Kilo2x"]]}': '{"secret":["<SECRET:text>"]}',
+            "passThrough: on bypass: on keyId: k1 authType: pap auth-vlan: 10": "passThrough: on bypass: on keyId: k1 authType: pap auth-vlan: 10",
+        })
+
+    def test_free_text_prose_fillers_need_a_value_that_is_not_a_word(self):
+        self.assertRedacts({
+            "password is required": "password is required",
+            "the token is valid for 3600s": "the token is valid for 3600s",
+            "password - see vault": "password - see vault",
+            "admin_password is set": "admin_password is set",
+            "password is Abc123!": "password is <SECRET:text>",
+            "password => alpha": "password => <SECRET:text>",
+        })
+
+    def test_free_text_redaction_keeps_json_valid(self):
+        objects = [
+            {"note": "pass=x\\", "y": "z"}, {"psk": "a\\"}, {"psk": "\\\""}, {"psk": "ab\"cd\\\\"}, {"a": "pass: 'x", "b": "don't"},
+            {"note": "password: \"abc\" ok", "x": 1}, {"desc": "password: x\"", "x": 1}, {"desc": "password='a\"b'", "x": 1},
+            {"secret": ["a]b", "c\"]d"]}, {"psk": ["a", "b"], "nest": {"token": ["c"]}}, {"psk": "a,b}c", "x": 1},
+            {"passwordMinLength": 8, "tokenLifetime": 3600, "md5KeyId": 1}, {"secret": [["x"]], "pw": [1]},
+            {"hint": "Enter 'password': ", "x": 1}, {"hint": "type 'psk'=", "x": "y"}, {"hint": "Enter \"password\": ", "x": 1},
+        ]
+        for obj in objects:
+            for text in (json.dumps(obj), json.dumps(obj, separators=(",", ":")), json.dumps(json.dumps(obj))):
+                with self.subTest(text):
+                    out = redact_secrets({"t": text})[0]["t"]
+                    if text.startswith("{"):
+                        self.assertEqual(json.loads(out).keys(), obj.keys())  # no key is swallowed into a value
+                    self.assertEqual(redact_secrets({"t": out})[0]["t"], out)  # a second pass changes nothing
+        self.assertEqual(redact_secrets({"t": json.dumps({"a": "pass: 'x", "b": "don't"})})[0]["t"], "{\"a\": \"pass: <SECRET:text>\", \"b\": \"don't\"}")
+        out = redact_secrets({"t": '{"note":"pass=x\\\\","y":"z"}'})[0]["t"]
+        self.assertEqual(out, '{"note":"pass=<SECRET:text>\\\\","y":"z"}')  # guard-ok: a backslash run before a quote is left (review of 7c44603)
+
+    def test_free_text_prompt_at_the_end_of_a_json_string_keeps_the_next_key(self):
+        for obj in ({"banner": "Password: ", "motd": "hello"}, {"prompt": "Enter password: ", "x": 1}, {"a": "pass:", "b": "c"},
+                    {"a": "token = ", "b": "c d"}, {"a": "psk: '", "b": "c'"}, {"Password: ": "Sierra1x"}):
+            for text in (json.dumps(obj), json.dumps(json.dumps(obj))):
+                with self.subTest(text):
+                    self.assertEqual(redact_secrets({"t": text})[0]["t"], text)
+        self.assertEqual(redact_secrets({"t": '{"a": "token = " , "b": "c d"}'})[0]["t"], '{"a": "token = " , "b": "c d"}')
+        text = json.dumps(json.dumps({"a": 'pass: x"y', "b": 1}))  # double-encoded: the value stops before the escaped quote
+        self.assertEqual(redact_secrets({"t": text})[0]["t"], json.dumps(json.dumps({"a": 'pass: <SECRET:text>"y', "b": 1})))
+
+    def test_free_text_unquoted_key_must_end_in_a_secret_word(self):
+        self.assertRedacts({
+            "token-lifetime: 1h psk-mode: main pskType: ascii md5-auth: enabled md5sum: d41d8cd9":
+                "token-lifetime: 1h psk-mode: main pskType: ascii md5-auth: enabled md5sum: d41d8cd9",
+            "password-complexity: high passwordless: enabled passwd-file: /etc/x tokenize: yes secretariat: hq":
+                "password-complexity: high passwordless: enabled passwd-file: /etc/x tokenize: yes secretariat: hq",
+            "sharedKey: Romeo1x enablePassword: Romeo2x x-psk: Romeo3x": "sharedKey: <SECRET:text> enablePassword: <SECRET:text> x-psk: <SECRET:text>",
+            '{"tokenize":"Romeo4x"}': '{"tokenize":"<SECRET:text>"}',  # a quoted key holding a secret word is redacted, like a field
+            "{'tokenize': 'Romeo5x'}": "{'tokenize': '<SECRET:text>'}",
+            "x-adminPassword: Romeo6x adminPasswd: Romeo7x ospfMd5: Romeo8x adminPassword: 12345":
+                "x-adminPassword: <SECRET:text> adminPasswd: <SECRET:text> ospfMd5: <SECRET:text> adminPassword: <SECRET:text>",
+        })
+
+    def test_free_text_prose_filler_ignores_trailing_punctuation(self):
+        self.assertRedacts({
+            "A password is required.": "A password is required.",
+            "Password is mandatory, contact NOC.": "Password is mandatory, contact NOC.",
+            "the secret is out.": "the secret is out.",
+            "password is a.b9.": "password is <SECRET:text>",
+            "password is e.g. this": "password is e.g. this",
+        })
+
+    def test_random_json_text_stays_valid_and_keeps_other_values(self):
+        rng = random.Random(20261028)
+        secret_keys = ["password", "adminPassword", "psk", "secret", "token", "md5", "x_password", "apiKey", "pre-shared-key", "tokenLifetime"]
+        other_keys = ["name", "desc", "banner", "prompt", "keyId", "mode", "bypass", "passThrough", "motd"]
+        pieces = ["a", "Q9", "\\", "\\\\", '"', "'", " ", "Password: ", "Enter password: ", "pass:", "token = ", 'x"y', "]", "}", ",", ":", " is ", "1", "-"]
+        hint = re.compile(r"(?i)pass|pw|secret|psk|token|key|md5")
+
+        def value(depth):
+            pick = rng.random()
+            if depth < 3 and pick < 0.15:
+                return [value(depth + 1) for _ in range(rng.randint(0, 3))]
+            if depth < 3 and pick < 0.3:
+                return {rng.choice(secret_keys + other_keys): value(depth + 1) for _ in range(rng.randint(0, 3))}
+            if pick < 0.45:
+                return rng.choice([rng.randint(-9, 99999), True, False, None])
+            text = [rng.choice(pieces) for _ in range(rng.randint(0, 6))]
+            text.insert(rng.randint(0, len(text)), "Z{}q".format(rng.randint(100000, 999999)))  # a marker to look for in the output
+            return "".join(text)
+
+        def secrets(item):
+            """Markers of the strings a secret key holds directly or in an array of scalars (one nesting level)."""
+            if isinstance(item, list):
+                return [m for v in item for m in secrets(v)]
+            if not isinstance(item, dict):
+                return []
+            found = []
+            for key, v in item.items():
+                flat = v if isinstance(v, list) and all(not isinstance(x, (dict, list)) or isinstance(x, list) and all(
+                    not isinstance(y, (dict, list)) for y in x) for x in v) else None
+                if key in secret_keys and (isinstance(v, str) or flat is not None):
+                    found += re.findall(r"Z\d+q", json.dumps(v))
+                found += secrets(v)
+            return found
+
+        def same(before, after, secret):
+            if isinstance(before, dict):
+                self.assertEqual(set(after), set(before))
+                for key in before:
+                    same(before[key], after[key], key in secret_keys)
+            elif isinstance(before, list):
+                if not secret:  # a secret key's array becomes one placeholder item
+                    self.assertEqual(len(after), len(before))
+                    for b, a in zip(before, after):
+                        same(b, a, False)
+            elif not isinstance(before, str) or not secret and not hint.search(before):
+                self.assertEqual(after, before)
+
+        for _ in range(1500):
+            obj = {rng.choice(secret_keys + other_keys): value(0) for _ in range(3)}
+            for text in (json.dumps(obj), json.dumps(json.dumps(obj))):
+                with self.subTest(text):
+                    out = redact_secrets({"t": text})[0]["t"]
+                    after, before = json.loads(out), json.loads(text)
+                    if isinstance(before, str):
+                        after, before = json.loads(after), json.loads(before)
+                    same(before, after, False)
+                    self.assertEqual(redact_secrets({"t": out})[0]["t"], out)
+                    for marker in secrets(obj):
+                        self.assertNotIn(marker, out)  # every value a secret key holds is gone
+
+    def test_free_text_value_may_start_with_json_punctuation(self):
+        self.assertRedacts({
+            '{"password":",Ab1x"}': '{"password":"<SECRET:text>"}',
+            '{"password":":x9"}': '{"password":"<SECRET:text>"}',
+            '{"password":"]x9","b":1}': '{"password":"<SECRET:text>","b":1}',
+            '{"psk":"}"}': '{"psk":"<SECRET:text>"}',
+            'x "{\\"password\\":\\",Ab1x\\"}"': 'x "{\\"password\\":\\"<SECRET:text>\\"}"',
+            'password: ":Ab1x"': 'password: "<SECRET:text>"',
+            'psk = "]x9"': 'psk = "<SECRET:text>"',
+            "pass: '}a1'": "pass: '<SECRET:text>'",
+            "password: 'a\"b c'": "password: '<SECRET:text>'",
+            '{"label":"Password:","hint":"min 8"}': '{"label":"Password:","hint":"min 8"}',
+            '{"banner": "Password: ", "motd": "hello"}': '{"banner": "Password: ", "motd": "hello"}',
+            json.dumps({"banner": "Password: ", "motd": "hello", "n": [1]}, indent=2): json.dumps({"banner": "Password: ", "motd": "hello", "n": [1]}, indent=2),
+            "private-key: Q1x rsa-private-key: Q2x ike-key: Q3x shared-key: Q4x md5-key: Q5x":
+                "private-key: <SECRET:text> rsa-private-key: <SECRET:text> ike-key: <SECRET:text> shared-key: <SECRET:text> md5-key: <SECRET:text>",
+            '{"private-key":["Q6x"]}': '{"private-key":["<SECRET:text>"]}',
+            'note "Password: ",': 'note "Password: ",',  # a cut-off line still ends the string
+            json.dumps({"banner": "Password: "}, indent=2): json.dumps({"banner": "Password: "}, indent=2),
+        })
+
+    def test_long_runs_stay_linear(self):
+        n = 2000
+        for text in ('banner "password: \\"' + "\\\\" * n + "x", 'password: "' + "\\" * n, "password: " + "\\" * n, 'password: "' + '\\"' * n,
+                     '"secret":[' + '"a",' * n, '"secret":[' + "[" * n, "pw " + "-" * n * 50, "a-" * n * 50, '"' + "a-" * n * 50,
+                     "password" + " " * n * 50, '"' * n * 50, "password is " * n, "x_" * n * 50, '"pw":' * n * 10):
+            start = time.perf_counter()
+            redact_secrets({"t": text})
+            self.assertLess(time.perf_counter() - start, 1.0, text[:40])
+
     def test_nac_server_key_is_secret_but_tag_key_is_not(self):
         out, paths = redact_secrets({"nac": {"server": [{"host": "192.0.2.5", "authport": 1812, "key": "radius-shared"}]},
                                      "tags": [{"key": "site", "value": "a"}]})
@@ -180,14 +499,13 @@ class DefaultTemplateTest(unittest.TestCase):
             return real(method, path, query, expected_status, expect_json)
 
         client.request = request
-        folder = Path(tempfile.mkdtemp())
-        real_dir, capture.DEFAULT_TEMPLATES_DIR = capture.DEFAULT_TEMPLATES_DIR, folder
-        self.addCleanup(setattr, capture, "DEFAULT_TEMPLATES_DIR", real_dir)
+        bundled, work = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
         capture.client_for = lambda nickname: client
         err = io.StringIO()
-        with contextlib.redirect_stderr(err):
+        with mock.patch.object(capture, "DEFAULT_TEMPLATES_DIR", bundled), mock.patch.object(capture, "WORK_DIR", work), contextlib.redirect_stderr(err):
             capture.capture("lab", "lab-a", "reference", 0, Path(tempfile.mkdtemp()))
-        return folder / "orchestrator-10.0.0.99999.yml", err.getvalue()
+        self.assertEqual(list(bundled.iterdir()), [])  # the toolkit folder stays clean: a downloaded template goes to the work folder
+        return work / "reference" / "default-templates" / "orchestrator-10.0.0.99999.yml", err.getvalue()
 
     def test_template_in_a_base64_json_configdata_field_is_cached(self):
         # The shape an Orchestrator on 10.0.0.40625 returns: base64 YAML inside a JSON object.
@@ -205,6 +523,12 @@ class DefaultTemplateTest(unittest.TestCase):
         self.assertFalse(saved.exists())
         self.assertIn("10.0.0.99999", err)
 
+    def test_a_downloaded_template_is_found_for_its_release(self):
+        saved, _ = self.run_with("applianceInfo:\n  hostname: example\n")
+        with mock.patch.object(common, "WORK_DIR", saved.parents[2]):
+            path, why = common.find_default_template("10.0.0.99999")
+        self.assertEqual((path, why.startswith("the exact template")), (saved, True))
+
     def test_plain_text_template_is_still_cached(self):
         saved, _ = self.run_with("applianceInfo:\n  hostname: example\n")
         self.assertEqual(saved.read_text(encoding="utf-8"), "applianceInfo:\n  hostname: example\n")
@@ -217,13 +541,14 @@ class DefaultTemplateTest(unittest.TestCase):
 
 
 class TranslateMissingTemplateTest(unittest.TestCase):
-    def test_unknown_release_stops_with_a_clear_message(self):
+    def test_no_template_at_all_stops_with_a_clear_message(self):
+        # an unknown build falls back to a bundled template (docs/decisions/0014); only an empty template folder stops
         err = io.StringIO()
-        with contextlib.redirect_stderr(err):
+        empty = Path(tempfile.mkdtemp())
+        with mock.patch.object(common, "DEFAULT_TEMPLATES_DIR", empty), mock.patch.object(common, "WORK_DIR", empty), contextlib.redirect_stderr(err):
             code = translate.main(["--capture", tempfile.mkdtemp(), "--site-type", "t", "--target-release", "10.0.0.99999"])
         self.assertEqual(code, 2)
-        self.assertIn("10.0.0.99999", err.getvalue())
-        self.assertIn("capture", err.getvalue())
+        self.assertIn("no default templates", err.getvalue())
 
 
 if __name__ == "__main__":

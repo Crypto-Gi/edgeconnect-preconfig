@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "scripts"))
 from common import parse_yaml  # noqa: E402
 from decisions import is_site_specific, list_mode, make_decide, propose  # noqa: E402
 from generate import generate  # noqa: E402

@@ -35,7 +35,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Without `setup.sh` there is no `edgeconnect-preconfig` command; run the same commands as `python3 skills/building-edgeconnect-preconfig-templates/scripts/cli.py COMMAND ...` inside the virtual environment. The tests need the same packages (`python3 -m unittest discover -s tests`).
+Without `setup.sh` there is no `edgeconnect-preconfig` command; run the same commands as `python3 toolkit/scripts/cli.py COMMAND ...` inside the virtual environment. The tests need the same packages (`python3 -m unittest discover -s tests`).
 
 ### 2. Configure `.env`
 Copy `.env.example` to `.env` in your working directory, or set `EC_DOTENV=/path/to/.env`. Without `EC_DOTENV` the scripts use the first `.env` they find: the working directory, then the skill folder and each folder above it (so the install folder's shared `.env` is found). Environment variables of the same name override `.env` values.

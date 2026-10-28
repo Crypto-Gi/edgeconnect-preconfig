@@ -157,6 +157,8 @@ def cmd_build(argv: List[str]) -> int:
     p.add_argument("--out", type=Path, default=Path.cwd() / "preconfig-output", help="parent folder (default ./preconfig-output)")
     p.add_argument("--validate-on", metavar="NICK", help="validate on this Orchestrator instead of the source one")
     p.add_argument("--target-release", help="the validator's Orchestrator release, when its key may not read it")
+    from translate import ecos_arg
+    p.add_argument("--target-ecos", type=ecos_arg, help="ECOS release of the appliances the preconfig is for, e.g. 9.6.2.1 (unknown by default)")
     a = p.parse_args(argv)
     validator = a.validate_on or a.orchestrator
     check_validator(validator)
@@ -178,13 +180,13 @@ def cmd_build(argv: List[str]) -> int:
     shutil.rmtree(staging, ignore_errors=True)
     print("converting for Orchestrator release {} ...".format(release), flush=True)
     try:
-        text = translate_into(staging, cap, site, release, [])
+        text = translate_into(staging, cap, site, release, ["--target-ecos", a.target_ecos] if a.target_ecos else [])
         print("checking and validating on {} ...".format(validator), flush=True)
         problems = checked(staging, site, validator, validator != a.orchestrator)
         if problems:
             raise Fail("not saved, the result did not pass:\n  " + "\n  ".join(problems))
         info = {"orchestrator": a.orchestrator, "validator": validator, "appliance": run["appliance"], "capture": str(cap),
-                "target_release": release, "site_type": site, "built": utc_stamp(), "toolkit": toolkit_version()}
+                "target_release": release, "target_ecos": a.target_ecos, "site_type": site, "built": utc_stamp(), "toolkit": toolkit_version()}
         write_json(staging / "build.json", info)
         a.out.mkdir(parents=True, exist_ok=True)
         keep_previous(folder)
@@ -400,7 +402,7 @@ def build_site(folder: Path, info: Dict[str, Any], name: str, sheet: List[Dict[s
     staging.mkdir(parents=True)
     try:
         write_sheet(sheet, staging / "variables.csv")
-        translate_into(staging, Path(info["capture"]), name, info["target_release"], ["--variables", str(staging / "variables.csv")])
+        translate_into(staging, Path(info["capture"]), name, info["target_release"], ["--variables", str(staging / "variables.csv")] + (["--target-ecos", info["target_ecos"]] if info.get("target_ecos") else []))
         substitute = info["validator"] != info["orchestrator"]
         problems = checked(staging, name, info["validator"], substitute)
         if problems:
@@ -542,7 +544,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     info = load_build(a.folder)
     base = a.folder if (a.folder / "build.json").is_file() else a.folder.parent
     from capture import Stop, capture
-    from translate import Capture, NothingToConvert, build, gated_paths, prune
+    from translate import Capture, NothingToConvert, allowed_paths, build, prune
     from variables import classify, sheet_items, write_sheet
     caps = []
     for site in a.sites:
@@ -551,9 +553,9 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
             caps.append(capture(info["orchestrator"], site, "sample", 0.2, WORK_DIR / "samples" / info["orchestrator"]))
         except Stop as stop:
             raise Fail(str(stop))
-    gated = gated_paths(info["target_release"])
+    allowed = allowed_paths(info["target_release"])
     try:
-        others = [prune(build(Capture(c), []), gated, []) for c in caps]
+        others = [prune(build(Capture(c), [], info.get("target_ecos")), allowed, []) for c in caps]
     except NothingToConvert as error:
         raise Fail(str(error))
     reference = load_yaml(base / "reference.yaml")

@@ -76,7 +76,9 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
 
         versions = reader.get("/gms/versions")  # a 403 comes back as not ok: no release, the rest of the capture goes on
         release = versions["data"].get("current") if versions["ok"] and isinstance(versions["data"], dict) else None
-        if release and not only and not (DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)).is_file():
+        cache = WORK_DIR / "reference" / "default-templates"  # downloaded templates live in the work folder; the toolkit keeps only bundled ones
+        name = "orchestrator-{}.yml".format(release)
+        if release and not only and not (DEFAULT_TEMPLATES_DIR / name).is_file() and not (cache / name).is_file():
             def_tmpl = reader.get("/gms/appliance/preconfiguration/default")
             text = def_tmpl["data"] if def_tmpl["ok"] else None
             if isinstance(text, dict):  # 10.0.0.40625 answers {"configData": "<base64 of the YAML>", ...}
@@ -89,18 +91,18 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
             except Exception:  # not YAML at all
                 usable = False
             if usable:
-                DEFAULT_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
-                (DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)).write_text(text, encoding="utf-8")
+                cache.mkdir(parents=True, exist_ok=True)
+                (cache / name).write_text(text, encoding="utf-8")
             else:
-                print("warning: could not cache the default preconfig template of Orchestrator release {}; translate.py --target-release {} "
-                      "needs {}".format(release, release, DEFAULT_TEMPLATES_DIR / "orchestrator-{}.yml".format(release)), file=sys.stderr)
+                print("warning: could not cache the default preconfig template of Orchestrator release {}; translate.py uses the nearest "
+                      "bundled template instead".format(release), file=sys.stderr)
         listing = reader.get("/appliance")
         if not listing["ok"]:
             raise Stop("cannot list appliances: {}".format(listing))
         target = find_appliance(listing["data"], appliance)
         nepk = str(target.get("nePk") or target.get("id"))
         reach = reader.get("/reachability/gms", {"nePk": nepk})
-        reachable = bool(reach["ok"] and isinstance(reach["data"], dict) and int(reach["data"].get("state", 2)) in (1, 4))
+        reachable = bool(reach["ok"] and isinstance(reach["data"], dict) and int(reach["data"].get("state", 2)) in (1, 4, 5))  # 1 normal, 4 out of sync, 5 sync in progress
         index: List[Dict[str, Any]] = []
         if reach.get("error") == "PermissionDeniedError":  # unknown, not unreachable: try the live reads and report the refusal (decision 0009)
             reachable = None

@@ -8,7 +8,7 @@ Issues and pull requests are welcome. Report a security problem privately: the *
 - **The toolkit never applies.** `tests/test_no_apply.py` fails if any script or test calls the apply API or sets `autoApply` true ([decision 0008](docs/decisions/0008-the-toolkit-cannot-apply.md)).
 - **Decisions** that the code must keep live in [docs/decisions/](docs/decisions/); read the ones for the area you change, and add one when you make a rule.
 - **Every `.env` key** the scripts read is documented in [`.env.example`](.env.example); `tests/test_env_example.py` fails otherwise.
-- **The skill folder ships as is:** after changing anything under `skills/building-edgeconnect-preconfig-templates/`, rebuild `dist/` (`python3 -c "import shutil; shutil.make_archive('dist/building-edgeconnect-preconfig-templates', 'zip', root_dir='skills', base_dir='building-edgeconnect-preconfig-templates')"`, then copy the zip to `dist/building-edgeconnect-preconfig-templates.skill`).
+- **Edit `toolkit/`, never the skill's copy.** `toolkit/` (`VERSION`, `scripts/`, `references/`) is the only source; after changing it, run `python3 tools/build_skill.py` to copy it into `skills/building-edgeconnect-preconfig-templates/` and rebuild `dist/`. `tests/test_layout.py` fails while the copy or `dist/` is out of date ([decision 0012](docs/decisions/0012-toolkit-is-the-source-the-skill-ships-a-copy.md)).
 
 ## Running the tests
 
@@ -41,12 +41,13 @@ edgeconnect-preconfig/
 │   ├── TESTING_AND_VERIFICATION.md           # Verification report: unit tests, captures, live applies
 │   ├── assets/demo.gif                       # README demo (a lab run, names and addresses replaced)
 │   └── decisions/                            # Decision records
+├── toolkit/                                  # <-- the code: edit here; runs without any agent
+│   ├── VERSION                               # toolkit version (1.3.0)
+│   ├── references/                           # 9.6/9.7/10.0 default templates, endpoint-catalogue, known-constraints, lessons, validate-behaviour, variable-ranking.json
+│   └── scripts/                              # 16 runtime scripts (cli, capture, cache_check, translate, mappers, decisions, variables, generate, cells, render, check, validate, upload, synth, options, common)
 ├── skills/
-│   └── building-edgeconnect-preconfig-templates/   # <-- Lean installable skill (26 files: zero README/test bloat)
-│       ├── SKILL.md
-│       ├── VERSION                           # toolkit version (1.2.3)
-│       ├── references/                       # 9.6/9.7/10.0 default templates, endpoint-catalogue, known-constraints, lessons, validate-behaviour, variable-ranking.json
-│       └── scripts/                          # 16 runtime scripts (cli, capture, cache_check, translate, mappers, decisions, variables, generate, cells, render, check, validate, upload, synth, options, common)
+│   └── building-edgeconnect-preconfig-templates/   # <-- installable skill: SKILL.md + a copy of toolkit/ (tools/build_skill.py)
+├── tools/build_skill.py                      # copies toolkit/ into the skill and rebuilds dist/; --check reports drift
 ├── tests/                                    # offline unit tests & maintainer lab harnesses
 │   ├── test_capture.py
 │   ├── test_cells.py
@@ -60,6 +61,7 @@ edgeconnect-preconfig/
 │   ├── test_report.py
 │   ├── test_validators.py                    # /validate runs only on nicknames listed exactly in EC_VALIDATORS
 │   ├── test_env_example.py                   # every .env key the scripts read is documented in .env.example
+│   ├── test_layout.py                        # the skill copy and dist/ match toolkit/; the work folder is found from both
 │   ├── test_variables.py
 │   └── harnesses/                            # corpus.py, lab_diff.py, probes.py, rank_variables.py, raw_diff.py, scan.py, suite.py
 └── dist/                                     # Pre-built archives for Claude Desktop / Cowork upload

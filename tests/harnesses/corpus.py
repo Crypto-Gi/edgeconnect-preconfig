@@ -14,7 +14,7 @@ from collections import Counter
 from pathlib import Path
 from typing import List, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "toolkit" / "scripts"))
 from common import SKILL_DIR, WORK_DIR  # noqa: E402
 
 HERE = SKILL_DIR / "scripts"

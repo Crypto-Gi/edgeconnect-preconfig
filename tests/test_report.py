@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "scripts"))
 import translate  # noqa: E402
 from common import SKILL_DIR, toolkit_version  # noqa: E402
 
@@ -61,6 +61,13 @@ class Report(unittest.TestCase):
         self.assertIn("`x` -> `z`", text)  # an unknown disposition is shown, never hidden
         self.assertIn("1 entries that are mapped, default, runtime state or context", text)
 
+    def test_summary_names_route_labels_the_target_must_have(self):
+        ref = {"segmentLocalRoutes": [{"segment": "Default", "routes": [{"routeIpSubnet": "0.0.0.0/0", "routeLabel": "Internet"}, {"routeIpSubnet": "192.0.2.0/24", "routeLabel": None}]}],
+               "ipSlaRule": {"ruleEntries": [{"routeLabel": "Backup path"}]}}
+        text = translate.summary_md([], ref, {"orchestrator": "lab", "release": "9.7.1.42046", "appliance": {}}, "9.7.1.42046")
+        self.assertIn("route labels the target Orchestrator must already have: Backup path, Internet", text)
+        self.assertNotIn("must already have", translate.summary_md([], {"applianceInfo": {}}, {"orchestrator": "lab", "release": "x", "appliance": {}}, "x"))
+
     def test_running_config_is_a_gap_only_for_sections_it_holds(self):
         class Cap(FakeCap):
             def __init__(self, text):
@@ -97,6 +104,21 @@ class Report(unittest.TestCase):
                 contextlib.redirect_stderr(err):
             self.assertEqual(translate.main(["--capture", "x", "--site-type", "t", "--out", "/nonexistent-out"]), 2)
         self.assertIn("lacks appliance", err.getvalue())
+
+    def test_every_translation_says_which_target_ecos_it_used(self):
+        import contextlib
+        import io
+        import json
+        import tempfile
+        for flag, ecos, line in ((["--target-ecos", "9.6.2.1"], "9.6.2.1", "Target appliance ECOS: 9.6.2.1 (from --target-ecos)"),
+                                 ([], None, "Target appliance ECOS: unknown (pass --target-ecos; interface routes with next hop 0.0.0.0 are left out)")):
+            with self.subTest(ecos=ecos), tempfile.TemporaryDirectory() as tmp, mock.patch.object(translate, "Capture", return_value=FakeCap()), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(translate.main(["--capture", "x", "--site-type", "t", "--out", tmp] + flag), 0)
+                ledger = json.loads((Path(tmp) / "ledger.json").read_text())
+                self.assertEqual((ledger.get("target_release"), ledger.get("target_ecos", "absent")), ("9.7.1.42046", ecos))
+                self.assertIn("- " + line + ".", (Path(tmp) / "summary.md").read_text().split("## ")[0])
+                self.assertIn(line, out.getvalue())
 
     def test_business_hours_are_checked_by_hand_not_a_gap(self):
         text = translate.summary_md([entry("not-readable", "availabilityTimeSettings")], {}, {"appliance": {}}, "9.7.1.42046")

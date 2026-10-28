@@ -1,16 +1,17 @@
+import re
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "harnesses"))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills" / "building-edgeconnect-preconfig-templates" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "scripts"))
 from lab_diff import GuardrailError, check_guardrails, compare_intended_vs_actual  # noqa: E402
 from common import parse_yaml  # noqa: E402
 from mappers import Ctx, m_bgpSystemConfig, m_branchNatMapsConfig, m_dhcpRemoteAddressPoolConfig, m_flowRedirection, m_ipAllowList, m_multicast, m_nac, m_peerPriority, m_segmentBgpSystems, m_tunnelConfiguration, m_vrrp, m_vxlan, m_managementIp, m_ecLicensing, m_managementRoutes, m_secureWebServicesConfig, passthrough_max_bandwidth  # noqa: E402
 from synth import substitute  # noqa: E402
 from mappers import m_idsIpsConfig, m_interfaceConfig, m_segmentOspfConfig  # noqa: E402
 from suite import load_constraints  # noqa: E402
-from translate import HARDEN, build, drop_template_fields, local_firewall_rules, prune, template_fields  # noqa: E402
+from translate import HARDEN, QUIET, allowed_paths, build, drop_template_fields, local_firewall_rules, prune, template_fields  # noqa: E402  guard-ok: scripts are imported after the sys.path insert
 import copy  # noqa: E402
 
 
@@ -135,11 +136,65 @@ class Substitution(unittest.TestCase):
 
 
 class Release(unittest.TestCase):
-    def test_prune_removes_gated_paths_and_ledgers_once(self):
+    def test_prune_keeps_only_allowed_paths_and_ledgers_each_drop_once(self):
         ledger = []
-        out = prune({"a": {"keep": 1, "gated": 2}, "l": [{"gated": 1, "x": 2}, {"gated": 3}]}, {"a.gated", "l.gated"}, ledger)
+        out = prune({"a": {"keep": 1, "extra": 2}, "l": [{"extra": 1, "x": 2}, {"extra": 3}]}, {"a", "a.keep", "l", "l.x"}, ledger)
         self.assertEqual(out, {"a": {"keep": 1}, "l": [{"x": 2}, {}]})
-        self.assertEqual([e["target"] for e in ledger], ["a.gated", "l.gated"])
+        self.assertEqual([(e["target"], e["disposition"]) for e in ledger], [("a.extra", "outside-preconfig"), ("l.extra", "outside-preconfig")])
+
+    def test_allowed_paths_follow_the_target_template_plus_known_omissions(self):
+        allowed = allowed_paths("9.7.1.42046")
+        self.assertIn("nac.aaaProfile.dot1x_server_group", allowed)
+        self.assertIn("deploymentInfo.deploymentInterfaces.addressingMode", allowed)  # /validate accepts it; the template does not show it
+        self.assertNotIn("nac.aaaProfile.dot1x_acct_server_group", allowed)
+        self.assertNotIn("tunnelConfiguration.tunnels.ipsecConfig.ikePqcgroup", allowed)  # 10.0 only
+
+
+class Ecos95(unittest.TestCase):
+    """ECOS 9.5.x returns keys later releases dropped and leaves out keys they added (lab corpus, 2026-10-27)."""
+
+    def test_nac_accounting_server_groups_are_not_written(self):
+        aaa = {"self": 1, "name": "default", "da_enable": False, "da_server": "default", "dot1x_acct_server_group": "default", "dot1x_default_role": "default", "dot1x_profile": "default",
+               "dot1x_server_group": "default", "mac_acct_server_group": "default", "mac_default_role": "default", "mac_profile": "default", "mac_server_group": "default", "stats_timeout": 10}
+        src = {"nacEnable": False, "server": {"1": {"self": 1, "address": "192.0.2.5", "authport": 1812, "key": "", "name": "default", "source_ip_interface": "any"}},
+               "serverGroup": {"1": {"self": 1, "name": "default", "server": {"1": {"self": 1, "name": "default"}}}}, "aaaProfile": {"1": aaa},
+               "dot1x": {"1": {"self": 1, "name": "default"}}, "macAuthProfile": {"1": {"self": 1, "name": "default"}}, "applyPolicies": {"if": {"lan0": {"profile": "default", "auth_type": 1}}}}
+        ledger = []
+        out = prune({"nac": m_nac(ctx({"nac": src, "deployment": DEP})[0])}, allowed_paths("9.7.1.42046"), ledger)
+        self.assertNotIn("dot1x_acct_server_group", out["nac"]["aaaProfile"][0])
+        self.assertNotIn("mac_acct_server_group", out["nac"]["aaaProfile"][0])
+        self.assertEqual(out["nac"]["aaaProfile"][0]["dot1x_server_group"], "default")
+        self.assertEqual(sorted(e["target"] for e in ledger), ["nac.aaaProfile.dot1x_acct_server_group", "nac.aaaProfile.mac_acct_server_group"])
+
+    def test_ip_sla_rule_without_route_label(self):
+        from mappers import m_ipSlaRule
+        op = {"type": "ip-monitor", "ip-monitor-ip": "192.0.2.98", "tunnel-name": "to_peer_DefaultOverlay", "src-port-name": "lo20000"}
+        c, notes = ctx({"deployment": DEP, "ipsla-managers": {"MGR_1": {"enable": True, "interval": "1", "comment": "", "upAction": "def-alarm", "downAction": "alarm", "operation": {"OPR_1": op}}}})
+        rule = m_ipSlaRule(c)["ruleEntries"][0]
+        self.assertIsNone(rule["routeLabel"])
+        self.assertEqual(rule["ipslaMonitor"]["tunnelName"], "to_peer_DefaultOverlay")
+
+    def test_vrrp_without_tracker(self):
+        c, _ = ctx({"vrrp": [{"groupId": 100, "interface": "lan1", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 1, "priority": 128, "version": 2, "preempt": True,
+                              "auth": "", "desc": "vrrp ipv4", "pkt_trace": False, "holddown": 60}]})
+        self.assertFalse(m_vrrp(c)["vrrpEntries"][0]["tracker"])  # no tracker on 9.5.x is the template default, false
+
+    def test_ha_group_without_ipv6_pool_gets_orchestrator_default(self):
+        dep = copy.deepcopy(DEP)
+        dep["sysConfig"]["haIf"] = "lan1"
+        dep["sysConfig"]["ifLabels"]["wan"] = [{"id": "1", "name": "INET"}]
+        wan = {"vlan": 0, "label": "1", "wanSide": True, "vrf": 0, "zone": 0, "harden": 1, "behindNAT": "none", "maxBW": {"outbound": 50000, "inbound": 50000}, "version": 4, "ip": "198.51.100.10", "mask": 24, "wanNexthop": "198.51.100.1"}
+        dep["modeIfs"] = [{"ifName": "wan0", "applianceIPs": [wan]}, {"ifName": "lan1", "applianceIPs": [dict(wan, vlan=4000)]}]
+        ha = {"g1": {"subnet": "169.254.1.0/24", "mask": 30, "v6HaSubnet": None, "v6HaMask": 0, "vlanStart": 4000, "appliances": [{"nePk": "9.NE"}, {"nePk": "8.NE"}]}}
+        cap = FakeCap({"appliance": {"hostName": "h1", "groupId": "1.Network", "site": "S1", "networkRole": "0"}, "deployment": dep, "ha-groups": ha})
+        cap.folder = "fake"
+        ha_cfg = build(cap, [])["deploymentInfo"]["haConfig"]
+        self.assertEqual((ha_cfg["hav6IpPool"], ha_cfg["hav6SubnetMask"]), ("fd00::a9fe:0000/112", 126))  # /validate rejects mask 0
+
+    def test_bonded_interface_without_speed_is_default_not_unresolved(self):
+        c, notes = ctx({"interface-state": {"ifInfo": [{"ifname": "blan0", "ifSpeed": "", "ifDuplex": "", "admin": True}]}})
+        self.assertIsNone(m_interfaceConfig(c))
+        self.assertFalse(any(n["disposition"] == "unresolved" for n in notes))
 
 
 class ApplyGuardrailAndDiff(unittest.TestCase):
@@ -303,6 +358,80 @@ class AuditRegressions(unittest.TestCase):
         self.assertNotIn("admin", entry)
         self.assertNotIn("preemption", entry)
 
+    def _two_lans(self, **extra):
+        dep = copy.deepcopy(DEP)
+        dep["sysConfig"]["ifLabels"]["lan"].append({"id": "5", "name": "Data"})
+        dep["sysConfig"]["vrfs"].append({"id": "1", "name": "Guest"})
+        lan = {"vlan": 0, "wanSide": False, "vrf": 0, "zone": 0, "mask": 24}
+        dep["modeIfs"] = [{"ifName": "lan0", "applianceIPs": [dict(lan, label="4", ip="192.0.2.1")]}, {"ifName": "lan1", "applianceIPs": [dict(lan, label="5", ip="198.51.100.1")]}]
+        ledger = []
+        return self._build([], ledger=ledger, deployment=dep, **{"template-association": {"templateIds": ["G1"]}, **extra}), ledger
+
+    def test_nac_merge_template_ledgers_the_local_objects_without_writing_nac(self):
+        def obj(name):
+            return {"self": 1, "name": name}
+        nac = {"nacEnable": True, "server": {"1": {"address": "192.0.2.5", "authport": 1812, "key": "", "name": "default", "source_ip_interface": "any"}},
+               "serverGroup": {"1": {"name": "default", "server": "default"}}, "aaaProfile": {"1": dict(obj("default"), da_server="default"), "2": dict(obj("corp"), da_server="default")},
+               "dot1x": {"1": obj("default")}, "macAuthProfile": {"1": obj("default")},
+               "applyPolicies": {"if": {"lan0": {"profile": "default", "auth_type": 1}, "lan1": {"profile": "corp", "auth_type": 2}}}}
+        tpl = {"merge": True, "nacEnable": True, "server": {"1": {"name": "default"}}, "serverGroup": {"1": {"name": "default"}}, "aaaProfile": {"1": {"name": "default"}},
+               "dot1x": {"1": {"name": "default"}}, "macAuthProfile": {"1": {"name": "default"}}, "applyPolicies": {"if": {"Voice": {"auth_type": 1, "profile": "default", "self": "Voice"}}}}
+        groups = [{"name": "G1", "selectedTemplateNames": ["nac"], "templates": [{"name": "nac", "value": tpl}]}]
+        doc, ledger = self._two_lans(nac=nac, **{"template-groups": groups})
+        # /validate answers HTTP 500 unless all six lists are non-empty, and the other lists hold only the template's objects: nothing is written
+        self.assertNotIn("nac", doc)
+        local = [e for e in ledger if e["item"] == "nac (local objects under a merge template)"]
+        self.assertEqual([e["disposition"] for e in local], ["outside-preconfig"])
+        self.assertIn("aaaProfile corp, applyPolicies Data", local[0]["note"])
+        self.assertIn("/validate", local[0]["note"])
+        self.assertNotIn("aaaProfile default", local[0]["note"])  # the template's own objects are not listed as local
+        self.assertEqual([e for e in ledger if e["target"].startswith("nac") and e["disposition"] == "mapped"], [])  # nothing claims a NAC section
+        owned = next(e["note"] for e in ledger if e["item"] == "template nac" and e["disposition"] == "template-group")
+        self.assertIn("merge", owned)
+        self.assertIn("the section is not written", owned)
+        # a trusted policy is the appliance default, not a local setting to redo by hand
+        trusted = dict(nac, applyPolicies={"if": {"lan0": {"profile": "default", "auth_type": 1}, "lan1": {"profile": "none", "auth_type": 0}}})
+        doc, ledger = self._two_lans(nac=trusted, **{"template-groups": groups})
+        self.assertNotIn("applyPolicies", next(e["note"] for e in ledger if e["item"] == "nac (local objects under a merge template)"))
+        # the NAC read failed: what is local is unknown, so it is not-readable, never silently "nothing local"
+        doc, ledger = self._two_lans(**{"template-groups": groups})
+        self.assertEqual([e["disposition"] for e in ledger if e["item"].startswith("nac (local")], ["not-readable"])
+        # without merge the template replaces the appliance's NAC: the section stays out, as before
+        groups[0]["templates"][0]["value"] = dict(tpl, merge=False)
+        doc, ledger = self._two_lans(nac=nac, **{"template-groups": groups})
+        self.assertNotIn("nac", doc)
+        self.assertIn("the section is not written", next(e["note"] for e in ledger if e["item"] == "template nac"))
+
+    def test_bgp_route_targets_with_apply_status_none_are_not_template_owned(self):
+        rt = {"import": "0:0", "export": "0:0"}
+        bgp = {"name": "bgp", "value": {"vrf": {"0": {"max_restart_time": 120, "route_target_template": dict(rt, applyStatus="none")},
+                                               "1": {"route_target_template": dict(rt, applyStatus="NONE")},
+                                               "2": {"route_target_template": rt}}}}  # no applyStatus: owned, as before
+        groups = [{"name": "G1", "selectedTemplateNames": ["bgp"], "templates": [bgp]}]
+        owned = template_fields(FakeCap({"template-association": {"templateIds": ["G1"]}, "template-groups": groups}))
+        self.assertEqual(owned["bgp"], {"0": {"maxRestartTime"}, "1": set(), "2": {"importRouteTarget", "exportRouteTarget"}})
+
+    def test_vxlan_template_without_a_vtep_leaves_the_vtep_to_the_appliance(self):
+        live = {"vxlan": {"port": 4789, "vtepIf": "lo1"}, "vxlan-vni-map": {"0": {"vni": 1001}, "1": {"vni": 1002}}}
+        def run(tpl):
+            groups = [{"name": "G1", "selectedTemplateNames": ["vxlan"], "templates": [{"name": "vxlan", "value": tpl}]}]
+            return self._two_lans(**live, **{"template-groups": groups})
+        doc, ledger = run({"port": "4789", "vrfId": {"1": {"role": "0", "vni": 5000, "zoneId": 0}}, "vtepIf": "none"})
+        got = doc.get("vxlan") or {}
+        self.assertEqual(got.get("vtepSrcInterface"), "lo1")
+        self.assertEqual(got.get("destinationUdpPort"), 4789)  # the template sets it too, but /validate requires it
+        port = [e for e in ledger if e["item"] == "vxlan destinationUdpPort"]
+        self.assertEqual([e["disposition"] for e in port], ["mapped"])
+        self.assertIn("requires", port[0]["note"])
+        self.assertEqual([m["vni"] for m in got.get("vniVrfMaps", [])], [1001])  # Guest's VNI map is the template's
+        self.assertIn("vniVrfMaps", next(e["note"] for e in ledger if e["item"] == "template vxlan"))
+        doc, _ = run({"port": "4789", "vrfId": {}, "vtepIf": ""})
+        self.assertEqual([m["vni"] for m in doc["vxlan"]["vniVrfMaps"]], [1001, 1002])
+        # a template that sets the VTEP owns the section, as before
+        doc, ledger = run({"port": "4789", "vrfId": {}, "vtepIf": "lo5"})
+        self.assertNotIn("vxlan", doc)
+        self.assertIn("the section is not written", next(e["note"] for e in ledger if e["item"] == "template vxlan"))
+
     def test_bgp_neighbor_without_evpn_key_before_ecos_9_4_1(self):
         nb = {"192.0.2.2": {"remote_as": 65002, "type": "PE-router", "enable": True, "hold": 180, "ka": 60, "lcl_interface": "", "next_hop_self": False,
                             "password": "", "store_received_routes": False, "bfd_desired": False, "directly_connected": True}}
@@ -365,6 +494,23 @@ class AuditRegressions(unittest.TestCase):
         self.assertEqual((out["server"][0]["source_ip_interface"], out["applyPolicies"]), ("Data", [{"id": 1, "auth_interface": "Voice", "auth_type": "trusted"}]))
         nac["applyPolicies"] = {"if": {"lan0.71": {"profile": "none", "auth_type": 0}}}
         self.assertIsNone(m_nac(ctx({"deployment": dep, "nac": nac})[0]))
+
+    def test_relay_lease_times_are_ledgered_not_dropped_silently(self):
+        # a relay interface keeps an inactive server block with its own lease times; the format's relay entry has no lease fields
+        inactive = {"prefix": "0.0.0.0/0", "ipStart": "0.0.0.0", "ipEnd": "0.0.0.0", "gw": [], "dns": [], "netbiosNodeType": "H", "maxLease": 172800, "defaultLease": 86400}
+        relay = {"vlan": 0, "label": "4", "wanSide": False, "ip": "10.0.0.1", "mask": 24, "vrf": 0, "zone": 0,
+                 "dhcpd": {"type": "relay", "server": inactive, "relay": {"dhcpserver": ["10.9.9.9"], "option82": False, "option82_policy": "append"}}}
+        ledger = []
+        entry = self._build([relay], ledger=ledger)["deploymentInfo"]["dhcpInfo"][0]
+        self.assertNotIn("defaultLease", entry)
+        notes = [e for e in ledger if e["disposition"] == "outside-preconfig" and e["target"] == "deploymentInfo.dhcpInfo"]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("86400", notes[0]["note"])
+        self.assertIn("lan0", notes[0]["note"])
+        relay["dhcpd"]["server"] = dict(inactive, maxLease=7200, defaultLease=600)  # ECOS defaults: nothing to report
+        ledger = []
+        self._build([relay], ledger=ledger)
+        self.assertFalse([e for e in ledger if e["target"] == "deploymentInfo.dhcpInfo" and e["disposition"] == "outside-preconfig"])
 
     def test_translate_dhcp_relay_gateway_dual_stack_and_cluster_profile(self):
         relay = {"vlan": 0, "label": "4", "wanSide": False, "ip": "10.0.0.1", "mask": 24, "vrf": 0, "zone": 0,
@@ -483,9 +629,22 @@ class AuditRegressions(unittest.TestCase):
     def test_disabled_ospf_segment_is_ledgered_when_no_segment_runs_ospf(self):
         from mappers import m_segmentOspfConfig
         dep = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}]), "modeIfs": DEP["modeIfs"]}
-        c, notes = ctx({"deployment": dep, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": False, "routerId": "192.0.2.1"}}})
+        c, notes = ctx({"deployment": dep, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": False, "routerId": "192.0.2.1"}}, "ospf-interfaces-all-vrfs": {}})
         self.assertIsNone(m_segmentOspfConfig(c))
         self.assertTrue(any(n["item"] == "ospf-system-all-vrfs[1]" and "corp" in n["note"] for n in notes))
+
+    def test_disabled_ospf_segment_with_interfaces_is_carried_disabled(self):
+        from mappers import m_ospfSystemConfig, m_segmentOspfConfig
+        dep = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}]), "modeIfs": DEP3["modeIfs"]}
+        iface = {"area": "0.0.0.0", "cost": 10, "priority": 1, "adminStatus": True, "helloInterval": 10, "deadInterval": 40, "transmitDelay": 1, "retransmitInterval": 5,
+                 "authType": "None", "authKey": "", "md5Key": 0, "md5Password": "", "comment": "", "bfdDesired": False}
+        area = {"0.0.0.0": {"area_type": 0, "redist": False, "summary": False, "translator_role": 0}}
+        data = {"deployment": dep, "ospf-areas": {"0": area, "1": area}, "ospf-interfaces-all-vrfs": {"0": {"lan0": iface}, "1": {"lan0.72": iface}},
+                "ospf-system-all-vrfs": {"0": {"enable": True, "routerId": "192.0.2.1"}, "1": {"enable": False, "routerId": "192.0.2.2", "redistMapToOSPF": "corp_rtmap_to_ospf"}}}
+        out = {e["segment"]: e for e in m_segmentOspfConfig(ctx(data)[0]) or []}
+        self.assertEqual(sorted(out), ["Default", "corp"])  # the dormant corp OSPF is kept, switched off as on the source
+        self.assertEqual((out["corp"]["enable"], out["corp"]["routerId"], [i["interfaceName"] for i in out["corp"]["interfaces"]]), (False, "192.0.2.2", ["lan0.72"]))
+        self.assertIsNone(m_ospfSystemConfig(ctx(data)[0]))  # Orchestrator ignores ospfSystemConfig once segmentOspfConfig is present
 
     def test_segment_routes_take_comment_from_route_config_not_the_default_table(self):
         from mappers import m_segmentLocalRoutes
@@ -662,8 +821,974 @@ class AuditRegressions(unittest.TestCase):
         self.assertEqual(substitute({"idsIpsConfig": {"mode": "Off", "profile": "Default_S5"}}, inv)["idsIpsConfig"]["profile"], "Default_S5")
         self.assertTrue(notes)
 
+    def test_route_labels_are_substituted_for_the_validator(self):
+        inv = {"segments": ["Default"], "zones": ["Default"], "lan": ["L"], "wan": ["W"], "groups": ["g"], "templateGroups": ["t"], "overlays": ["o"],
+               "routeLabels": ["Internet", "Lab label"]}
+        doc = {"segmentLocalRoutes": [{"segment": "Default", "routes": [{"routeIpSubnet": "0.0.0.0/0", "routeLabel": "Internet"}, {"routeIpSubnet": "192.0.2.0/24", "routeLabel": "Backup"}]}]}
+        out = substitute(doc, inv)
+        self.assertEqual([r["routeLabel"] for r in out["segmentLocalRoutes"][0]["routes"]], ["Internet", "Internet"])  # an unknown name takes the validator's first label
+
     def test_suite_loads_the_shipped_constraints(self):
         self.assertTrue(load_constraints())
+
+
+
+class IsolationCheck:
+    def check(self, mapper, data, pick, good, section):
+        c, notes = ctx(data)
+        out = mapper(c)
+        self.assertIsNotNone(out, "the whole section was dropped")
+        self.assertEqual(pick(out), good)
+        self.assertEqual([n["target"] for n in notes if n["disposition"] == "toolkit-error"], [section])
+
+
+class ItemIsolation(IsolationCheck, unittest.TestCase):
+    """One malformed item is ledgered as toolkit-error and skipped; the rest of its section is still written."""
+
+    def test_vrrp_group(self):
+        from mappers import m_vrrp
+        g = {"groupId": 1, "interface": "lan0", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 1, "priority": 100, "version": 2, "preempt": True, "pkt_trace": False, "holddown": 10}
+        bad = {k: v for k, v in dict(g, groupId=2).items() if k != "priority"}
+        self.check(m_vrrp, {"vrrp": [g, bad]}, lambda o: [e["groupId"] for e in o["vrrpEntries"]], [1], "vrrp")
+
+    def test_loopback(self):
+        from mappers import m_loopbackInterface
+        lo = {"admin": True, "ipaddr": "192.0.2.9", "nmask": 32, "label": "", "vrf_id": 0, "zone": 0}
+        self.check(m_loopbackInterface, {"deployment": DEP, "loopbacks": {"lo1": lo, "lo2": {"admin": True}}}, lambda o: [x["interfaceId"] for x in o["loopbacks"]], ["lo1"], "loopbackInterface")
+
+    def test_bgp_neighbor(self):
+        from mappers import m_bgpSystemConfig
+        n = {"remote_as": 65001, "type": "Branch", "enable": True, "hold": 180, "ka": 60, "next_hop_self": False, "store_received_routes": True, "directly_connected": True}
+        data = {"deployment": DEP, "bgp-system": {"enable": True, "asn": 65000}, "bgp-neighbors": {"192.0.2.1": n, "192.0.2.2": {"type": "Branch"}}}
+        self.check(m_bgpSystemConfig, data, lambda o: [x["peerIpAddress"] for x in o["neighbors"]], ["192.0.2.1"], "bgpSystemConfig.neighbors")
+
+    def test_port_forwarding_rule(self):
+        from mappers import m_inboundPortForwarding
+        r = {"srcSubnet": "0.0.0.0/0", "destSubnet": "192.0.2.10/32", "destPort": "443", "protocol": "tcp", "targetIp": "", "targetPort": "", "srcIf": "any", "vrf_id": 0, "comment": ""}
+        self.check(m_inboundPortForwarding, {"deployment": DEP, "port-forwarding": [r, {"srcIf": "any", "comment": ""}]}, lambda o: len(o["portForwardingRules"]), 1, "inboundPortForwarding")
+
+    def test_ip_sla_rule(self):
+        from mappers import m_ipSlaRule
+        op = {"type": "ip-monitor", "ip-monitor-ip": "192.0.2.98"}
+        good = {"enable": True, "interval": "10", "comment": "", "upAction": "def-alarm", "downAction": "alarm", "operation": {"OPR_1": op}}
+        bad = dict(good, interval="every minute")
+        self.check(m_ipSlaRule, {"deployment": DEP, "ipsla-managers": {"MGR_1": good, "MGR_2": bad}}, lambda o: len(o["ruleEntries"]), 1, "ipSlaRule")
+
+    def test_local_route(self):
+        from mappers import m_localRoutes
+        st = {"configured": True, "local": True, "automatic": False, "prefix": "198.51.100.0/24", "nextHop": "192.0.2.254", "ifName": "lan0", "metric": 50, "advert": True, "advert_bgp": False, "advert_ospf": False}
+        bad = {k: v for k, v in dict(st, prefix="203.0.113.0/24").items() if k != "metric"}
+        data = {"deployment": DEP, "subnets": {"subnets": {"entries": [{"state": st}, {"state": bad}]}}}
+        self.check(m_localRoutes, data, lambda o: [r["routeIpSubnet"] for r in o["routes"]], ["198.51.100.0/24"], "localRoutes.routes")
+
+    def test_branch_nat_rule(self):
+        from mappers import m_branchNatMapsConfig
+        maps = {"map1": {"prio": {"10": {"dir": "outbound", "match": {"intf": "lan0"}, "set": {}}, "20": {"dir": "outbound", "match": "unexpected", "set": {}}}}}
+        self.check(m_branchNatMapsConfig, {"deployment": DEP, "branch-nat-maps": maps}, lambda o: [r["priorityLevel"] for r in o["branchNatRules"]], [10], "branchNatMapsConfig")
+
+    def test_bridge_group_and_link_aggregation(self):
+        from mappers import m_bridgeGroups, m_linkAggregation
+        bg = {"portlist": "lan1,lan2", "mtu": 1500, "admin": True, "comments": ""}
+        self.check(m_bridgeGroups, {"bridge-groups": {"blan0": bg, "blan1": {"mtu": 1500}}}, lambda o: [x["bridgeGroup"] for x in o], ["blan0"], "bridgeGroups")
+        lag = {"portlist": "lan0,lan1", "mtu": 1500, "mode": 4, "lacp_rate": "slow", "lacp_sys_prio": 65535, "comment": ""}
+        self.check(m_linkAggregation, {"link-aggregation": {"blan0": lag, "blan1": {"mtu": 1500}}}, lambda o: [x["channelGroup"] for x in o["linkAggregationGroups"]], ["blan0"], "linkAggregation")
+
+    def test_ospf_segment(self):
+        from mappers import m_segmentOspfConfig
+        dep = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}, {"id": "2", "name": "guest"}]), "modeIfs": DEP["modeIfs"]}
+        iface = {"area": "0.0.0.0", "cost": 1, "priority": 1, "adminStatus": True, "helloInterval": 10, "deadInterval": 40, "transmitDelay": 1, "retransmitInterval": 5,
+                 "authType": "None", "authKey": "", "md5Key": 0, "md5Password": "", "comment": "", "bfdDesired": False}
+        data = {"deployment": dep, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}, "2": "unexpected"},
+                "ospf-interfaces-all-vrfs": {"0": {"lan0": iface}, "1": {"lan0.71": iface}, "2": {"lan0.72": iface}}}
+        self.check(m_segmentOspfConfig, data, lambda o: [e["segment"] for e in o], ["Default", "corp"], "segmentOspfConfig")
+
+    def test_bgp_segment(self):
+        from mappers import m_segmentBgpSystems
+        dep = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}, {"id": "2", "name": "guest"}]), "modeIfs": DEP["modeIfs"]}
+        systems = {"0": {"enable": True, "asn": 65000}, "1": {"enable": True, "asn": 65000}, "2": {"enable": True}}
+        self.check(m_segmentBgpSystems, {"deployment": dep, "bgp-system-all-vrfs": systems, "bgp-neighbors-all-vrfs": {}}, lambda o: [e["segment"] for e in o], ["Default", "corp"], "segmentBgpSystems")
+
+    def test_bfd_segment(self):
+        from mappers import m_segmentBfdConfigs
+        bfd = {"0": {"enable": True, "minRxInterval": 300, "minTxInterval": 300, "detectMultiplier": 3}, "1": {"enable": True}}
+        self.check(m_segmentBfdConfigs, {"deployment": DEP3, "bfd-vrfs": bfd}, lambda o: [e["segment"] for e in o], ["Default"], "segmentBfdConfigs")  # vrf 1 names a segment: its item is malformed, not unresolved
+
+    def test_custom_tag(self):
+        from mappers import m_customApplianceTags
+        self.check(m_customApplianceTags, {"custom-tags": {"1": {"name": "site", "value": "a"}, "2": {"name": "region"}}}, lambda o: [t["key"] for t in o["customApplianceTagsInterfaces"]], ["site"], "customApplianceTags")
+
+    def test_multicast_segment(self):
+        from mappers import m_multicast
+        good = {"vrf_id": 0, "rp": "192.0.2.9", "pim": {}, "igmp": {}, "filter_name": None}
+        bad = {"vrf_id": 1, "pim": "unexpected"}
+        data = {"deployment": DEP, "multicast-config": [good, bad], "multicast-enable": [{"vrf_id": 0, "enable": True}]}
+        self.check(m_multicast, data, lambda o: [e["segment"] for e in o], ["Default"], "multicast")
+
+
+DEP3 = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}, {"id": "2", "name": "guest"}]),
+        "modeIfs": [{"ifName": "lan0", "applianceIPs": [{"vlan": v, "label": "4"} for v in (0, 71, 72)]}, {"ifName": "lan1", "applianceIPs": [{"vlan": 0, "label": "4"}]}]}  # OSPF needs deployed interfaces
+OSPF_IF = {"area": "0.0.0.0", "cost": 1, "priority": 1, "adminStatus": True, "helloInterval": 10, "deadInterval": 40, "transmitDelay": 1, "retransmitInterval": 5,
+           "authType": "None", "authKey": "", "md5Key": 0, "md5Password": "", "comment": "", "bfdDesired": False}
+NEIGHBOR = {"remote_as": 65001, "type": "Branch", "enable": True, "hold": 180, "ka": 60, "next_hop_self": False, "store_received_routes": True, "directly_connected": True}
+ROUTE = {"configured": True, "local": True, "automatic": False, "prefix": "198.51.100.0/24", "nextHop": "192.0.2.254", "ifName": "lan0", "metric": 50, "advert": True, "advert_bgp": False, "advert_ospf": False}
+VTI = {"ipaddr": "192.0.2.1", "nmask": 30, "admin": True, "tunnel": "pt1", "side": "lan", "label": "", "vrf_id": 0, "zone": 0, "auto_distribute": False, "behindNAT": "none"}
+PF = {"srcSubnet": "0.0.0.0/0", "destSubnet": "192.0.2.10/32", "destPort": "443", "protocol": "tcp", "targetIp": "", "targetPort": "", "srcIf": "any", "vrf_id": 0, "comment": ""}
+QUIET_DISPOSITIONS = QUIET
+
+
+def errors(notes):
+    return [n for n in notes if n["disposition"] == "toolkit-error"]
+
+
+class NoEmptySection(unittest.TestCase):
+    """When every item of a list section fails, the section is not written: an empty list replaces the target's items on apply."""
+
+    def check_dropped(self, name, mapper, data):
+        c, notes = ctx(data)
+        try:
+            out = mapper(c)
+        except Exception as err:  # translate's section-level catch also leaves it unwritten
+            out = "raised {}".format(err)
+        self.assertIsNone(out, name)
+        self.assertTrue(errors(notes), name + ": the failure is not ledgered")
+
+    def test_every_list_mapper(self):
+        from mappers import (m_customApplianceTags, m_inboundPortForwarding, m_ipSlaRule, m_linkAggregation, m_localRoutes, m_loopbackInterface, m_ospfSystemConfig,
+                             m_segmentBfdConfigs, m_segmentLocalRoutes, m_virtualTunnelInterface, m_bridgeGroups)
+        bad_route = {k: v for k, v in ROUTE.items() if k != "metric"}
+        cases = [
+            ("multicast", m_multicast, {"deployment": DEP, "multicast-config": [{"vrf_id": 1, "pim": "unexpected"}]}),
+            ("multicast None", m_multicast, {"deployment": DEP, "multicast-config": [None]}),
+            ("bgp neighbors", m_bgpSystemConfig, {"deployment": DEP, "bgp-system": {"enable": True, "asn": 65000}, "bgp-neighbors": {"192.0.2.2": {"type": "Branch"}, "192.0.2.3": None}}),
+            ("segment bgp neighbors", m_segmentBgpSystems, {"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": False, "asn": 1}, "1": {"enable": True, "asn": 65000}},
+                                                            "bgp-neighbors-all-vrfs": {"1": {"192.0.2.2": {"type": "Branch"}}}}),
+            ("local routes", m_localRoutes, {"deployment": DEP, "subnets": {"subnets": {"entries": [{"state": bad_route}, None]}}}),
+            ("segment routes", m_segmentLocalRoutes, {"deployment": DEP3, "subnets-all-vrfs": {"subnets": {"1": {"entries": [{"state": bad_route}]}}}}),
+            ("vrrp", m_vrrp, {"vrrp": [None, {"groupId": 2}]}),
+            ("loopbacks", m_loopbackInterface, {"deployment": DEP, "loopbacks": {"lo1": None, "lo2": {"admin": True}}}),
+            ("lag", m_linkAggregation, {"link-aggregation": {"blan0": None, "blan1": {"mtu": 1500}}}),
+            ("bridge", m_bridgeGroups, {"bridge-groups": {"blan0": None, "blan1": {"mtu": 1500}}}),
+            ("bfd", m_segmentBfdConfigs, {"deployment": DEP, "bfd-vrfs": {"0": None, "1": {"enable": True}}}),
+            ("tags", m_customApplianceTags, {"custom-tags": {"1": None, "x": {"name": "a", "value": "b"}}}),
+            ("port forwarding", m_inboundPortForwarding, {"deployment": DEP, "port-forwarding": [None, {"srcIf": "any", "comment": ""}]}),
+            ("ip sla", m_ipSlaRule, {"deployment": DEP, "ipsla-managers": {"MGR_1": None}}),
+            ("branch nat", m_branchNatMapsConfig, {"deployment": DEP, "branch-nat-maps": {"map1": {"prio": {"10": None, "20": {"match": "x"}}}}}),
+            ("vti", m_virtualTunnelInterface, {"deployment": DEP, "vtis": {"vti1": None, "vti2": {"ipaddr": "192.0.2.5"}}}),
+            ("ospf system interfaces", m_ospfSystemConfig, {"deployment": DEP, "ospf-system": {"enable": True}, "ospf-areas": {}, "ospf-interfaces": {"lan0": None}}),
+            ("segment ospf", m_segmentOspfConfig, {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"1": None}, "ospf-interfaces-all-vrfs": {}}),
+            ("segment ospf interfaces", m_segmentOspfConfig, {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"1": {"enable": True}}, "ospf-interfaces-all-vrfs": {"1": {"lan0.71": None}}}),
+        ]
+        for name, mapper, data in cases:
+            with self.subTest(name):
+                self.check_dropped(name, mapper, data)
+
+
+class NonDictItems(IsolationCheck, unittest.TestCase):
+    """A null or non-dict item is skipped like any other unreadable item; the filters and ledger loops around it must not trip on it."""
+
+    def test_bridge_and_lag_null(self):
+        from mappers import m_bridgeGroups, m_linkAggregation
+        bg = {"portlist": "lan1,lan2", "mtu": 1500, "admin": True, "comments": ""}
+        self.check(m_bridgeGroups, {"bridge-groups": {"blan0": bg, "blan1": None}}, lambda o: [x["bridgeGroup"] for x in o], ["blan0"], "bridgeGroups")
+        lag = {"portlist": "lan0,lan1", "mtu": 1500, "mode": 4, "lacp_rate": "slow", "lacp_sys_prio": 65535, "comment": ""}
+        self.check(m_linkAggregation, {"link-aggregation": {"blan0": lag, "blan1": None}}, lambda o: [x["channelGroup"] for x in o["linkAggregationGroups"]], ["blan0"], "linkAggregation")
+
+    def test_bfd_null(self):
+        from mappers import m_segmentBfdConfigs
+        good = {"enable": True, "minRxInterval": 300, "minTxInterval": 300, "detectMultiplier": 3}
+        self.check(m_segmentBfdConfigs, {"deployment": DEP, "bfd-vrfs": {"0": good, "1": None}}, lambda o: [e["segment"] for e in o], ["Default"], "segmentBfdConfigs")
+
+    def test_tags_null_and_non_numeric_key(self):
+        from mappers import m_customApplianceTags
+        self.check(m_customApplianceTags, {"custom-tags": {"1": {"name": "site", "value": "a"}, "2": None}}, lambda o: [t["key"] for t in o["customApplianceTagsInterfaces"]], ["site"], "customApplianceTags")
+        self.check(m_customApplianceTags, {"custom-tags": {"1": {"name": "site", "value": "a"}, "x": {"name": "r", "value": "b"}}}, lambda o: [t["key"] for t in o["customApplianceTagsInterfaces"]], ["site"], "customApplianceTags")
+
+    def test_segment_ospf_null_segment_and_interface(self):
+        data = {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}, "2": None},
+                "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF}, "1": {"lan0.71": OSPF_IF}}}
+        self.check(m_segmentOspfConfig, data, lambda o: [e["segment"] for e in o], ["Default", "corp"], "segmentOspfConfig")
+
+    def test_port_forwarding_and_vrrp_null(self):
+        from mappers import m_inboundPortForwarding
+        self.check(m_inboundPortForwarding, {"deployment": DEP, "port-forwarding": [PF, None]}, lambda o: len(o["portForwardingRules"]), 1, "inboundPortForwarding")
+        g = {"groupId": 1, "interface": "lan0", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 1, "priority": 100, "version": 2, "preempt": True, "pkt_trace": False, "holddown": 10}
+        self.check(m_vrrp, {"vrrp": [g, None]}, lambda o: [e["groupId"] for e in o["vrrpEntries"]], [1], "vrrp")
+
+
+class PerItemLists(IsolationCheck, unittest.TestCase):
+    """Lists that used to be built in one expression: one bad entry is skipped, the rest are written."""
+
+    def test_vti(self):
+        from mappers import m_virtualTunnelInterface
+        bad = {k: v for k, v in VTI.items() if k != "auto_distribute"}
+        self.check(m_virtualTunnelInterface, {"deployment": DEP, "vtis": {"vti1": VTI, "vti2": bad}}, lambda o: [v["interfaceId"] for v in o["vtis"]], ["vti1"], "virtualTunnelInterface")
+
+    def test_ospf_system_interface(self):
+        from mappers import m_ospfSystemConfig
+        bad = {k: v for k, v in OSPF_IF.items() if k != "cost"}
+        data = {"deployment": DEP3, "ospf-system": {"enable": True}, "ospf-areas": {}, "ospf-interfaces": {"lan0": OSPF_IF, "lan1": bad}}
+        self.check(m_ospfSystemConfig, data, lambda o: [i["interfaceName"] for i in o["interfaces"]], ["lan0"], "ospfSystemConfig.interfaces")
+
+    def test_segment_ospf_interface(self):
+        bad = {k: v for k, v in OSPF_IF.items() if k != "cost"}
+        data = {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"1": {"enable": True}}, "ospf-interfaces-all-vrfs": {"1": {"lan0.71": OSPF_IF, "lan0.72": bad}}}
+        self.check(m_segmentOspfConfig, data, lambda o: [(e["segment"], [i["interfaceName"] for i in e["interfaces"]]) for e in o], [("corp", ["lan0.71"])], "segmentOspfConfig.interfaces")
+
+
+class LedgerAccuracy(unittest.TestCase):
+    def test_port_forwarding_names_the_captured_index(self):
+        from mappers import m_inboundPortForwarding
+        c, notes = ctx({"deployment": DEP, "port-forwarding": [dict(PF, comment="HA rule"), PF, {"srcIf": "any", "comment": ""}]})
+        m_inboundPortForwarding(c)
+        self.assertEqual([n["item"] for n in errors(notes)], ["port-forwarding[2]"])
+
+    def test_branch_nat_failures_in_two_maps_are_two_lines(self):
+        c, notes = ctx({"deployment": DEP, "branch-nat-maps": {"map1": {"prio": {"10": {"match": "x"}}}, "map2": {"prio": {"10": {"match": "x"}}}}})
+        m_branchNatMapsConfig(c)
+        self.assertEqual(len(errors(notes)), 2)
+
+    def test_segment_failures_ledgered_under_their_section(self):
+        from mappers import m_segmentLocalRoutes
+        bad_route = {k: v for k, v in dict(ROUTE, prefix="203.0.113.0/24").items() if k != "metric"}
+        c, notes = ctx({"deployment": DEP3, "subnets-all-vrfs": {"subnets": {"1": {"entries": [{"state": ROUTE}, {"state": bad_route}]}}}})
+        m_segmentLocalRoutes(c)
+        self.assertEqual({n["target"] for n in errors(notes)}, {"segmentLocalRoutes.routes"})
+        c, notes = ctx({"deployment": DEP3, "bgp-system-all-vrfs": {"1": {"enable": True, "asn": 65000}},
+                        "bgp-neighbors-all-vrfs": {"1": {"192.0.2.1": NEIGHBOR, "192.0.2.2": {"type": "Branch"}}}})
+        m_segmentBgpSystems(c)
+        self.assertEqual({n["target"] for n in errors(notes)}, {"segmentBgpSystems.neighbors"})
+
+    def test_no_contradicting_default_note_for_failed_items(self):
+        from mappers import m_segmentBfdConfigs, m_customApplianceTags
+        for mapper, data in ((m_segmentBfdConfigs, {"deployment": DEP, "bfd-vrfs": {"0": {"enable": True}}}),
+                             (m_customApplianceTags, {"custom-tags": {"1": {"name": "site"}}}),
+                             (m_segmentBgpSystems, {"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": {"enable": True, "asn": 1}, "2": {"enable": True}}, "bgp-neighbors-all-vrfs": {}})):
+            with self.subTest(mapper.__name__):
+                c, notes = ctx(data)
+                mapper(c)
+                self.assertTrue(errors(notes))
+                self.assertEqual([n["note"] for n in notes if n["disposition"] == "default-omitted"
+                                  and re.search(r"disabled|no tag has a name|guest", n["note"])], [])
+
+    def test_dormant_ospf_segment_with_settings_is_visible(self):
+        data = {"deployment": DEP3, "ospf-areas": {}, "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF}},
+                "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": False, "routerId": "10.0.0.1", "redistMapToOSPF": "map1"}, "2": {"enable": False, "routerId": "0.0.0.0", "redistMapToOSPF": ""}}}
+        c, notes = ctx(data)
+        m_segmentOspfConfig(c)
+        lines = [n for n in notes if n["item"] == "ospf-system-all-vrfs[1]"]
+        self.assertTrue(lines and all(n["disposition"] not in QUIET_DISPOSITIONS for n in lines), lines)
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "ospf-system-all-vrfs[2]"], ["default-omitted"])
+
+
+
+SHARING = {"add_local_lan": True, "add_local_wan": False, "add_local_metric": 50, "add_local_communities": False, "local_communities": "", "local_asn_filter": False, "rtmap_to_subshare": "map1"}
+
+
+class SilentGaps(unittest.TestCase):
+    """Source config the converter cannot carry is ledgered visibly, never dropped in silence or written as an empty list."""
+
+    def test_vni_maps_without_vtep_are_ledgered(self):
+        from mappers import m_vxlan
+        c, notes = ctx({"deployment": DEP3, "vxlan": {"ERROR": "NOT_AVAILABLE"}, "vxlan-vni-map": {"0": {"vni": 10000, "zoneId": 0, "role": 0}, "1": {"vni": 10010, "zoneId": 0, "role": 0}}})
+        self.assertIsNone(m_vxlan(c))
+        visible = [n for n in notes if n["target"].startswith("vxlan") and n["disposition"] not in QUIET_DISPOSITIONS]
+        self.assertEqual(len(visible), 1, notes)
+        self.assertIn("Default 10000", visible[0]["note"])
+        self.assertIn("corp 10010", visible[0]["note"])
+
+    def test_no_vni_maps_no_vxlan_note(self):
+        from mappers import m_vxlan
+        c, notes = ctx({"deployment": DEP3, "vxlan": {"ERROR": "NOT_AVAILABLE"}, "vxlan-vni-map": {"0": {"vni": 4294967295, "zoneId": 0, "role": 0}}})
+        self.assertIsNone(m_vxlan(c))
+        self.assertEqual([n for n in notes if n["target"].startswith("vxlan")], [])
+
+    def test_unreadable_segment_routes_read(self):
+        from mappers import m_segmentLocalRoutes
+        data = {"deployment": DEP3, "subnets": {"subnets": {"entries": [{"state": ROUTE}]}},
+                "system-info": {"auto_subnet": {"vrf": {"0": SHARING, "1": SHARING}}}}
+        c, notes = ctx(data)
+        out = m_segmentLocalRoutes(c)
+        self.assertEqual([(e["segment"], [r["routeIpSubnet"] for r in e["routes"]]) for e in out], [("Default", ["198.51.100.0/24"])])
+        lines = [n for n in notes if n["disposition"] == "not-readable"]
+        self.assertEqual(len(lines), 1, notes)
+        self.assertIn("corp", lines[0]["note"])
+        self.assertFalse([n for n in notes if n["disposition"] == "mapped" and n["item"] == "subnets-all-vrfs"])
+
+    def test_unread_segment_routes_with_only_default_sharing(self):
+        from mappers import m_localRoutes, m_segmentLocalRoutes
+        data = {"deployment": DEP3, "subnets": {"subnets": {"entries": [{"state": ROUTE}]}}, "system-info": {"auto_subnet": {"vrf": {"0": SHARING}}}}
+        c, notes = ctx(data)
+        self.assertEqual([r["routeIpSubnet"] for r in m_localRoutes(c)["routes"]], ["198.51.100.0/24"])
+        self.assertIsNone(m_segmentLocalRoutes(c))
+        lines = [n for n in notes if n["disposition"] == "not-readable"]
+        self.assertEqual(len(lines), 1, notes)
+        self.assertIn("corp", lines[0]["note"])
+        self.assertIn("guest", lines[0]["note"])
+        self.assertFalse([n for n in notes if n["item"] == "subnets-all-vrfs" and n["disposition"] == "default-omitted"])
+
+    def test_no_routes_read_at_all(self):
+        from mappers import m_localRoutes, m_segmentLocalRoutes
+        c, notes = ctx({"deployment": DEP, "system-info": {"auto_subnet": {"vrf": {"0": SHARING}}}})
+        self.assertIsNone(m_localRoutes(c))
+        self.assertEqual([n["target"] for n in notes if n["disposition"] == "not-readable"], ["localRoutes.routes"])
+        c, notes = ctx({"deployment": DEP3, "system-info": {"auto_subnet": {"vrf": {"0": SHARING, "1": SHARING}}}})
+        self.assertIsNone(m_segmentLocalRoutes(c))
+        self.assertTrue([n for n in notes if n["disposition"] == "not-readable"])
+
+
+
+class ReviewRoundTwo(unittest.TestCase):
+    """Second independent review of the isolation change: null per-segment blocks, defaults read as settings, ledger accuracy."""
+
+    def written_empty(self, out, key):
+        return [e for e in (out or []) if isinstance(e, dict) and e.get(key) == []]
+
+    def test_null_segment_blocks_are_unreadable_not_empty(self):
+        from mappers import m_segmentLocalRoutes
+        cases = [
+            (m_segmentLocalRoutes, {"deployment": DEP3, "subnets-all-vrfs": {"subnets": {"0": {"entries": [{"state": ROUTE}]}, "1": None}},
+                                    "system-info": {"auto_subnet": {"vrf": {"0": SHARING, "1": SHARING}}}}, "routes"),
+            (m_segmentBgpSystems, {"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": {"enable": True, "asn": 65000}},
+                                   "bgp-neighbors-all-vrfs": {"0": {"192.0.2.1": NEIGHBOR}, "1": None}}, "neighbors"),
+            (m_segmentOspfConfig, {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}},
+                                   "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF}, "1": None}}, "interfaces"),
+        ]
+        for mapper, data, key in cases:
+            with self.subTest(mapper.__name__):
+                c, notes = ctx(data)
+                out = mapper(c)
+                self.assertEqual(self.written_empty(out, key), [], out)
+                self.assertEqual([e["segment"] for e in out], ["Default"])
+                self.assertTrue(errors(notes))
+
+    def test_null_segment_bgp_system_with_neighbors(self):
+        c, notes = ctx({"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": None}, "bgp-neighbors-all-vrfs": {"1": {"192.0.2.1": NEIGHBOR}}})
+        m_segmentBgpSystems(c)
+        self.assertEqual([(n["item"], n["disposition"]) for n in notes if n["item"] == "bgp-system-all-vrfs[1]"], [("bgp-system-all-vrfs[1]", "not-readable")])
+        self.assertFalse([n for n in notes if n["disposition"] == "default-omitted" and "0 non-default" in n["note"]])
+
+    def test_default_ospf_values_are_not_kept_settings(self):
+        data = {"deployment": DEP3, "ospf-areas": {}, "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF}},
+                "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": False, "routerId": "10.0.0.1", "redistMapToOSPF": "default_rtmap_to_ospf"},
+                                         "2": {"enable": False, "routerId": "10.0.0.1", "redistMapToOSPF": "guest_map"}}}
+        c, notes = ctx(data)
+        m_segmentOspfConfig(c)
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "ospf-system-all-vrfs[1]"], ["default-omitted"])
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "ospf-system-all-vrfs[2]"], ["outside-preconfig"])
+
+    def test_no_contradicting_localroutes_note_when_both_reads_fail(self):
+        from mappers import m_localRoutes
+        c, notes = ctx({"deployment": DEP3, "system-info": {"auto_subnet": {"vrf": {"0": SHARING, "1": SHARING}}}})
+        self.assertIsNone(m_localRoutes(c))
+        self.assertFalse([n for n in notes if n["target"] == "localRoutes" and "written in segmentLocalRoutes" in n["note"]])
+
+    def test_no_mapped_zero_note(self):
+        from mappers import m_segmentLocalRoutes
+        bad_route = {k: v for k, v in ROUTE.items() if k != "metric"}
+        for mapper, data in ((m_segmentBgpSystems, {"deployment": DEP3, "bgp-system-all-vrfs": {"1": {"enable": True, "asn": 1}}, "bgp-neighbors-all-vrfs": {"1": {"192.0.2.2": {"type": "x"}}}}),
+                             (m_segmentOspfConfig, {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"1": None}, "ospf-interfaces-all-vrfs": {}}),
+                             (m_segmentLocalRoutes, {"deployment": DEP3, "subnets-all-vrfs": {"subnets": {"1": {"entries": [{"state": bad_route}]}}}})):
+            with self.subTest(mapper.__name__):
+                c, notes = ctx(data)
+                self.assertIsNone(mapper(c))
+                self.assertFalse([n for n in notes if n["disposition"] == "mapped"])
+
+    def test_disabled_segment_bgp_with_unreadable_neighbors(self):
+        c, notes = ctx({"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": {"enable": False, "asn": 1}}, "bgp-neighbors-all-vrfs": {"1": None}})
+        m_segmentBgpSystems(c)
+        self.assertEqual([n["item"] for n in errors(notes)], ["bgp-system-all-vrfs[1]"])
+
+    def test_branch_nat_non_numeric_priority(self):
+        maps = {"map1": {"prio": {"10": {"dir": "outbound", "match": {"intf": "lan0"}, "set": {}}, "x": {"dir": "outbound", "match": {}, "set": {}}}}}
+        c, notes = ctx({"deployment": DEP, "branch-nat-maps": maps})
+        out = m_branchNatMapsConfig(c)
+        self.assertEqual([r["priorityLevel"] for r in out["branchNatRules"]], [10])
+        self.assertEqual([n["item"] for n in errors(notes)], ["branch-nat-maps[map1] rule x"])
+
+    def test_segment_route_notes_name_their_section(self):
+        from mappers import m_segmentLocalRoutes
+        unresolved = dict(ROUTE, prefix="203.0.113.0/24", nextHop="", ifName="")
+        c, notes = ctx({"deployment": DEP3, "subnets-all-vrfs": {"subnets": {"1": {"entries": [{"state": ROUTE}, {"state": unresolved}]}}}})
+        m_segmentLocalRoutes(c)
+        self.assertEqual({n["target"] for n in notes if n["disposition"] == "unresolved"}, {"segmentLocalRoutes.routes"})
+
+    def test_vni_maps_with_unreadable_running_config(self):
+        from mappers import m_vxlan
+        c, notes = ctx({"deployment": DEP3, "vxlan": {"ERROR": "NOT_AVAILABLE"}, "vxlan-vni-map": {"0": {"vni": 10000, "zoneId": 0, "role": 0}}})
+        m_vxlan(c)
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "vxlan-vni-map"], ["not-readable"])
+        c, notes = ctx({"deployment": DEP3, "vxlan": {"ERROR": "NOT_AVAILABLE"}, "vxlan-vni-map": [{"vni": 10000}], "running-config": {"runningConfig": "system hostname x"}})
+        m_vxlan(c)
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "vxlan-vni-map"], ["unresolved"])
+
+    def test_empty_multicast_list_kept(self):
+        c, notes = ctx({"deployment": DEP, "multicast-config": []})
+        self.assertEqual(m_multicast(c), [])
+
+
+
+class ReviewRoundThree(unittest.TestCase):
+    """Third independent review: reads that could not be done are never "nothing configured", and never an empty list."""
+
+    def unreadable(self, notes, item):
+        return [n for n in notes if n["item"].startswith(item) and n["disposition"] == "not-readable"]
+
+    def test_disabled_ospf_segment_with_null_interfaces(self):
+        data = {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}, "2": {"enable": False}},
+                "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF}, "1": {"lan0.71": OSPF_IF}, "2": None}}
+        c, notes = ctx(data)
+        self.assertEqual([e["segment"] for e in m_segmentOspfConfig(c)], ["Default", "corp"])
+        self.assertTrue([n for n in errors(notes) + self.unreadable(notes, "ospf") if n["item"] == "ospf-system-all-vrfs[2]"], notes)
+        self.assertFalse([n for n in notes if n["item"] == "ospf-system-all-vrfs[2]" and n["disposition"] in ("default-omitted", "mapped")])
+
+    def test_vni_maps_when_vxlan_says_no_vtep(self):
+        from mappers import m_vxlan
+        c, notes = ctx({"deployment": DEP3, "vxlan": {"port": 4789, "vtepIf": ""}, "vxlan-vni-map": {"1": {"vni": 100}}})
+        m_vxlan(c)
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "vxlan-vni-map"], ["outside-preconfig"])
+
+    def test_non_string_ospf_map_on_disabled_segment(self):
+        data = {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}, "2": {"enable": False, "redistMapToOSPF": 5}},
+                "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF}, "1": {"lan0.71": OSPF_IF}}}
+        c, notes = ctx(data)
+        self.assertEqual([e["segment"] for e in m_segmentOspfConfig(c)], ["Default", "corp"])
+
+    def test_digit_like_keys_fail_alone(self):
+        from mappers import m_customApplianceTags
+        c, notes = ctx({"custom-tags": {"1": {"name": "site", "value": "a"}, "²": {"name": "r", "value": "b"}}})
+        self.assertEqual([t["key"] for t in m_customApplianceTags(c)["customApplianceTagsInterfaces"]], ["site"])
+        maps = {"map1": {"prio": {"10": {"dir": "outbound", "match": {"intf": "lan0"}, "set": {}}, "²": {"dir": "outbound", "match": {}, "set": {}}}}}
+        c, notes = ctx({"deployment": DEP, "branch-nat-maps": maps})
+        self.assertEqual([r["priorityLevel"] for r in m_branchNatMapsConfig(c)["branchNatRules"]], [10])
+
+    def test_branch_nat_all_failed_no_none_configured_note(self):
+        c, notes = ctx({"deployment": DEP, "branch-nat-maps": {"map1": {"prio": {"x": {"match": {}}}}}})
+        self.assertIsNone(m_branchNatMapsConfig(c))
+        self.assertTrue(errors(notes))
+        self.assertFalse([n for n in notes if n["disposition"] == "default-omitted" and n["target"] == "branchNatMapsConfig"])
+
+    def test_routes_read_without_a_table(self):
+        from mappers import m_localRoutes, m_segmentLocalRoutes
+        for table in (None, "unexpected"):
+            data = {"deployment": DEP3, "subnets-all-vrfs": {"subnets": table}, "subnets": {"subnets": {"entries": [{"state": ROUTE}]}},
+                    "system-info": {"auto_subnet": {"vrf": {"0": SHARING, "1": SHARING}}}}
+            c, notes = ctx(data)
+            out = m_segmentLocalRoutes(c)
+            self.assertEqual([(e["segment"], [r["routeIpSubnet"] for r in e["routes"]]) for e in out], [("Default", ["198.51.100.0/24"])])
+            self.assertTrue(self.unreadable(notes, "subnets-all-vrfs"))
+        c, notes = ctx({"deployment": DEP, "subnets": {"subnets": None}, "system-info": {"auto_subnet": {"vrf": {"0": SHARING}}}})
+        self.assertIsNone(m_localRoutes(c))
+        self.assertTrue(self.unreadable(notes, "subnets"))
+
+    def test_unreadable_neighbor_and_interface_reads(self):
+        from mappers import m_ospfSystemConfig
+        cases = [
+            (m_segmentBgpSystems, {"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": {"enable": True, "asn": 2}}}, "neighbors"),
+            (m_bgpSystemConfig, {"deployment": DEP, "bgp-system": {"enable": True, "asn": 1}}, "neighbors"),
+            (m_segmentOspfConfig, {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}}}, "interfaces"),
+            (m_ospfSystemConfig, {"deployment": DEP, "ospf-system": {"enable": True}, "ospf-areas": {}}, "interfaces"),
+        ]
+        for mapper, data, key in cases:
+            with self.subTest(mapper.__name__):
+                c, notes = ctx(data)
+                out = mapper(c)
+                entries = out if isinstance(out, list) else [out] if out else []
+                self.assertEqual([e for e in entries if e.get(key) == []], [], out)
+                self.assertTrue([n for n in notes if n["disposition"] == "not-readable"], notes)
+
+    def test_null_segment_bgp_settings(self):
+        c, notes = ctx({"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": None}, "bgp-neighbors-all-vrfs": {}})
+        m_segmentBgpSystems(c)
+        self.assertTrue(self.unreadable(notes, "bgp-system-all-vrfs[1]"), notes)
+        self.assertFalse([n for n in notes if n["disposition"] == "default-omitted" and "corp" in n["note"]])
+
+    def test_default_bgp_settings_unread_with_neighbors(self):
+        c, notes = ctx({"deployment": DEP, "bgp-neighbors": {"192.0.2.1": NEIGHBOR}})
+        self.assertIsNone(m_bgpSystemConfig(c))
+        self.assertTrue(self.unreadable(notes, "bgp-system"), notes)
+
+
+class RouteLabelsAndContact(unittest.TestCase):
+    """Route labels are their own dictionary (/cn/rtlabels in the running-config), not interface labels; a CLI-only contact is ledgered."""
+    RTLABELS = ("internal set modify - /cn/rtlabels/config/1 value uint32 1\n"
+                "internal set modify - /cn/rtlabels/config/1/name value string Internet\n"
+                "internal set modify - /cn/rtlabels/config/2/name value string \"Backup path\"\n")
+    # interface labels reuse the same ids with other names: resolving a route label there writes a wrong value
+    DEP = {"sysConfig": dict(DEP["sysConfig"], ifLabels={"lan": [{"id": "4", "name": "Voice"}], "wan": [{"id": "1", "name": "INET"}, {"id": "2", "name": "MPLS"}, {"id": "7", "name": "LTE"}]}),
+           "modeIfs": DEP["modeIfs"]}
+    ROUTE = {"configured": True, "local": True, "automatic": False, "prefix": "203.0.113.0/24", "nextHop": "192.0.2.1", "ifName": "lan0", "metric": 50, "advert": True,
+             "advert_bgp": False, "advert_ospf": False, "zone_id": "65534", "label": "1"}
+
+    def routes(self, label, rc):
+        from mappers import m_localRoutes
+        data = {"deployment": self.DEP, "subnets": {"subnets": {"entries": [{"state": dict(self.ROUTE, label=label)}]}}}
+        if rc is not None:
+            data["running-config"] = {"runningConfig": rc}
+        c, notes = ctx(data)
+        return m_localRoutes(c)["routes"][0]["routeLabel"], notes
+
+    def test_route_label_comes_from_route_labels(self):
+        self.assertEqual(self.routes("1", self.RTLABELS)[0], "Internet")
+        self.assertEqual(self.routes("2", self.RTLABELS)[0], "Backup path")
+        self.assertEqual(self.routes("0", self.RTLABELS)[0], None)
+
+    def test_unknown_route_label_is_null_and_ledgered(self):
+        for rc in (self.RTLABELS, None):  # id 7 is an interface label only; no running-config at all
+            label, notes = self.routes("7", rc)
+            self.assertIsNone(label)
+            gaps = [n for n in notes if n["disposition"] == "unresolved" and n["target"] == "localRoutes.routes.routeLabel"]
+            self.assertEqual(len(gaps), 1, notes)
+            self.assertIn("203.0.113.0/24", gaps[0]["note"])
+            self.assertIn("7", gaps[0]["note"])
+            # the reason must say why: no stored running-config is not "a label the running-config does not name"
+            self.assertIn("no stored running-config" if rc is None else "do not name", gaps[0]["note"])
+
+    def test_ip_sla_route_label_comes_from_route_labels(self):
+        from mappers import m_ipSlaRule
+        op = {"type": "port-monitor", "port-name": "wan1"}
+        rule = {"enable": True, "interval": "10", "comment": "", "routeLabelId": 2, "upAction": "def-alarm", "downAction": "alarm", "operation": {"OPR_1": op}}
+        c, _ = ctx({"deployment": self.DEP, "ipsla-managers": {"MGR_1": rule}, "running-config": {"runningConfig": self.RTLABELS}})
+        self.assertEqual(m_ipSlaRule(c)["ruleEntries"][0]["routeLabel"], "Backup path")
+        c, notes = ctx({"deployment": self.DEP, "ipsla-managers": {"MGR_1": dict(rule, routeLabelId=7)}, "running-config": {"runningConfig": self.RTLABELS}})
+        self.assertIsNone(m_ipSlaRule(c)["ruleEntries"][0]["routeLabel"])
+        self.assertTrue([n for n in notes if n["disposition"] == "unresolved" and n["item"] == "ipsla-managers[MGR_1]" and "7" in n["note"]], notes)
+
+    def _build(self, ledger, **extra):
+        dep = dict(copy.deepcopy(DEP), modeIfs=[])
+        data = dict({"appliance": {"hostName": "h1", "groupId": "1.Network", "site": "S1", "networkRole": "0"}, "deployment": dep}, **extra)
+        cap = FakeCap(data)
+        cap.folder = "fake"
+        return build(cap, ledger)
+
+    def test_cli_only_contact_is_ledgered_not_guessed(self):
+        rc = {"runningConfig": 'system hostname h1\nsystem contact "Ann Example, ann@example.com"\n'}
+        ledger = []
+        info = self._build(ledger, **{"running-config": rc, "extra-info": {"contact": None}})["applianceInfo"]
+        self.assertEqual(info["contact"], {})  # one free-text string; the format splits name, email and phoneNumber
+        gaps = [e for e in ledger if e["target"] == "applianceInfo.contact"]
+        self.assertEqual([e["disposition"] for e in gaps], ["unresolved"], ledger)
+        self.assertIn("Ann Example, ann@example.com", gaps[0]["note"])
+        ledger = []
+        info = self._build(ledger, **{"running-config": rc, "extra-info": {"contact": {"name": "NOC", "email": "noc@example.com"}}})["applianceInfo"]
+        self.assertEqual(info["contact"], {"name": "NOC", "email": "noc@example.com"})
+        self.assertEqual([e for e in ledger if e["target"] == "applianceInfo.contact"], [])
+
+
+def null_segments(value, path=""):
+    """Paths where a written value holds segment: null."""
+    if isinstance(value, dict):
+        return [path + ".segment"] * (value.get("segment", "") is None) + [p for k, v in value.items() for p in null_segments(v, path + "." + k)]
+    if isinstance(value, list):
+        return [p for i, v in enumerate(value) for p in null_segments(v, "{}[{}]".format(path, i))]
+    return []
+
+
+class SegmentNeverNull(unittest.TestCase):
+    """A vrf id that names no segment (a deleted segment) is never written as segment: null, which Orchestrator applies to the Default
+    segment: the item is skipped and ledgered unresolved, naming the id."""
+    BFD = {"enable": True, "minRxInterval": 300, "minTxInterval": 300, "detectMultiplier": 3}
+
+    def unresolved(self, notes):
+        self.assertEqual(errors(notes), [])
+        self.assertTrue([n for n in notes if n["disposition"] == "unresolved" and "vrf id 45 names no segment" in n["note"]], notes)
+
+    def test_bfd_in_a_deleted_segment(self):
+        from mappers import m_segmentBfdConfigs
+        c, notes = ctx({"deployment": DEP, "bfd-vrfs": {"0": self.BFD, "45": self.BFD}})
+        self.assertEqual([e["segment"] for e in m_segmentBfdConfigs(c)], ["Default"])
+        self.unresolved(notes)
+        self.assertEqual([n["item"] for n in notes if n["disposition"] == "unresolved"], ["bfd-vrfs[45]"])
+        c, notes = ctx({"deployment": DEP, "bfd-vrfs": {"0": dict(self.BFD, enable=False), "45": self.BFD}})
+        self.assertIsNone(m_segmentBfdConfigs(c))
+        self.unresolved(notes)
+        self.assertFalse([n for n in notes if n["disposition"] == "default-omitted"], "BFD is enabled in vrf 45: 'disabled in every segment' would be false")
+
+    def test_every_segment_field(self):
+        from mappers import m_inboundPortForwarding, m_loopbackInterface, m_natPools, m_segmentLocalRoutes, m_virtualTunnelInterface
+        pim = {"lan0": {"dr_priority": 1, "enable": True, "hello_interval": 30, "join_prune_interval": 30}}
+        nat_rule = {"dir": "inbound", "match": {"segment": 45, "intf": "any", "proto": "any"}, "set": {"trans_dst": "192.0.2.9"}}
+        cases = [
+            ("loopbacks", m_loopbackInterface, {"deployment": DEP, "loopbacks": {"lo1": {"admin": True, "ipaddr": "192.0.2.1", "nmask": 32, "label": "", "vrf_id": 45, "zone": 0},
+                                                                                "lo2": {"admin": True, "ipaddr": "192.0.2.2", "nmask": 32, "label": "", "vrf_id": 0, "zone": 0}}},
+             lambda o: [x["interfaceId"] for x in o["loopbacks"]], ["lo2"]),
+            ("port forwarding", m_inboundPortForwarding, {"deployment": DEP, "port-forwarding": [dict(PF, vrf_id=45), PF]}, lambda o: [x["segment"] for x in o["portForwardingRules"]], ["Default"]),
+            ("segment bgp", m_segmentBgpSystems, {"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 65000}, "1": {"enable": True, "asn": 65000}, "45": {"enable": True, "asn": 65000}},
+                                                  "bgp-neighbors-all-vrfs": {}}, lambda o: [x.get("segment", "(none)") for x in o], ["Default", "corp"]),
+            ("nat pools", m_natPools, {"deployment": DEP, "nat-pools": {"1": {"name": "p1", "segment": 45, "dir": "outbound", "subnet": "198.51.100.0/30", "pat": 1, "comment": ""}}}, lambda o: o, None),
+            ("segment ospf", m_segmentOspfConfig, {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}, "45": {"enable": True}},
+                                                   "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF}, "1": {"lan0.71": OSPF_IF}, "45": {"lan0.9": OSPF_IF}}}, lambda o: [x["segment"] for x in o], ["Default", "corp"]),
+            ("segment routes", m_segmentLocalRoutes, {"deployment": DEP3, "subnets-all-vrfs": {"subnets": {"0": {"entries": [{"state": ROUTE}]}, "45": {"entries": [{"state": ROUTE}]}}}},
+             lambda o: [x["segment"] for x in o], ["Default"]),
+            ("multicast", m_multicast, {"deployment": DEP, "multicast-enable": [{"vrf_id": 0, "enable": True}],
+                                        "multicast-config": [{"vrf_id": 0, "rp": "192.0.2.9", "pim": pim, "igmp": {}, "filter_name": None}, {"vrf_id": 45, "rp": "", "pim": {}, "igmp": {}, "filter_name": None}]},
+             lambda o: [x["segment"] for x in o], ["Default"]),
+            ("vxlan", m_vxlan, {"deployment": DEP, "vxlan": {"port": 4789, "vtepIf": "lo1"}, "vxlan-vni-map": {"0": {"vni": 1001, "zoneId": 0, "role": 0}, "45": {"vni": 1045, "zoneId": 0, "role": 0}}},
+             lambda o: [x["vni"] for x in o["vniVrfMaps"]], [1001]),
+            ("vti", m_virtualTunnelInterface, {"deployment": DEP, "vtis": {"vti1": dict(VTI, vrf_id=45), "vti2": VTI}}, lambda o: [x["interfaceId"] for x in o["vtis"]], ["vti2"]),
+            ("branch nat", m_branchNatMapsConfig, {"deployment": DEP, "branch-nat-maps": {"map1": {"prio": {"10": nat_rule, "20": dict(nat_rule, match={"segment": 0})}}}},
+             lambda o: [x["priorityLevel"] for x in o["branchNatRules"]], [20]),
+        ]
+        for name, mapper, data, pick, good in cases:
+            with self.subTest(name):
+                c, notes = ctx(data)
+                out = mapper(c)
+                self.assertEqual(null_segments(out), [])
+                self.assertEqual(pick(out) if out is not None else None, good)
+                self.unresolved(notes)
+
+
+class DhcpRemotePoolOptions(unittest.TestCase):
+    """Remote pool options: the API returns each option's value without its code; the code is the key of the stored backup's
+    /cn/dhcpd/config/subnet/<pool>/dhcp_options/<code> line, so an option is written only when the backup names its code."""
+    POOL = {"subnet": "192.168.8.0/24", "scopeName": "GUEST", "ipRange": [], "gatewayIp": "192.168.8.1", "dnsServers": [], "ntpServers": [], "netbiosNameServers": [],
+            "netbiosNodeType": "B", "maxLeaseTime": 600, "defaultLeaseTime": 60, "options": [{"value": "255.255.255.255"}, {"value": "192.0.2.7"}]}
+    CLI = ("internal set modify - /cn/dhcpd/config/subnet/192.168.8.0\\\\/24/dhcp_options/42 value uint8 42\n"
+           "internal set modify - /cn/dhcpd/config/subnet/192.168.8.0\\\\/24/dhcp_options/42/value value string 192.0.2.7\n"
+           "internal set modify - /cn/dhcpd/config/subnet/192.168.8.0\\\\/24/dhcp_options/1 value uint8 1\n"
+           "internal set modify - /cn/dhcpd/config/subnet/192.168.8.0\\\\/24/dhcp_options/1/value value string 255.255.255.255\n"
+           "internal set modify - /cn/dhcpd/config/subnet/10.9.9.0\\\\/24/dhcp_options/3/value value string 192.0.2.7\n")
+
+    def test_codes_from_the_stored_backup(self):
+        c, notes = ctx({"dhcp-remote-subnets": [self.POOL], "running-config": {"runningConfig": self.CLI}})
+        self.assertEqual(m_dhcpRemoteAddressPoolConfig(c).get("options"), [{"option": 1, "value": "255.255.255.255"}, {"option": 42, "value": "192.0.2.7"}])
+        self.assertFalse([n for n in notes if n["disposition"] in ("unresolved", "unmapped-source-key")], notes)
+
+    def test_no_code_is_never_guessed(self):
+        for name, rc in (("no backup", None), ("backup without the pool's options", {"runningConfig": self.CLI.replace("192.168.8.0", "10.8.8.0")}),
+                         ("backup with other values", {"runningConfig": self.CLI.replace("192.0.2.7", "192.0.2.8")})):
+            with self.subTest(name):
+                c, notes = ctx({"dhcp-remote-subnets": [self.POOL], "running-config": rc})
+                out = m_dhcpRemoteAddressPoolConfig(c)
+                self.assertEqual(out["dhcpAddressMask"], "192.168.8.0/24")
+                self.assertNotIn("options", out)
+                gaps = [n["note"] for n in notes if n["disposition"] == "unresolved" and n["target"] == "dhcpRemoteAddressPoolConfig.options"]
+                self.assertEqual(len(gaps), 2, notes)
+                self.assertTrue("255.255.255.255" in gaps[0] and "192.0.2.7" in gaps[1], gaps)
+
+    def test_the_written_pool_mixed_codes_and_spaces(self):
+        cli = self.CLI + ("internal set modify - /cn/dhcpd/config/subnet/192.168.9.0\\\\/24/dhcp_options/15/value value string corp.example lab.example\n")
+        first = dict(self.POOL, options=[{"option": 1, "value": "255.255.255.255"}, {"value": "192.0.2.7"}])
+        second = dict(self.POOL, subnet="192.168.9.0/24", options=[{"value": "corp.example lab.example"}])
+        c, _ = ctx({"dhcp-remote-subnets": [first], "running-config": {"runningConfig": cli}})
+        self.assertEqual(m_dhcpRemoteAddressPoolConfig(c).get("options"), [{"option": 1, "value": "255.255.255.255"}, {"option": 42, "value": "192.0.2.7"}])
+        c, _ = ctx({"dhcp-remote-subnets": [first, second], "running-config": {"runningConfig": cli}})
+        self.assertEqual(m_dhcpRemoteAddressPoolConfig(c).get("options"), [{"option": 15, "value": "corp.example lab.example"}])  # the latest pool is the one written
+
+    def test_a_malformed_option_keeps_the_pool(self):
+        for bad in (None, "x", {"option": 3}, {"option": "router", "value": "192.0.2.1"}):
+            with self.subTest(bad=bad):
+                c, notes = ctx({"dhcp-remote-subnets": [dict(self.POOL, options=[self.POOL["options"][0], bad, self.POOL["options"][1]])], "running-config": {"runningConfig": self.CLI}})
+                try:
+                    out = m_dhcpRemoteAddressPoolConfig(c)
+                except Exception as err:  # translate's section-level catch would drop the whole pool
+                    out = "raised {!r}".format(err)
+                self.assertEqual(out.get("options") if isinstance(out, dict) else out, [{"option": 1, "value": "255.255.255.255"}, {"option": 42, "value": "192.0.2.7"}])
+                self.assertEqual([(n["item"], n["target"]) for n in notes if n["disposition"] == "toolkit-error"], [("dhcp-remote-subnets.options[1]", "dhcpRemoteAddressPoolConfig.options")])
+
+    def test_options_of_another_shape_keep_the_pool(self):
+        c, notes = ctx({"dhcp-remote-subnets": [dict(self.POOL, options={"1": "x", "42": "y"})]})
+        self.assertEqual(m_dhcpRemoteAddressPoolConfig(c)["dhcpAddressMask"], "192.168.8.0/24")
+        self.assertEqual([n["item"] for n in notes if n["disposition"] == "toolkit-error"], ["dhcp-remote-subnets.options[0]"])
+
+    def test_an_option_with_its_code_is_written_as_is(self):
+        c, notes = ctx({"dhcp-remote-subnets": [dict(self.POOL, options=[{"option": 6, "value": "192.0.2.53"}])]})
+        self.assertEqual(m_dhcpRemoteAddressPoolConfig(c).get("options"), [{"option": 6, "value": "192.0.2.53"}])
+
+
+class MulticastOneObject(unittest.TestCase):
+    """ECOS before 9.7 returns multicast as one object without vrf_id (seen on 9.5.7 and 9.6.4): it is the Default segment's; named
+    interfaces are written, the virtual PIM interfaces (pimN) are ledgered as runtime."""
+    PIM = {"dr_priority": 1, "enable": True, "hello_interval": 30, "join_prune_interval": 30}
+
+    def test_configured_object_is_the_default_segment(self):
+        c, notes = ctx({"deployment": DEP, "multicast-enable": {"enable": True},
+                        "multicast-config": {"rp": "192.0.2.9", "pim": {"lan0": self.PIM, "pim0": self.PIM, "pim1": self.PIM}, "igmp": {"lan0": {"enable": True}}, "filter_name": ""}})
+        self.assertEqual(m_multicast(c), [{"segment": "Default", "enable": "true", "rpAddresses": "192.0.2.9", "filterName": None,
+                                           "pim": [{"interfaceName": "lan0", "pimEnable": True, "igmpEnable": True, "drPriority": 1, "helloInterval": 30, "joinPruneInterval": 30}]}])
+        self.assertEqual(sorted(n["note"].split("'")[1] for n in notes if n["disposition"] == "runtime"), ["pim0", "pim1"])
+        self.assertTrue(all("virtual PIM interface" in n["note"] for n in notes if n["disposition"] == "runtime"), notes)
+        self.assertFalse([n for n in notes if n["disposition"] in ("unresolved", "toolkit-error")], notes)
+
+    def test_switched_off_but_configured_and_other_unknown_entries(self):
+        c, notes = ctx({"deployment": DEP, "multicast-enable": {"enable": False}, "multicast-config": {"rp": "192.0.2.9", "pim": {"pimlan": self.PIM}, "igmp": {}, "filter_name": ""}})
+        out = m_multicast(c)
+        self.assertEqual((out[0]["enable"], out[0]["rpAddresses"], out[0]["pim"]), ("false", "192.0.2.9", []))
+        self.assertEqual([n["note"] for n in notes if n["disposition"] == "runtime"], ["pim entry 'pimlan' matches no interface or label of this appliance (stale); the validator rejects it"])
+        self.assertTrue([n for n in notes if n["disposition"] == "mapped" and "written as the Default segment (assumption" in n["note"]], notes)
+
+    def test_unknown_enable_is_not_called_disabled(self):
+        empty = {"rp": "", "pim": {}, "igmp": {}, "filter_name": ""}
+        for enable in (None, "odd", {"enable": "maybe"}, {}):
+            with self.subTest(enable=enable):
+                c, notes = ctx({"deployment": DEP, "multicast-enable": enable, "multicast-config": empty})
+                self.assertIsNone(m_multicast(c))
+                self.assertEqual([(n["disposition"], n["target"]) for n in notes if n["item"].startswith("multicast")], [("not-readable", "multicast")])
+        c, notes = ctx({"deployment": DEP, "multicast-config": dict(empty, rp="192.0.2.9")})
+        self.assertEqual(m_multicast(c)[0]["enable"], "none")
+        self.assertEqual([n["target"] for n in notes if n["disposition"] == "not-readable"], ["multicast.enable"])
+
+    def test_unconfigured_object_is_default_omitted(self):
+        c, notes = ctx({"deployment": DEP, "multicast-enable": {"enable": False}, "multicast-config": {"rp": "", "pim": {}, "igmp": {}, "filter_name": ""}})
+        self.assertIsNone(m_multicast(c))
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "multicast-config"], ["default-omitted"])
+        c, notes = ctx({"deployment": DEP, "multicast-enable": {"enable": True}, "multicast-config": {"rp": "", "pim": {}, "igmp": {}, "filter_name": ""}})
+        self.assertEqual(m_multicast(c)[0]["enable"], "true")  # switched on with nothing else set is still a setting
+
+
+class ManagedBgpNeighbors(unittest.TestCase):
+    """BGP neighbors Orchestrator services create (gms_marked) are skipped as before, and the ledger names them."""
+
+    def test_skipped_neighbors_are_ledgered(self):
+        neighbors = {"192.0.2.2": NEIGHBOR, "192.0.2.9": dict(NEIGHBOR, gms_marked=True)}
+        c, notes = ctx({"deployment": DEP, "bgp-system": {"enable": True, "asn": 65000}, "bgp-neighbors": neighbors})
+        self.assertEqual([n["peerIpAddress"] for n in m_bgpSystemConfig(c)["neighbors"]], ["192.0.2.2"])
+        self.assertEqual([(n["item"], n["target"], "192.0.2.9" in n["note"]) for n in notes if n["disposition"] == "orchestrator-managed"],
+                         [("bgp-system", "bgpSystemConfig.neighbors", True)])
+        c, notes = ctx({"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 65000}, "1": {"enable": True, "asn": 65000}},
+                        "bgp-neighbors-all-vrfs": {"1": {"192.0.2.9": dict(NEIGHBOR, gmsMarked=True), "192.0.2.10": dict(NEIGHBOR, gms_marked=True)}}})
+        self.assertEqual([s["neighbors"] for s in m_segmentBgpSystems(c)], [[], []])
+        self.assertEqual([(n["item"], n["target"], "192.0.2.10, 192.0.2.9" in n["note"]) for n in notes if n["disposition"] == "orchestrator-managed"],
+                         [("bgp-system-all-vrfs[1]", "segmentBgpSystems.neighbors", True)])
+
+
+class DormantFlowRedirection(unittest.TestCase):
+    def test_cluster_interface_without_peers_is_ledgered(self):
+        c, notes = ctx({"running-config": {"fileName": "b", "backupTime": "1", "runningConfig": "cluster interface wan0\n"}})
+        self.assertIsNone(m_flowRedirection(c))
+        self.assertEqual([(n["disposition"], n["target"], n["note"]) for n in notes], [("default-omitted", "flowRedirection", "cluster interface wan0 without peers (dormant)")])
+        c, notes = ctx({"running-config": {"fileName": "b", "backupTime": "1", "runningConfig": "system hostname h1\n"}})
+        self.assertIsNone(m_flowRedirection(c))
+        self.assertEqual(notes, [])
+
+
+class ManagementPorts(unittest.TestCase):
+    """interfaceConfig never carries mgmt ports (the management plane is off-limits); their state is ledgered, never claimed as default."""
+    UP = {"admin": True, "ifSpeed": "auto", "ifDuplex": "auto"}
+
+    def test_only_mgmt0_down_is_ledgered(self):
+        info = [dict(self.UP, ifname="mgmt0"), dict(self.UP, ifname="mgmt1", admin=False), dict(self.UP, ifname="lan0")]
+        c, notes = ctx({"interface-state": {"ifInfo": info}})
+        self.assertIsNone(m_interfaceConfig(c))
+        self.assertEqual([n["item"] for n in notes if n["disposition"] != "default-omitted"], [])  # mgmt1 down is the usual state
+        c, notes = ctx({"interface-state": {"ifInfo": [dict(self.UP, ifname="mgmt0", ifSpeed="100", ifDuplex="full")]}})
+        m_interfaceConfig(c)
+        self.assertEqual([n["item"] for n in notes if n["disposition"] != "default-omitted"], [])  # mgmt0 up: speed and duplex are not ledgered
+
+    def test_mgmt_admin_down_is_ledgered_not_carried(self):
+        info = [dict(self.UP, ifname="mgmt0", admin=False), dict(self.UP, ifname="wan0"), dict(self.UP, ifname="lan0"), dict(self.UP, ifname="mgmt1")]
+        c, notes = ctx({"interface-state": {"ifInfo": info}})
+        self.assertIsNone(m_interfaceConfig(c))
+        self.assertEqual([(n["disposition"], n["item"]) for n in notes if n["target"] == "interfaceConfig"],
+                         [("outside-preconfig", "interface-state[mgmt0]"), ("default-omitted", "interface-state")])
+        self.assertIn("admin down", [n for n in notes if n["item"] == "interface-state[mgmt0]"][0]["note"])
+        self.assertNotIn("every physical interface", [n for n in notes if n["item"] == "interface-state"][0]["note"])
+        c, notes = ctx({"interface-state": {"ifInfo": [dict(self.UP, ifname="mgmt0", admin=False), dict(self.UP, ifname="lan0", admin=False)]}})
+        self.assertEqual(m_interfaceConfig(c)["interfaces"], [{"interfaceName": "lan0", "interfaceSpeed": "auto", "interfaceDuplex": "auto", "admin": "down"}])
+        self.assertEqual([n["item"] for n in notes if n["disposition"] == "outside-preconfig"], ["interface-state[mgmt0]"])  # lan0 down is carried, not ledgered
+
+
+class InterfaceRouteNextHopZero(unittest.TestCase):
+    """A route with next hop 0.0.0.0 and an interface: apply rejects it on ECOS 9.7.1 ("Interface cannot be specified when Next Hop is 0.0.0.0")
+    and applies it on ECOS 9.6.2.1, both under a 9.7.1 Orchestrator. The target appliance's ECOS decides (translate --target-ecos): 9.7+ and
+    unknown leave it out with a ledger line, before 9.7 keeps it. The Orchestrator release (--target-release) does not decide."""
+    IFROUTE = {"state": dict(ROUTE, prefix="10.14.32.0/21", nextHop="", ifName=""), "config": {"prefix": "10.14.32.0/21", "ifName": "lan1", "nextHop": "0.0.0.0"}}
+    ANY_IF = {"state": dict(ROUTE, prefix="10.15.0.0/16", nextHop="", ifName=""), "config": {"prefix": "10.15.0.0/16", "ifName": "default", "nextHop": "0.0.0.0"}}
+    KEPT = [("10.14.32.0/21", "lan1"), ("10.15.0.0/16", None), ("198.51.100.0/24", "lan0")]
+    DROPPED = [("10.15.0.0/16", None), ("198.51.100.0/24", "lan0")]
+
+    def routes(self, ecos, release="9.7.1.42046"):
+        notes = []
+        c = Ctx(FakeCap({"deployment": DEP, "subnets": {"subnets": {"entries": [self.IFROUTE, self.ANY_IF, {"state": ROUTE}]}}}), notes)
+        c.target_release, c.target_ecos = release, ecos  # what translate --target-release and --target-ecos set
+        from mappers import m_localRoutes
+        return [(r["routeIpSubnet"], r["interfaceName"]) for r in m_localRoutes(c)["routes"]], [n["note"] for n in notes if n["disposition"] == "unresolved" and "next hop 0.0.0.0" in n["note"]]
+
+    def test_ecos_97_and_later_drops(self):
+        for ecos in ("9.7.1.0", "10.0.0.1"):
+            with self.subTest(ecos):
+                routes, gaps = self.routes(ecos, release=None)
+                self.assertEqual(routes, self.DROPPED)
+                self.assertEqual(len(gaps), 1, gaps)
+                self.assertTrue(all(w in gaps[0] for w in ("10.14.32.0/21", "lan1", "Default", "target ECOS " + ecos, "ECOS 9.7+ rejects an interface with next hop 0.0.0.0")), gaps)
+
+    def test_ecos_before_97_keeps_under_a_97_orchestrator(self):
+        routes, gaps = self.routes("9.6.2.1")
+        self.assertEqual((routes, gaps), (self.KEPT, []))
+
+    def test_unknown_ecos_drops_and_says_why(self):
+        routes, gaps = self.routes(None)
+        self.assertEqual(routes, self.DROPPED)
+        self.assertEqual(len(gaps), 1, gaps)
+        self.assertTrue(gaps[0].startswith("target appliance ECOS unknown: ECOS 9.7+ rejects an interface with next hop 0.0.0.0 (route 10.14.32.0/21 on lan1, segment Default); "
+                                           "on ECOS before 9.7 it applies as is: pass --target-ecos"), gaps)
+
+    def test_a_malformed_ecos_is_unknown(self):
+        for ecos in ("abc", "", "latest", "9", "9.7x"):
+            with self.subTest(ecos=ecos):
+                routes, gaps = self.routes(ecos)
+                self.assertEqual(routes, self.DROPPED)
+                self.assertTrue(gaps and gaps[0].startswith("target appliance ECOS unknown"), gaps)
+        self.assertEqual(self.routes("9.6.2.1_107093"), (self.KEPT, []))
+
+    def test_translate_rejects_a_malformed_target_ecos(self):
+        import contextlib, io, translate
+        from unittest import mock
+        seen = []
+        with mock.patch.object(translate, "build", side_effect=lambda cap, ledger, target_ecos=None: seen.append(target_ecos) or (_ for _ in ()).throw(translate.NothingToConvert("stop"))), \
+                mock.patch.object(translate, "Capture", side_effect=lambda folder: folder), contextlib.redirect_stderr(io.StringIO()) as err:
+            for bad in ("abc", "", "latest", "9"):
+                with self.assertRaises(SystemExit, msg=bad):
+                    translate.main(["--capture", "x", "--site-type", "t", "--target-ecos", bad])
+            translate.main(["--capture", "x", "--site-type", "t", "--target-ecos", "9.6.2.1_107093"])
+        self.assertEqual(seen, ["9.6.2.1_107093"])
+        self.assertIn("not an ECOS release", err.getvalue())
+
+    def test_translate_passes_the_target_ecos(self):
+        import contextlib, io, translate
+        from unittest import mock
+        seen = []
+
+        def fake_build(cap, ledger, target_ecos=None):
+            seen.append(target_ecos)
+            raise translate.NothingToConvert("stop")
+        with mock.patch.object(translate, "build", side_effect=fake_build), mock.patch.object(translate, "Capture", side_effect=lambda folder: folder), \
+                contextlib.redirect_stderr(io.StringIO()):
+            translate.main(["--capture", "x", "--site-type", "t", "--target-ecos", "9.6.2.1"])
+            translate.main(["--capture", "x", "--site-type", "t"])
+        self.assertEqual(seen, ["9.6.2.1", None])
+
+    def test_build_passes_the_target_ecos(self):
+        for ecos, dropped in (("9.6.2.1", False), ("9.7.1.0", True), (None, True)):
+            cap = FakeCap({"appliance": {"hostName": "h1", "groupId": "1.Network", "site": "S1", "networkRole": "0"}, "deployment": dict(copy.deepcopy(DEP), modeIfs=[]),
+                           "subnets": {"subnets": {"entries": [self.IFROUTE]}}})
+            cap.folder = "fake"
+            ledger = []
+            build(cap, ledger, target_ecos=ecos)
+            self.assertEqual(bool([e for e in ledger if "ECOS 9.7+ rejects" in e["note"]]), dropped, ecos)
+
+
+class InlineRouterOneSide(unittest.TestCase):
+    """Apply rejects inline-router without both LAN and WAN interfaces ("Must provide both LAN side and WAN side interfaces for inline router
+    mode"); /validate accepts it. The deployment is still written as the source has it, with a loud warning; the build never fails on it."""
+    WAN = {"vlan": 0, "label": "1", "wanSide": True, "vrf": 0, "zone": 0, "harden": 1, "behindNAT": "none", "maxBW": {"outbound": 50000}, "version": 4, "ip": "198.51.100.10", "mask": 24, "wanNexthop": "198.51.100.1"}
+
+    def build(self, mode_ifs, inline=True, ha_if=None):
+        dep = copy.deepcopy(DEP)
+        dep["sysConfig"].update(mode="router", inline=inline)
+        if ha_if:
+            dep["sysConfig"]["haIf"] = ha_if
+        dep["sysConfig"]["ifLabels"]["wan"] = [{"id": "1", "name": "INET"}]
+        dep["modeIfs"] = mode_ifs
+        cap = FakeCap({"appliance": {"hostName": "h1", "groupId": "1.Network", "site": "S1", "networkRole": "0"}, "deployment": dep})
+        cap.folder = "fake"
+        ledger = []
+        return build(cap, ledger), ledger
+
+    def test_wan_only_router_is_written_and_warned(self):
+        from translate import summary_md
+        out, ledger = self.build([{"ifName": "wan0", "applianceIPs": [self.WAN]}])
+        self.assertEqual((out["deploymentInfo"]["deploymentMode"], [i["interfaceName"] for i in out["deploymentInfo"]["deploymentInterfaces"]]), ("inline-router", ["wan0"]))
+        gaps = [e for e in ledger if e["target"] == "deploymentInfo.deploymentMode"]
+        self.assertEqual([(e["disposition"], e["note"]) for e in gaps],
+                         [("unresolved", "inline-router with no LAN interface: the deployment step will be rejected on apply; set the deployment by hand")])
+        summary = summary_md(ledger, out, {}, "9.7.1.42046")
+        self.assertIn("**Warning: apply will fail**: inline-router with no LAN interface", summary.split("## ")[0])
+
+    LAN = {"vlan": 0, "label": "4", "wanSide": False, "vrf": 0, "zone": 0, "ip": "192.0.2.1", "mask": 24}
+
+    def warnings(self, *args, **kw):
+        return [e["note"].split(":")[0] for e in self.build(*args, **kw)[1] if e["target"] == "deploymentInfo.deploymentMode"]
+
+    def test_both_sides_no_warning(self):
+        self.assertEqual(self.warnings([{"ifName": "wan0", "applianceIPs": [self.WAN]}, {"ifName": "lan0", "applianceIPs": [self.LAN]}]), [])
+
+    def test_other_cases(self):
+        lan0 = {"ifName": "lan0", "applianceIPs": [self.LAN]}
+        self.assertEqual(self.warnings([lan0]), ["inline-router with no WAN interface"])
+        self.assertEqual(self.warnings([{"ifName": "wan0", "applianceIPs": [self.WAN]}], inline=False), [])  # router mode, not inline-router
+        self.assertEqual(self.warnings([{"ifName": "wan0", "applianceIPs": [self.WAN]}, {"ifName": "lan0", "applianceIPs": [{"vlan": 0}]}]), [])  # the LAN entry was unreadable
+        self.assertEqual(self.warnings([lan0, {"ifName": "lan1", "applianceIPs": [dict(self.WAN, vlan=4000)]}], ha_if="lan1"), [])  # EdgeHA WAN links count
+
+
+class OspfOnDeployedInterfaces(unittest.TestCase):
+    """OSPF is written only on interfaces the preconfig deploys (deployment entries, user loopbacks and VTIs); an interface it does not
+    create is ledgered, and an Orchestrator-managed loopback never gets OSPF."""
+    LOOPBACKS = {"lo1": {"admin": True, "ipaddr": "192.0.2.1", "nmask": 32, "label": "", "vrf_id": 0, "zone": 0},
+                 "lo20000": {"admin": True, "ipaddr": "192.0.2.2", "nmask": 32, "label": "", "vrf_id": 0, "zone": 0, "gms_marked": True}}
+
+    def dropped(self, notes):
+        return sorted((n["disposition"], n["note"].split(" is ")[0]) for n in notes if n["note"].startswith("OSPF interface"))
+
+    def test_default_segment(self):
+        c, notes = ctx({"deployment": DEP, "loopbacks": self.LOOPBACKS, "ospf-system": {"enable": True}, "ospf-areas": {},
+                        "ospf-interfaces": {"lan0": OSPF_IF, "lan1": OSPF_IF, "lo1": OSPF_IF, "lo20000": OSPF_IF}})
+        self.assertEqual([i["interfaceName"] for i in __import__("mappers").m_ospfSystemConfig(c)["interfaces"]], ["lan0", "lo1"])
+        self.assertEqual(self.dropped(notes), [("orchestrator-managed", "OSPF interface lo20000"), ("unresolved", "OSPF interface lan1")])
+
+    def test_segments(self):
+        dep = copy.deepcopy(DEP3)
+        dep["modeIfs"] = [{"ifName": "lan0", "applianceIPs": [{"vlan": 0, "label": "4"}, {"vlan": 71, "label": "4"}]}, {"ifName": "lan3", "applianceIPs": [{"vlan": 1, "label": "4"}]}]
+        c, notes = ctx({"deployment": dep, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}}, "vtis": {"vti1": VTI},
+                        "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF, "lan2": OSPF_IF, "vti1": OSPF_IF}, "1": {"lan0.71": OSPF_IF, "lan0.72": OSPF_IF, "lan3": OSPF_IF, "lan3.1": OSPF_IF}}})
+        self.assertEqual([[i["interfaceName"] for i in s["interfaces"]] for s in m_segmentOspfConfig(c)], [["lan0", "vti1"], ["lan0.71", "lan3.1"]])
+        self.assertEqual(self.dropped(notes), [("unresolved", "OSPF interface lan0.72"), ("unresolved", "OSPF interface lan2"), ("unresolved", "OSPF interface lan3")])
+
+
+class InterfaceReferences(unittest.TestCase):
+    """A field that names an interface the preconfig does not create is kept (the source's real value; the target may have the interface)
+    and ledgered: orchestrator-managed for a gms_marked loopback or VTI, unresolved otherwise. The same check as the OSPF interfaces."""
+    LOOPBACKS = {"lo20000": {"admin": True, "ipaddr": "192.0.2.2", "nmask": 32, "label": "", "vrf_id": 0, "zone": 0, "gms_marked": True}}
+
+    def refs(self, notes):
+        return sorted((n["disposition"], n["note"]) for n in notes if "references interface" in n["note"])
+
+    def test_bgp_source_interfaces(self):
+        neighbors = {"192.0.2.2": dict(NEIGHBOR, lcl_interface="lo20000"), "192.0.2.3": dict(NEIGHBOR, lcl_interface="lo20001"), "192.0.2.4": dict(NEIGHBOR, lcl_interface="lan0"),
+                     "192.0.2.5": dict(NEIGHBOR, lcl_interface="any")}
+        c, notes = ctx({"deployment": DEP, "loopbacks": self.LOOPBACKS, "bgp-system": {"enable": True, "asn": 65000}, "bgp-neighbors": neighbors})
+        self.assertEqual([n["sourceIpInterface"] for n in m_bgpSystemConfig(c)["neighbors"]], ["lo20000", "lo20001", "lan0", "any"])  # kept as the source has them
+        self.assertEqual(self.refs(notes), [
+            ("orchestrator-managed", "BGP neighbor 192.0.2.2 references interface lo20000, an Orchestrator-managed interface (gms_marked); the target's Orchestrator must create it"),
+            ("unresolved", "BGP neighbor 192.0.2.3 references interface lo20001, which this preconfig does not create; the target must already have it")])
+
+    def test_vxlan_vrrp_route_and_ip_sla(self):
+        c, notes = ctx({"deployment": DEP, "vxlan": {"port": 4789, "vtepIf": "lo20001"}, "vxlan-vni-map": {}})
+        self.assertEqual(m_vxlan(c)["vtepSrcInterface"], "lo20001")
+        self.assertEqual([d for d, _ in self.refs(notes)], ["unresolved"])
+        group = {"groupId": 1, "interface": "lan0.9", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 1, "priority": 100, "version": 2, "preempt": True, "pkt_trace": False, "holddown": 10}
+        c, notes = ctx({"deployment": DEP, "vrrp": [group, dict(group, groupId=2, interface="lan0")]})
+        self.assertEqual([g["interfaceName"] for g in m_vrrp(c)["vrrpEntries"]], ["lan0.9", "lan0"])
+        self.assertEqual(self.refs(notes), [("unresolved", "VRRP group 1 references interface lan0.9, which this preconfig does not create; the target must already have it")])
+        from mappers import m_localRoutes
+        c, notes = ctx({"deployment": DEP, "subnets": {"subnets": {"entries": [{"state": dict(ROUTE, ifName="lan7")}, {"state": dict(ROUTE, prefix="203.0.113.0/24")}]}}})
+        self.assertEqual([r["interfaceName"] for r in m_localRoutes(c)["routes"]], ["lan7", "lan0"])
+        self.assertEqual(self.refs(notes), [("unresolved", "route 198.51.100.0/24 references interface lan7, which this preconfig does not create; the target must already have it")])
+        from mappers import m_ipSlaRule
+        op = {"type": "ip-monitor", "ip-monitor-ip": "192.0.2.98", "tunnel-name": "to_peer", "src-port-name": "lo20000"}
+        c, notes = ctx({"deployment": DEP, "loopbacks": self.LOOPBACKS, "ipsla-managers": {"MGR_1": {"enable": True, "interval": "1", "comment": "", "upAction": "def-alarm",
+                                                                                                    "downAction": "alarm", "operation": {"OPR_1": op}}}})
+        self.assertEqual(m_ipSlaRule(c)["ruleEntries"][0]["ipslaMonitor"]["sourceInterfaceName"], "lo20000")
+        self.assertEqual([d for d, _ in self.refs(notes)], ["orchestrator-managed"])
+
+    def test_segment_bgp_cli_vxlan_and_unreadable_interfaces(self):
+        c, notes = ctx({"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 65000}, "1": {"enable": True, "asn": 65000}},
+                        "bgp-neighbors-all-vrfs": {"1": {"192.0.2.3": dict(NEIGHBOR, lcl_interface="lo20001")}}})
+        m_segmentBgpSystems(c)
+        self.assertEqual([n["item"] for n in notes if "references interface" in n["note"]], ["bgp-system-all-vrfs[1] neighbor 192.0.2.3"])  # not the "check" probe
+        c, notes = ctx({"deployment": DEP, "running-config": {"runningConfig": "vxlan vtep-interface lo20001\n"}})
+        self.assertEqual(m_vxlan(c)["vtepSrcInterface"], "lo20001")
+        self.assertEqual([d for d, _ in self.refs(notes)], ["unresolved"])
+        group = {"groupId": 1, "interface": "lan0.9", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 1, "priority": 100, "version": 2, "preempt": True, "pkt_trace": False, "holddown": 10}
+        c, notes = ctx({"deployment": dict(DEP, modeIfs="odd"), "vrrp": [group]})
+        self.assertEqual([g["interfaceName"] for g in m_vrrp(c)["vrrpEntries"]], ["lan0.9"])  # an unreadable interfaces read never stops the section
+        self.assertEqual(self.refs(notes), [])
+
+    def test_label_names_count_as_carried(self):
+        from mappers import m_ipSlaRule
+        op = {"type": "ip-monitor", "ip-monitor-ip": "192.0.2.98", "src-port-label": "Voice"}
+        c, notes = ctx({"deployment": DEP, "ipsla-managers": {"MGR_1": {"enable": True, "interval": "1", "comment": "", "upAction": "def-alarm", "downAction": "alarm", "operation": {"OPR_1": op}}}})
+        m_ipSlaRule(c)
+        self.assertEqual(self.refs(notes), [])
 
 
 if __name__ == "__main__":
