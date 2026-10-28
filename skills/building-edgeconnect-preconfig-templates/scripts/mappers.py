@@ -851,6 +851,9 @@ def m_interfaceConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     out = []
     for i in info:
         name = i["ifname"]
+        if re.match(r"^mgmt\d+$", name) and not (i.get("admin") and i.get("ifSpeed") in ("auto", "") and i.get("ifDuplex") in ("auto", "")):
+            ctx.note("interface-state[{}]".format(name), "outside-preconfig", "interfaceConfig", "{} is admin {}, speed {}, duplex {}; management ports are never carried "
+                     "(the management plane stays as the target has it)".format(name, "up" if i.get("admin") else "down", i.get("ifSpeed"), i.get("ifDuplex")))
         if not re.match(r"^(lan|wan|tlan|twan|twlan|blan|bwan)\d+$", name):
             continue
         if i.get("ifSpeed") in ("auto", "") and i.get("ifDuplex") in ("auto", "") and i.get("admin"):  # "": a bonded blanN/bwanN has no speed of its own
@@ -862,7 +865,7 @@ def m_interfaceConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
         entry = {"interfaceName": name, "interfaceSpeed": speed if speed == "auto" else int(speed), "interfaceDuplex": i["ifDuplex"], "admin": "up" if i["admin"] else "down"}
         out.append(entry)
     if not out:
-        ctx.note("interface-state", "default-omitted", "interfaceConfig", "every physical interface is admin up with auto speed and duplex")
+        ctx.note("interface-state", "default-omitted", "interfaceConfig", "every LAN and WAN interface is admin up with auto speed and duplex (management ports are not carried)")
         return None
     ctx.note("interface-state", "mapped", "interfaceConfig", "{} interfaces differ from auto/auto/up; the rest are omitted (section behaviour: replace)".format(len(out)))
     return {"interfaces": out}

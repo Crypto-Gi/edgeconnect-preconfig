@@ -1533,5 +1533,22 @@ class DormantFlowRedirection(unittest.TestCase):
         self.assertEqual(notes, [])
 
 
+class ManagementPorts(unittest.TestCase):
+    """interfaceConfig never carries mgmt ports (the management plane is off-limits); their state is ledgered, never claimed as default."""
+    UP = {"admin": True, "ifSpeed": "auto", "ifDuplex": "auto"}
+
+    def test_mgmt_admin_down_is_ledgered_not_carried(self):
+        info = [dict(self.UP, ifname="mgmt0", admin=False), dict(self.UP, ifname="wan0"), dict(self.UP, ifname="lan0"), dict(self.UP, ifname="mgmt1")]
+        c, notes = ctx({"interface-state": {"ifInfo": info}})
+        self.assertIsNone(m_interfaceConfig(c))
+        self.assertEqual([(n["disposition"], n["item"]) for n in notes if n["target"] == "interfaceConfig"],
+                         [("outside-preconfig", "interface-state[mgmt0]"), ("default-omitted", "interface-state")])
+        self.assertIn("admin down", [n for n in notes if n["item"] == "interface-state[mgmt0]"][0]["note"])
+        self.assertNotIn("every physical interface", [n for n in notes if n["item"] == "interface-state"][0]["note"])
+        c, notes = ctx({"interface-state": {"ifInfo": [dict(self.UP, ifname="mgmt0", admin=False), dict(self.UP, ifname="lan0", admin=False)]}})
+        self.assertEqual(m_interfaceConfig(c)["interfaces"], [{"interfaceName": "lan0", "interfaceSpeed": "auto", "interfaceDuplex": "auto", "admin": "down"}])
+        self.assertEqual([n["item"] for n in notes if n["disposition"] == "outside-preconfig"], ["interface-state[mgmt0]"])  # lan0 down is carried, not ledgered
+
+
 if __name__ == "__main__":
     unittest.main()
