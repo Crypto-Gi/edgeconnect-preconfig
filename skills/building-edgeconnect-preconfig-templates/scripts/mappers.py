@@ -244,6 +244,23 @@ def ospf_interface(name: str, i: Dict[str, Any]) -> Dict[str, Any]:
             "authenticationKey": nul(i["authKey"]), "md5Key": i["md5Key"], "md5Password": nul(i["md5Password"]), "comment": nul(i["comment"])}
 
 
+def deployed(ctx: Ctx, item: str, target: str, ifs: Dict[str, Any]) -> Dict[str, Any]:
+    """The routing interfaces of ifs that the preconfig creates: deployment entries (ifName or ifName.vlan) and user loopbacks and VTIs.
+    The others are ledgered and left out: Orchestrator-managed loopbacks/VTIs (gms_marked), and interfaces nothing in the preconfig deploys,
+    which apply cannot configure."""
+    names, gms = {"{}.{}".format(m["ifName"], int(a.get("vlan") or 0)) if int(a.get("vlan") or 0) > 0 else m["ifName"] for m in ctx.mode_ifs() for a in m["applianceIPs"]}, set()
+    for ident in ("loopbacks", "vtis"):
+        src = ctx.data(ident)
+        for k, v in (src.items() if isinstance(src, dict) else []):
+            (gms if managed(v) else names).add(k)
+    for name in sorted(set(ifs) - names):
+        if name in gms:
+            ctx.note(item, "orchestrator-managed", target, "OSPF interface {} is an Orchestrator-managed interface (gms_marked); not written".format(name))
+        else:
+            ctx.note(item, "unresolved", target, "OSPF interface {} is not deployed in this preconfig (no deployment interface, loopback or VTI); not written".format(name))
+    return {k: v for k, v in ifs.items() if k in names}
+
+
 def m_ospfSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     all_systems, all_ifs = ctx.data("ospf-system-all-vrfs") or {}, ctx.data("ospf-interfaces-all-vrfs")
     if any(vrf != "0" and ospf_runs(all_systems, all_ifs, vrf) for vrf in all_systems):
@@ -265,7 +282,8 @@ def m_ospfSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
         entry = dict(ospf_interface(name, i), bfdEnabled=i["bfdDesired"])
         ctx.unmapped("ospf-interfaces[{}]".format(name), i, OSPF_IF_USED, "ospfSystemConfig.interfaces")
         return entry
-    out["interfaces"] = each(ctx, "ospf-interfaces", "ospfSystemConfig.interfaces", sorted((ifs or {}).items()), interface)
+    ifs = deployed(ctx, "ospf-interfaces", "ospfSystemConfig.interfaces", ifs)
+    out["interfaces"] = each(ctx, "ospf-interfaces", "ospfSystemConfig.interfaces", sorted(ifs.items()), interface)
     if (ifs and not out["interfaces"]) or (src_areas and not out["areas"]):  # every item failed: an empty list would replace the target's on apply
         return None
     ctx.note("ospf-system, ospf-areas, ospf-interfaces", "mapped", "ospfSystemConfig", "default VRF only; interface adminStatus true/false written as Up/Down")
@@ -568,7 +586,7 @@ def m_segmentOspfConfig(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         if not runs[vrf]:
             continue
         try:
-            s, ifs = systems[vrf], block(interfaces, vrf)
+            s, ifs = systems[vrf], deployed(ctx, "ospf-interfaces-all-vrfs[{}]".format(vrf), "segmentOspfConfig.interfaces", block(interfaces, vrf))
             src_areas = sorted((areas.get(vrf) or {}).items())
             entry = {"segment": ctx.segment(vrf), "enable": s["enable"], "routerId": nul(s.get("routerId")), "redistMapToOspf": nul(s.get("redistMapToOSPF")), "opaqueEnable": s.get("opaque_enable"),
                      "areas": each(ctx, "ospf-areas[{}]".format(vrf), "segmentOspfConfig.areas", src_areas, ospf_area),

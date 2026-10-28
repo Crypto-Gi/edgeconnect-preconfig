@@ -635,7 +635,7 @@ class AuditRegressions(unittest.TestCase):
 
     def test_disabled_ospf_segment_with_interfaces_is_carried_disabled(self):
         from mappers import m_ospfSystemConfig, m_segmentOspfConfig
-        dep = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}]), "modeIfs": DEP["modeIfs"]}
+        dep = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}]), "modeIfs": DEP3["modeIfs"]}
         iface = {"area": "0.0.0.0", "cost": 10, "priority": 1, "adminStatus": True, "helloInterval": 10, "deadInterval": 40, "transmitDelay": 1, "retransmitInterval": 5,
                  "authType": "None", "authKey": "", "md5Key": 0, "md5Password": "", "comment": "", "bfdDesired": False}
         area = {"0.0.0.0": {"area_type": 0, "redist": False, "summary": False, "translator_role": 0}}
@@ -925,7 +925,8 @@ class ItemIsolation(IsolationCheck, unittest.TestCase):
         self.check(m_multicast, data, lambda o: [e["segment"] for e in o], ["Default"], "multicast")
 
 
-DEP3 = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}, {"id": "2", "name": "guest"}]), "modeIfs": DEP["modeIfs"]}
+DEP3 = {"sysConfig": dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "1", "name": "corp"}, {"id": "2", "name": "guest"}]),
+        "modeIfs": [{"ifName": "lan0", "applianceIPs": [{"vlan": v, "label": "4"} for v in (0, 71, 72)]}, {"ifName": "lan1", "applianceIPs": [{"vlan": 0, "label": "4"}]}]}  # OSPF needs deployed interfaces
 OSPF_IF = {"area": "0.0.0.0", "cost": 1, "priority": 1, "adminStatus": True, "helloInterval": 10, "deadInterval": 40, "transmitDelay": 1, "retransmitInterval": 5,
            "authType": "None", "authKey": "", "md5Key": 0, "md5Password": "", "comment": "", "bfdDesired": False}
 NEIGHBOR = {"remote_as": 65001, "type": "Branch", "enable": True, "hold": 180, "ka": 60, "next_hop_self": False, "store_received_routes": True, "directly_connected": True}
@@ -1025,7 +1026,7 @@ class PerItemLists(IsolationCheck, unittest.TestCase):
     def test_ospf_system_interface(self):
         from mappers import m_ospfSystemConfig
         bad = {k: v for k, v in OSPF_IF.items() if k != "cost"}
-        data = {"deployment": DEP, "ospf-system": {"enable": True}, "ospf-areas": {}, "ospf-interfaces": {"lan0": OSPF_IF, "lan1": bad}}
+        data = {"deployment": DEP3, "ospf-system": {"enable": True}, "ospf-areas": {}, "ospf-interfaces": {"lan0": OSPF_IF, "lan1": bad}}
         self.check(m_ospfSystemConfig, data, lambda o: [i["interfaceName"] for i in o["interfaces"]], ["lan0"], "ospfSystemConfig.interfaces")
 
     def test_segment_ospf_interface(self):
@@ -1630,6 +1631,30 @@ class InlineRouterOneSide(unittest.TestCase):
         self.assertEqual(self.warnings([{"ifName": "wan0", "applianceIPs": [self.WAN]}], inline=False), [])  # router mode, not inline-router
         self.assertEqual(self.warnings([{"ifName": "wan0", "applianceIPs": [self.WAN]}, {"ifName": "lan0", "applianceIPs": [{"vlan": 0}]}]), [])  # the LAN entry was unreadable
         self.assertEqual(self.warnings([lan0, {"ifName": "lan1", "applianceIPs": [dict(self.WAN, vlan=4000)]}], ha_if="lan1"), [])  # EdgeHA WAN links count
+
+
+class OspfOnDeployedInterfaces(unittest.TestCase):
+    """OSPF is written only on interfaces the preconfig deploys (deployment entries, user loopbacks and VTIs); an interface it does not
+    create is ledgered, and an Orchestrator-managed loopback never gets OSPF."""
+    LOOPBACKS = {"lo1": {"admin": True, "ipaddr": "192.0.2.1", "nmask": 32, "label": "", "vrf_id": 0, "zone": 0},
+                 "lo20000": {"admin": True, "ipaddr": "192.0.2.2", "nmask": 32, "label": "", "vrf_id": 0, "zone": 0, "gms_marked": True}}
+
+    def dropped(self, notes):
+        return sorted((n["disposition"], n["note"].split(" is ")[0]) for n in notes if n["note"].startswith("OSPF interface"))
+
+    def test_default_segment(self):
+        c, notes = ctx({"deployment": DEP, "loopbacks": self.LOOPBACKS, "ospf-system": {"enable": True}, "ospf-areas": {},
+                        "ospf-interfaces": {"lan0": OSPF_IF, "lan1": OSPF_IF, "lo1": OSPF_IF, "lo20000": OSPF_IF}})
+        self.assertEqual([i["interfaceName"] for i in __import__("mappers").m_ospfSystemConfig(c)["interfaces"]], ["lan0", "lo1"])
+        self.assertEqual(self.dropped(notes), [("orchestrator-managed", "OSPF interface lo20000"), ("unresolved", "OSPF interface lan1")])
+
+    def test_segments(self):
+        dep = copy.deepcopy(DEP3)
+        dep["modeIfs"] = [{"ifName": "lan0", "applianceIPs": [{"vlan": 0, "label": "4"}, {"vlan": 71, "label": "4"}]}, {"ifName": "lan3", "applianceIPs": [{"vlan": 1, "label": "4"}]}]
+        c, notes = ctx({"deployment": dep, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}}, "vtis": {"vti1": VTI},
+                        "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF, "lan2": OSPF_IF, "vti1": OSPF_IF}, "1": {"lan0.71": OSPF_IF, "lan0.72": OSPF_IF, "lan3": OSPF_IF, "lan3.1": OSPF_IF}}})
+        self.assertEqual([[i["interfaceName"] for i in s["interfaces"]] for s in m_segmentOspfConfig(c)], [["lan0", "vti1"], ["lan0.71", "lan3.1"]])
+        self.assertEqual(self.dropped(notes), [("unresolved", "OSPF interface lan0.72"), ("unresolved", "OSPF interface lan2"), ("unresolved", "OSPF interface lan3")])
 
 
 if __name__ == "__main__":
