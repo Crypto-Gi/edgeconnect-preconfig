@@ -220,6 +220,72 @@ class RedactTest(unittest.TestCase):
             with self.subTest(text):
                 self.assertEqual(redact_secrets({"t": text})[0]["t"], want)
 
+    def assertRedacts(self, cases):
+        for text, want in cases.items():
+            with self.subTest(text):
+                out, paths = redact_secrets({"t": text})
+                self.assertEqual(out["t"], want)
+                self.assertEqual(paths, ["$.t"] if want != text else [])
+                if text.startswith("{"):
+                    json.loads(out["t"])  # redaction never breaks JSON structure
+
+    def test_free_text_compound_key_names(self):
+        self.assertRedacts({
+            '{"adminPassword":"Alpha1x"}': '{"adminPassword":"<SECRET:text>"}',
+            '{"apiKey":"Bravo2x","x":1}': '{"apiKey":"<SECRET:text>","x":1}',
+            '{"clientSecret": "Charlie3x"}': '{"clientSecret": "<SECRET:text>"}',
+            '{"client_secret":"Delta4x"}': '{"client_secret":"<SECRET:text>"}',
+            '{"access_token":"Echo5x"}': '{"access_token":"<SECRET:text>"}',
+            '{"preSharedKey":"Foxtrot6x"}': '{"preSharedKey":"<SECRET:text>"}',
+            '{"authToken":"Golf7x"}': '{"authToken":"<SECRET:text>"}',
+            '{"ikePsk":"12345"}': '{"ikePsk":"<SECRET:text>"}',
+            'x "{\\"sharedSecret\\":\\"Hotel8x\\"}"': 'x "{\\"sharedSecret\\":\\"<SECRET:text>\\"}"',
+            "admin_password: India9x": "admin_password: <SECRET:text>",
+            "secret_key: Juliet1x": "secret_key: <SECRET:text>",
+            "api_key=Kilo2x": "api_key=<SECRET:text>",
+            "ike-pre-shared-key = Lima3x": "ike-pre-shared-key = <SECRET:text>",
+            "pre_shared_key: Lima4x authentication_key: Lima5x auth_key: Lima6x": "pre_shared_key: <SECRET:text> authentication_key: <SECRET:text> auth_key: <SECRET:text>",
+            '"adminPassword" = "Lima7x"': '"adminPassword" = "<SECRET:text>"',
+            '{"secretKeyId":"Mike4x"}': '{"secretKeyId":"<SECRET:text>"}',  # same as a keyed field of that name
+            # not secrets: a word that only contains "pass", a secret word with a suffix, booleans
+            '{"passThrough":"on","bypass":"Nov5x","md5Enabled":true}': '{"passThrough":"on","bypass":"Nov5x","md5Enabled":true}',
+            "token-lifetime: 3600 pass-through: on xpassword: Oscar6x": "token-lifetime: 3600 pass-through: on xpassword: Oscar6x",
+        })
+
+    def test_free_text_value_with_quotes_and_backslashes(self):
+        self.assertRedacts({
+            "pass: P@ss'w0rd! next": "pass: <SECRET:text> next",
+            "password: Ab\\cd9 next": "password: <SECRET:text> next",
+            '{"password":"ab\\"cd9","x":1}': '{"password":"<SECRET:text>","x":1}',
+            "password: 'it\\'s9x' next": "password: '<SECRET:text>' next",
+            'note "pass: Alpha1x" end': 'note "pass: <SECRET:text>" end',  # a quote before whitespace ends the value
+            "pass: (Bravo2x), next": "pass: <SECRET:text> next",
+            '{"x":"pass: Charlie3x","y":1}': '{"x":"pass: <SECRET:text>","y":1}',  # a quote before a delimiter ends the value
+            "note 'pass: Delta4x'": "note 'pass: <SECRET:text>'",
+            'x "{\\"password\\":\\"a\\\\\\"b9x\\"}"': 'x "{\\"password\\":\\"<SECRET:text>\\"}"',  # escaped JSON of "a\\"b9x"
+        })
+
+    def test_free_text_secret_with_a_nested_value(self):
+        self.assertRedacts({
+            '{"token":{"value":"Alpha1x","password":"Bravo2x"}}': '{"token":{"value":"Alpha1x","password":"<SECRET:text>"}}',
+            '{"secret":["Charlie3x", "Delta4x"],"x":[1]}': '{"secret":["<SECRET:text>"],"x":[1]}',
+            '{"psk":["a]b9x"]}': '{"psk":["<SECRET:text>"]}',
+            '{"secret":[],"pw":[{"user":"u"}]}': '{"secret":[],"pw":[{"user":"u"}]}',
+            'x "{\\"secret\\":[\\"Echo5x\\"]}"': 'x "{\\"secret\\":[\\"<SECRET:text>\\"]}"',
+        })
+
+    def test_free_text_filler_words(self):
+        self.assertRedacts({
+            "the password is Alpha1x": "the password is <SECRET:text>",
+            "Password - Bravo2x": "Password - <SECRET:text>",
+            "password => Charlie3x": "password => <SECRET:text>",
+            "password -> Delta4x": "password -> <SECRET:text>",
+            "admin_password is Echo5x": "admin_password is <SECRET:text>",
+            "admin_password -> Foxtrot6x": "admin_password -> <SECRET:text>",
+            "pass island": "pass island",
+            "md5 => Golf7x": "md5 => <SECRET:text>",
+        })
+
     def test_nac_server_key_is_secret_but_tag_key_is_not(self):
         out, paths = redact_secrets({"nac": {"server": [{"host": "192.0.2.5", "authport": 1812, "key": "radius-shared"}]},
                                      "tags": [{"key": "site", "value": "a"}]})
