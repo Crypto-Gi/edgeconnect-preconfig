@@ -11,7 +11,7 @@ from mappers import Ctx, m_bgpSystemConfig, m_branchNatMapsConfig, m_dhcpRemoteA
 from synth import substitute  # noqa: E402
 from mappers import m_idsIpsConfig, m_interfaceConfig, m_segmentOspfConfig  # noqa: E402
 from suite import load_constraints  # noqa: E402
-from translate import HARDEN, allowed_paths, build, drop_template_fields, local_firewall_rules, prune, template_fields  # noqa: E402  guard-ok: scripts are imported after the sys.path insert
+from translate import HARDEN, QUIET, allowed_paths, build, drop_template_fields, local_firewall_rules, prune, template_fields  # noqa: E402  guard-ok: scripts are imported after the sys.path insert
 import copy  # noqa: E402
 
 
@@ -851,7 +851,7 @@ NEIGHBOR = {"remote_as": 65001, "type": "Branch", "enable": True, "hold": 180, "
 ROUTE = {"configured": True, "local": True, "automatic": False, "prefix": "198.51.100.0/24", "nextHop": "192.0.2.254", "ifName": "lan0", "metric": 50, "advert": True, "advert_bgp": False, "advert_ospf": False}
 VTI = {"ipaddr": "192.0.2.1", "nmask": 30, "admin": True, "tunnel": "pt1", "side": "lan", "label": "", "vrf_id": 0, "zone": 0, "auto_distribute": False, "behindNAT": "none"}
 PF = {"srcSubnet": "0.0.0.0/0", "destSubnet": "192.0.2.10/32", "destPort": "443", "protocol": "tcp", "targetIp": "", "targetPort": "", "srcIf": "any", "vrf_id": 0, "comment": ""}
-QUIET_DISPOSITIONS = {"mapped", "default-omitted", "runtime", "empty-or-absent", "context", "from-default-template"}  # translate.QUIET
+QUIET_DISPOSITIONS = QUIET
 
 
 def errors(notes):
@@ -1032,6 +1032,18 @@ class SilentGaps(unittest.TestCase):
         self.assertIn("corp", lines[0]["note"])
         self.assertFalse([n for n in notes if n["disposition"] == "mapped" and n["item"] == "subnets-all-vrfs"])
 
+    def test_unread_segment_routes_with_only_default_sharing(self):
+        from mappers import m_localRoutes, m_segmentLocalRoutes
+        data = {"deployment": DEP3, "subnets": {"subnets": {"entries": [{"state": ROUTE}]}}, "system-info": {"auto_subnet": {"vrf": {"0": SHARING}}}}
+        c, notes = ctx(data)
+        self.assertEqual([r["routeIpSubnet"] for r in m_localRoutes(c)["routes"]], ["198.51.100.0/24"])
+        self.assertIsNone(m_segmentLocalRoutes(c))
+        lines = [n for n in notes if n["disposition"] == "not-readable"]
+        self.assertEqual(len(lines), 1, notes)
+        self.assertIn("corp", lines[0]["note"])
+        self.assertIn("guest", lines[0]["note"])
+        self.assertFalse([n for n in notes if n["item"] == "subnets-all-vrfs" and n["disposition"] == "default-omitted"])
+
     def test_no_routes_read_at_all(self):
         from mappers import m_localRoutes, m_segmentLocalRoutes
         c, notes = ctx({"deployment": DEP, "system-info": {"auto_subnet": {"vrf": {"0": SHARING}}}})
@@ -1040,6 +1052,96 @@ class SilentGaps(unittest.TestCase):
         c, notes = ctx({"deployment": DEP3, "system-info": {"auto_subnet": {"vrf": {"0": SHARING, "1": SHARING}}}})
         self.assertIsNone(m_segmentLocalRoutes(c))
         self.assertTrue([n for n in notes if n["disposition"] == "not-readable"])
+
+
+
+class ReviewRoundTwo(unittest.TestCase):
+    """Second independent review of the isolation change: null per-segment blocks, defaults read as settings, ledger accuracy."""
+
+    def written_empty(self, out, key):
+        return [e for e in (out or []) if isinstance(e, dict) and e.get(key) == []]
+
+    def test_null_segment_blocks_are_unreadable_not_empty(self):
+        from mappers import m_segmentLocalRoutes
+        cases = [
+            (m_segmentLocalRoutes, {"deployment": DEP3, "subnets-all-vrfs": {"subnets": {"0": {"entries": [{"state": ROUTE}]}, "1": None}},
+                                    "system-info": {"auto_subnet": {"vrf": {"0": SHARING, "1": SHARING}}}}, "routes"),
+            (m_segmentBgpSystems, {"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": {"enable": True, "asn": 65000}},
+                                   "bgp-neighbors-all-vrfs": {"0": {"192.0.2.1": NEIGHBOR}, "1": None}}, "neighbors"),
+            (m_segmentOspfConfig, {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": True}},
+                                   "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF}, "1": None}}, "interfaces"),
+        ]
+        for mapper, data, key in cases:
+            with self.subTest(mapper.__name__):
+                c, notes = ctx(data)
+                out = mapper(c)
+                self.assertEqual(self.written_empty(out, key), [], out)
+                self.assertEqual([e["segment"] for e in out], ["Default"])
+                self.assertTrue(errors(notes))
+
+    def test_null_segment_bgp_system_with_neighbors(self):
+        c, notes = ctx({"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": None}, "bgp-neighbors-all-vrfs": {"1": {"192.0.2.1": NEIGHBOR}}})
+        m_segmentBgpSystems(c)
+        self.assertTrue(errors(notes))
+        self.assertFalse([n for n in notes if n["disposition"] == "default-omitted" and "0 non-default" in n["note"]])
+
+    def test_default_ospf_values_are_not_kept_settings(self):
+        data = {"deployment": DEP3, "ospf-areas": {}, "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF}},
+                "ospf-system-all-vrfs": {"0": {"enable": True}, "1": {"enable": False, "routerId": "10.0.0.1", "redistMapToOSPF": "default_rtmap_to_ospf"},
+                                         "2": {"enable": False, "routerId": "10.0.0.1", "redistMapToOSPF": "guest_map"}}}
+        c, notes = ctx(data)
+        m_segmentOspfConfig(c)
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "ospf-system-all-vrfs[1]"], ["default-omitted"])
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "ospf-system-all-vrfs[2]"], ["outside-preconfig"])
+
+    def test_no_contradicting_localroutes_note_when_both_reads_fail(self):
+        from mappers import m_localRoutes
+        c, notes = ctx({"deployment": DEP3, "system-info": {"auto_subnet": {"vrf": {"0": SHARING, "1": SHARING}}}})
+        self.assertIsNone(m_localRoutes(c))
+        self.assertFalse([n for n in notes if n["target"] == "localRoutes" and "written in segmentLocalRoutes" in n["note"]])
+
+    def test_no_mapped_zero_note(self):
+        from mappers import m_segmentLocalRoutes
+        bad_route = {k: v for k, v in ROUTE.items() if k != "metric"}
+        for mapper, data in ((m_segmentBgpSystems, {"deployment": DEP3, "bgp-system-all-vrfs": {"1": {"enable": True, "asn": 1}}, "bgp-neighbors-all-vrfs": {"1": {"192.0.2.2": {"type": "x"}}}}),
+                             (m_segmentOspfConfig, {"deployment": DEP3, "ospf-areas": {}, "ospf-system-all-vrfs": {"1": None}, "ospf-interfaces-all-vrfs": {}}),
+                             (m_segmentLocalRoutes, {"deployment": DEP3, "subnets-all-vrfs": {"subnets": {"1": {"entries": [{"state": bad_route}]}}}})):
+            with self.subTest(mapper.__name__):
+                c, notes = ctx(data)
+                self.assertIsNone(mapper(c))
+                self.assertFalse([n for n in notes if n["disposition"] == "mapped"])
+
+    def test_disabled_segment_bgp_with_unreadable_neighbors(self):
+        c, notes = ctx({"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 1}, "1": {"enable": False, "asn": 1}}, "bgp-neighbors-all-vrfs": {"1": None}})
+        m_segmentBgpSystems(c)
+        self.assertEqual([n["item"] for n in errors(notes)], ["bgp-system-all-vrfs[1]"])
+
+    def test_branch_nat_non_numeric_priority(self):
+        maps = {"map1": {"prio": {"10": {"dir": "outbound", "match": {"intf": "lan0"}, "set": {}}, "x": {"dir": "outbound", "match": {}, "set": {}}}}}
+        c, notes = ctx({"deployment": DEP, "branch-nat-maps": maps})
+        out = m_branchNatMapsConfig(c)
+        self.assertEqual([r["priorityLevel"] for r in out["branchNatRules"]], [10])
+        self.assertEqual([n["item"] for n in errors(notes)], ["branch-nat-maps[map1] rule x"])
+
+    def test_segment_route_notes_name_their_section(self):
+        from mappers import m_segmentLocalRoutes
+        unresolved = dict(ROUTE, prefix="203.0.113.0/24", nextHop="", ifName="")
+        c, notes = ctx({"deployment": DEP3, "subnets-all-vrfs": {"subnets": {"1": {"entries": [{"state": ROUTE}, {"state": unresolved}]}}}})
+        m_segmentLocalRoutes(c)
+        self.assertEqual({n["target"] for n in notes if n["disposition"] == "unresolved"}, {"segmentLocalRoutes.routes"})
+
+    def test_vni_maps_with_unreadable_running_config(self):
+        from mappers import m_vxlan
+        c, notes = ctx({"deployment": DEP3, "vxlan": {"ERROR": "NOT_AVAILABLE"}, "vxlan-vni-map": {"0": {"vni": 10000, "zoneId": 0, "role": 0}}})
+        m_vxlan(c)
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "vxlan-vni-map"], ["not-readable"])
+        c, notes = ctx({"deployment": DEP3, "vxlan": {"ERROR": "NOT_AVAILABLE"}, "vxlan-vni-map": [{"vni": 10000}], "running-config": {"runningConfig": "system hostname x"}})
+        m_vxlan(c)
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "vxlan-vni-map"], ["unresolved"])
+
+    def test_empty_multicast_list_kept(self):
+        c, notes = ctx({"deployment": DEP, "multicast-config": []})
+        self.assertEqual(m_multicast(c), [])
 
 
 if __name__ == "__main__":

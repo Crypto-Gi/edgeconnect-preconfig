@@ -27,4 +27,9 @@ Combines three changes that were open as separate pull requests (#4, #5, #6).
 - **No silent drops found by the lab replicate**:
   - VXLAN VNI maps on a source with no VTEP interface are ledgered as outside-preconfig, naming each segment and VNI (the format requires `vtepSrcInterface`). They used to vanish without a ledger line.
   - Routes that could not be read are never written as an empty list (routes replace on apply). With `/subnets/all` unreadable (an unreachable appliance), the Default segment's routes come from `/subnets` and the other segments are left out and ledgered as not-readable. With `/subnets` unreadable too, `localRoutes` is not written and is ledgered the same way. A 403 still stops the capture (decision 0010).
+- **Isolation, third pass** (second independent review):
+  - A per-segment block that is present but null (routes, BGP neighbors, OSPF interfaces) is unreadable, not empty: the segment is ledgered and left out instead of written with an empty list. BGP settings that cannot be read while the segment has neighbors are a failure, not "no BGP".
+  - With `/subnets/all` unreadable and no per-segment routes otherwise known, the non-Default segments are ledgered not-readable instead of "0 segments with routes".
+  - A disabled OSPF segment is reported as keeping settings only for a redistribution map of its own: ECOS fills in a router ID on disabled segments and `default_rtmap_to_ospf` is the default.
+  - Ledger accuracy: segment route notes name segmentLocalRoutes; no "mapped 0 segments" line; no localRoutes note pointing to a segment section that is not written; branch NAT priorities that are not numbers fail alone; VNI maps whose VTEP could not be read are not-readable, and VNI maps in an unexpected shape are unresolved. An empty multicast list in the source is written as before.
 - **Missing PyYAML**: prints how to install it instead of a traceback.

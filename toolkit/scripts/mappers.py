@@ -77,6 +77,15 @@ def item_failed(ctx: Ctx, item: str, section: str, err: Exception) -> None:
     ctx.note(item, "toolkit-error", section, "{} not written: the mapper could not read it ({}: {}); a toolkit bug to report".format(item, type(err).__name__, err))
 
 
+def block(data: Dict[str, Any], key: str) -> Dict[str, Any]:
+    """data[key] as a dict: {} when the key is absent, an error when it is present but unreadable (null or another type), so the caller's
+    per-item guard ledgers it instead of writing an empty list."""
+    value = data.get(key, {})
+    if not isinstance(value, dict):
+        raise TypeError("{} is {}, not an object".format(key, type(value).__name__))
+    return value
+
+
 def each(ctx: Ctx, item: str, section: str, pairs: Any, build: Any) -> List[Any]:
     """build(key, value) for every pair, skipping (and ledgering) the ones that fail."""
     out = []
@@ -239,6 +248,8 @@ BGP_NEIGHBOR_USED = {"remote_as", "type", "enable", "hold", "ka", "lcl_interface
 
 def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str, Any], segment: Optional[str] = None) -> Optional[Dict[str, Any]]:
     live = [(ip, n) for ip, n in sorted((neighbors or {}).items()) if not managed(n)]
+    if not system and live:  # a non-dict system that is truthy fails on .get below
+        raise TypeError("BGP system settings unreadable ({}) while {} neighbor(s) exist".format(type(system).__name__, len(live)))
     if not system or (not system.get("enable") and not live):
         return None
     rt = (system.get("route_target") or {}).get("0") or {}
@@ -273,17 +284,17 @@ def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str,
     return out
 
 
-def has_bgp(ctx: Ctx, system: Dict[str, Any], neighbors: Dict[str, Any]) -> bool:
-    """Whether a segment runs BGP; an unreadable segment counts as yes, so the per-segment pass writes the rest and ledgers it."""
+def has_bgp(ctx: Ctx, system: Dict[str, Any], neighbors: Dict[str, Any], vrf: str) -> bool:
+    """Whether segment vrf runs BGP; an unreadable segment counts as yes, so the per-segment pass writes the rest and ledgers it."""
     try:
-        return bool(bgp_value(ctx, "check", system, neighbors))
+        return bool(bgp_value(ctx, "check", system, block(neighbors, vrf)))
     except ITEM_ERRORS:
         return True
 
 
 def m_bgpSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     systems, neighbors = ctx.data("bgp-system-all-vrfs") or {}, ctx.data("bgp-neighbors-all-vrfs") or {}
-    if any(vrf != "0" and has_bgp(ctx, systems[vrf], neighbors.get(vrf, {})) for vrf in systems):
+    if any(vrf != "0" and has_bgp(ctx, systems[vrf], neighbors, vrf) for vrf in systems):
         ctx.note("bgp-system, bgp-neighbors", "default-omitted", "bgpSystemConfig", "non-default segment BGP exists, so Default segment BGP is included in segmentBgpSystems (Orchestrator ignores bgpSystemConfig when segmentBgpSystems is present)")
         return None
     try:
@@ -297,16 +308,17 @@ def m_bgpSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
 
 def m_segmentBgpSystems(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     systems, neighbors = ctx.data("bgp-system-all-vrfs") or {}, ctx.data("bgp-neighbors-all-vrfs") or {}
-    non_default = [vrf for vrf in sorted(systems) if vrf != "0" and has_bgp(ctx, systems[vrf], neighbors.get(vrf, {}))]
+    non_default = [vrf for vrf in sorted(systems) if vrf != "0" and has_bgp(ctx, systems[vrf], neighbors, vrf)]
     if not non_default:
         ctx.note("bgp-system-all-vrfs", "default-omitted", "segmentBgpSystems", "0 non-default segments with BGP")
         return None
     out = [v for v in each(ctx, "bgp-system-all-vrfs", "segmentBgpSystems", sorted(systems.items()),
-                           lambda vrf, s: bgp_value(ctx, "bgp-system-all-vrfs[{}]".format(vrf), s, neighbors.get(vrf, {}), ctx.segment(vrf))) if v]
+                           lambda vrf, s: bgp_value(ctx, "bgp-system-all-vrfs[{}]".format(vrf), s, block(neighbors, vrf), ctx.segment(vrf))) if v]
     for vrf in sorted(systems):
         if not any(v.get("segment") == ctx.segment(vrf) for v in out) and not ctx.failed("segmentBgpSystems", "bgp-system-all-vrfs[{}]".format(vrf)):
             ctx.note("bgp-system-all-vrfs[{}]".format(vrf), "default-omitted", "segmentBgpSystems", "segment {}: BGP disabled with no neighbors (ASN and router ID stay on the source only)".format(ctx.segment(vrf)))
-    ctx.note("bgp-system-all-vrfs", "mapped", "segmentBgpSystems", "{} segments with BGP (includes Default when non-default segments use BGP)".format(len(out)))
+    if out:
+        ctx.note("bgp-system-all-vrfs", "mapped", "segmentBgpSystems", "{} segments with BGP (includes Default when non-default segments use BGP)".format(len(out)))
     return out or None
 
 
@@ -387,7 +399,8 @@ def m_segmentOspfConfig(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     for vrf in sorted(systems):
         s = systems[vrf] if isinstance(systems[vrf], dict) else {}
         if not runs[vrf] and (vrf != "0" or enabled):
-            kept = ["{} {}".format(k, s[k]) for k in ("routerId", "redistMapToOSPF") if s.get(k) not in (None, "", "0.0.0.0")]
+            # ECOS fills in a router ID on disabled segments and default_rtmap_to_ospf is the default: only a map of the site's own is a setting
+            kept = ["redistMapToOSPF " + s["redistMapToOSPF"]] if s.get("redistMapToOSPF") not in (None, "", "default_rtmap_to_ospf") else []
             if kept:
                 ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "outside-preconfig", "segmentOspfConfig",
                          "segment {}: OSPF switched off with no interfaces, but settings are kept ({}); such a segment is not written, so the target keeps its own".format(ctx.segment(vrf), ", ".join(kept)))
@@ -403,7 +416,7 @@ def m_segmentOspfConfig(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         if not runs[vrf]:
             continue
         try:
-            s, ifs = systems[vrf], interfaces.get(vrf) or {}
+            s, ifs = systems[vrf], block(interfaces, vrf)
             src_areas = sorted((areas.get(vrf) or {}).items())
             entry = {"segment": ctx.segment(vrf), "enable": s["enable"], "routerId": nul(s.get("routerId")), "redistMapToOspf": nul(s.get("redistMapToOSPF")), "opaqueEnable": s.get("opaque_enable"),
                      "areas": each(ctx, "ospf-areas[{}]".format(vrf), "segmentOspfConfig.areas", src_areas, ospf_area),
@@ -417,7 +430,8 @@ def m_segmentOspfConfig(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         if bfd:
             ctx.note("ospf-interfaces-all-vrfs[{}]".format(vrf), "unmapped-source-key", "segmentOspfConfig.interfaces", "BFD is enabled on {} but segmentOspfConfig has no bfdEnabled field".format(", ".join(bfd)))
         out.append(entry)
-    ctx.note("ospf-system-all-vrfs", "mapped", "segmentOspfConfig", "{} segments with OSPF (includes Default when non-default segments use OSPF)".format(len(out)))
+    if out:
+        ctx.note("ospf-system-all-vrfs", "mapped", "segmentOspfConfig", "{} segments with OSPF (includes Default when non-default segments use OSPF)".format(len(out)))
     return out or None
 
 
@@ -432,7 +446,7 @@ def route_list(ctx: Ctx, entries: List[Dict[str, Any]], vrf: str, target: str = 
     out, failed = [], 0
     for e in entries:
         try:
-            route = one_route(ctx, e, vrf)
+            route = one_route(ctx, e, vrf, target)
         except ITEM_ERRORS as err:
             failed += 1
             item_failed(ctx, "subnets[{}] route {}".format(vrf, ((e.get("state") or {}) if isinstance(e, dict) else {}).get("prefix")), target, err)
@@ -444,34 +458,34 @@ def route_list(ctx: Ctx, entries: List[Dict[str, Any]], vrf: str, target: str = 
     return sorted(out, key=lambda r: (str(r.get("routeIpSubnet")), str(r.get("nextHop") or "")))
 
 
-def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str) -> Optional[Dict[str, Any]]:
+def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.routes") -> Optional[Dict[str, Any]]:
     """One configured local route, or None when it is not written (the reason is ledgered)."""
     st = e["state"]
     if not (st.get("configured") and st.get("local")) or st.get("automatic"):
         return None
     conf = e.get("config") or {}
     if managed(conf) or managed(st):  # Orchestrator services (third-party cloud integrations, ...) create these themselves
-        ctx.note("subnets", "orchestrator-managed", "localRoutes.routes", "skipped route {} created by Orchestrator (gms_marked)".format(st.get("prefix")))
+        ctx.note("subnets", "orchestrator-managed", target, "skipped route {} created by Orchestrator (gms_marked)".format(st.get("prefix")))
         return None
     if not st.get("nextHop") and not st.get("ifName") and not conf:
-        ctx.note("subnets", "unresolved", "localRoutes.routes", "route {} has neither next hop nor interface in its state and no route config, so it is not written".format(st.get("prefix")))
+        ctx.note("subnets", "unresolved", target, "route {} has neither next hop nor interface in its state and no route config, so it is not written".format(st.get("prefix")))
         return None
     # The state shows next hop 0.0.0.0 or :: as empty and the interface in use; the route's config keeps what was set ("default" is any interface)
     next_hop = st.get("nextHop") or conf.get("nextHop")
     cfg_if = conf.get("ifName") or st.get("ifName")
     if_name = None if cfg_if == "default" else cfg_if
     if not next_hop:  # apply rejects it: "Next Hop cannot be empty when interface is specified"
-        ctx.note("subnets", "unresolved", "localRoutes.routes", "route {} on {} has no next hop; a preconfig route needs one, so it is not written".format(st.get("prefix"), if_name))
+        ctx.note("subnets", "unresolved", target, "route {} on {} has no next hop; a preconfig route needs one, so it is not written".format(st.get("prefix"), if_name))
         return None
     zone_id = conf.get("zone_id", st.get("zone_id"))  # the state reports the zone of the interface in use
     zone = None if str(zone_id) in ("65534", "") else ctx.zone(vrf, zone_id)
     # subnets3/configured holds the Default segment only and ignores segment parameters (ECOS 9.6.2.1)
     cfg_prefix, cfg = configured_route(ctx, st["prefix"], next_hop, cfg_if) if vrf == "0" else ({}, {})
-    if vrf != "0":
-        ctx.note("subnets-all-vrfs[{}]".format(vrf), "mapped", "segmentLocalRoutes.routes", "route {}: advertise flags taken from route state, which for Default routes disagrees with the configured table (assumption: confirm the flags)".format(st["prefix"]))
     route = {"routeIpSubnet": st["prefix"], "nextHop": nul(next_hop), "interfaceName": nul(if_name), "metric": st["metric"], "advertise": cfg_prefix.get("advert", st["advert"]),
              "advertiseToBgp": cfg_prefix.get("advert_bgp", st["advert_bgp"]), "advertiseToOspf": cfg_prefix.get("advert_ospf", st["advert_ospf"]), "zone": zone,
              "routeLabel": ctx.label(st.get("label")) if str(st.get("label")) != "0" else None}
+    if vrf != "0":
+        ctx.note("subnets-all-vrfs[{}]".format(vrf), "mapped", "segmentLocalRoutes.routes", "route {}: advertise flags taken from route state, which for Default routes disagrees with the configured table (assumption: confirm the flags)".format(st["prefix"]))
     for key, value in (("comment", cfg.get("comment") or conf.get("comment")), ("tag", cfg.get("dir") or conf.get("tag"))):  # subnets3 calls the tag dir, /subnets/all calls it tag
         if value:
             route[key] = value
@@ -535,6 +549,8 @@ def has_routes(ctx: Ctx, block: Any, vrf: str) -> bool:
 
 def m_localRoutes(ctx: Ctx) -> Optional[Dict[str, Any]]:
     if per_segment(ctx):
+        if ctx.data("subnets-all-vrfs") is None and ctx.data("subnets") is None:  # segmentLocalRoutes ledgers both reads as not readable
+            return None
         ctx.note("subnets", "default-omitted", "localRoutes", "non-default segments have routes or subnet-sharing settings, so the Default segment is written in segmentLocalRoutes (Orchestrator ignores localRoutes when segmentLocalRoutes is present)")
         return None
     subnets = ctx.data("subnets")
@@ -559,7 +575,11 @@ def m_segmentLocalRoutes(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     raw = ctx.data("subnets-all-vrfs")
     data = (raw or {}).get("subnets") or {}
     if not per_segment(ctx):
-        ctx.note("subnets-all-vrfs", "default-omitted", "segmentLocalRoutes", "0 non-default segments with configured routes or subnet-sharing settings")
+        unread = [name for vrf, name in sorted(ctx.vrfs.items()) if vrf != "0"] if raw is None else []
+        if unread:  # without /subnets/all, "no segment routes" cannot be told from "segment routes not read"
+            ctx.note("subnets-all-vrfs", "not-readable", "segmentLocalRoutes.routes", "the per-segment routes read (/subnets/all) could not be read, so the routes of segment(s) {} are unknown and not written; check them by hand".format(", ".join(unread)))
+        else:
+            ctx.note("subnets-all-vrfs", "default-omitted", "segmentLocalRoutes", "0 non-default segments with configured routes or subnet-sharing settings")
         return None
     source = "subnets-all-vrfs"
     if raw is None:  # routes replace on apply: a segment whose routes were not read is left out, never written with an empty list
@@ -575,7 +595,7 @@ def m_segmentLocalRoutes(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         if raw is None and vrf not in data:
             continue
         try:
-            routes = route_list(ctx, (data.get(vrf) or {}).get("entries", []), vrf, "segmentLocalRoutes.routes")
+            routes = route_list(ctx, block(data, vrf).get("entries", []), vrf, "segmentLocalRoutes.routes")
         except ITEM_ERRORS as err:
             item_failed(ctx, "subnets-all-vrfs[{}]".format(vrf), "segmentLocalRoutes", err)
             continue
@@ -586,7 +606,8 @@ def m_segmentLocalRoutes(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         elif flags:
             ctx.note("system-info.auto_subnet.vrf[{}]".format(vrf), "default-omitted", "segmentLocalRoutes",
                      "segment {} has no routes and its subnet-sharing settings are the ECOS defaults; writing it would add default_rtmap_to_subsh".format(ctx.segment(vrf)))
-    ctx.note(source, "mapped", "segmentLocalRoutes", "{} segments with configured routes or subnet-sharing settings (Default included)".format(len(out)))
+    if out:
+        ctx.note(source, "mapped", "segmentLocalRoutes", "{} segments with configured routes or subnet-sharing settings (Default included)".format(len(out)))
     return out or None
 
 
@@ -732,7 +753,7 @@ def m_multicast(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         except ITEM_ERRORS as err:
             item_failed(ctx, "multicast-config[{}]".format(seg.get("vrf_id") if isinstance(seg, dict) else seg), "multicast", err)
             continue
-    if not out:  # every segment failed (ledgered above), or none configured
+    if source and not out:  # every segment failed (ledgered above); an empty source list is written as before
         return None
     ctx.note("multicast-config", "mapped", "multicast", "{} segment(s); igmpEnable true when the interface is listed under igmp (assumption); enable written as a string true/false/none".format(len(out)))
     return out
@@ -920,8 +941,12 @@ def m_vxlan(ctx: Ctx) -> Optional[Dict[str, Any]]:
     if not vtep:
         dormant = ["{} {}".format(ctx.segment(k) or k, v.get("vni")) for k, v in sorted(seg_map.items(), key=lambda kv: str(kv[0]))
                    if isinstance(v, dict) and str(v.get("vni")) not in ("None", "", "0", "-1", "4294967295")] if isinstance(seg_map, dict) else []
-        if dormant:  # vtepSrcInterface is required by the format, so the maps cannot be written on their own
+        if dormant and ctx.data("running-config") is None:
+            ctx.note("vxlan-vni-map", "not-readable", "vxlan", "VNI maps ({}), but the VTEP interface could not be read (no /vxlan and no running-config), so they are not written; check by hand".format(", ".join(dormant)))
+        elif dormant:  # vtepSrcInterface is required by the format, so the maps cannot be written on their own
             ctx.note("vxlan-vni-map", "outside-preconfig", "vxlan", "VNI maps ({}) but no VTEP interface: the format requires vtepSrcInterface, so they are not written; the target keeps its own".format(", ".join(dormant)))
+        elif seg_map and not isinstance(seg_map, dict):
+            ctx.note("vxlan-vni-map", "unresolved", "vxlan", "VNI maps read in an unexpected shape ({}), not written".format(type(seg_map).__name__))
         return None
     vni: Dict[str, Dict[str, Any]] = {}
     for l in lines:
@@ -1102,7 +1127,7 @@ def m_branchNatMapsConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     for map_name, mp in data.items() if isinstance(data, dict) else []:
         if not isinstance(mp, dict):  # names only ({"map1": "map1"}): the map is left with no rules (references/lessons.md)
             continue
-        for prio, e in sorted((mp.get("prio") or {}).items(), key=lambda kv: int(kv[0])):
+        for prio, e in sorted((mp.get("prio") or {}).items(), key=lambda kv: (0, int(kv[0]), "") if str(kv[0]).isdigit() else (1, 0, str(kv[0]))):
             try:
                 if managed(e):
                     continue
