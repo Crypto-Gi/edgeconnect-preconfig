@@ -10,6 +10,7 @@ Rules shared by all mappers:
 Every mapping is checked against the validator (check.py --validate); evidence for a mapping is a validated example.
 """
 import re
+from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 ADMIN = {True: "Up", False: "Down"}
@@ -28,11 +29,22 @@ class Ctx:
         self.cap, self.notes = cap, notes
         self.nepk = cap.run["appliance"]["nePk"]
         dep = cap.data("deployment") or {}
+        dep = dep if isinstance(dep, dict) else {}
         cfg = dep.get("sysConfig") or {}  # `or`: keys can be present but null
-        self.labels = {str(l["id"]): l["name"] for side in (cfg.get("ifLabels") or {}).values() for l in side or []}
-        self.vrfs = {str(v["id"]): v["name"] for v in cfg.get("vrfs") or []}
-        self.zones = {vrf: {str(z["id"]): z["name"] for z in m.values()} if isinstance(m, dict) else {} for vrf, m in (cfg.get("vrfZonesMap") or {}).items()}
-        self.roles = {str(r["id"]): r["name"] for r in cfg.get("roles") or []}
+        cfg = cfg if isinstance(cfg, dict) else {}
+        where = "deployment.sysConfig."
+        sides = cfg.get("ifLabels") or {}
+        if not isinstance(sides, dict):
+            unreadable_read(self, where + "ifLabels", "interface labels are not resolved to names")
+            sides = {}
+        self.labels = {k: v for side, items in sides.items() for k, v in id_names(self, "{}ifLabels.{}".format(where, side), items).items()}
+        self.vrfs = id_names(self, where + "vrfs", cfg.get("vrfs"))
+        zone_map = cfg.get("vrfZonesMap") or {}
+        if not isinstance(zone_map, dict):
+            unreadable_read(self, where + "vrfZonesMap", "zones are not resolved to names")
+            zone_map = {}
+        self.zones = {vrf: id_names(self, "{}vrfZonesMap.{}".format(where, vrf), list(m.values())) if isinstance(m, dict) else {} for vrf, m in zone_map.items()}
+        self.roles = id_names(self, where + "roles", cfg.get("roles"))
         self.route_labels: Optional[Dict[str, str]] = None  # read from the running-config on first use
 
     def data(self, ident: str, prefer: str = "live") -> Any:
@@ -100,6 +112,36 @@ def item_failed(ctx: Ctx, item: str, section: str, err: Exception) -> None:
         ctx.note(item, "not-readable", section, "{} not written: {}; check it by hand".format(item, err))
         return
     ctx.note(item, "toolkit-error", section, "{} not written: the mapper could not read it ({}: {}); a toolkit bug to report".format(item, type(err).__name__, err))
+
+
+@contextmanager
+def guarded(ctx: Ctx, item: str, section: str) -> Any:
+    """Run a block that reads one source item: an unexpected shape is ledgered (item_failed) and the block skipped, never the whole translation."""
+    try:
+        yield
+    except ITEM_ERRORS as err:
+        item_failed(ctx, item, section, err)
+
+
+def unreadable_read(ctx: Ctx, item: str, what: str, section: str = "") -> None:
+    ctx.note(item, "not-readable", section, "the read has an unexpected shape, so {}; check them by hand".format(what))
+
+
+def id_names(ctx: Ctx, item: str, objs: Any, key: Callable[[Any], Any] = str) -> Dict[Any, Any]:
+    """{key(id): name} of a list of {id, name} objects (as dict comprehension: a later id wins). A list of another type is ledgered
+    not-readable, an object of another shape toolkit-error; both are skipped, so one bad object never loses the others."""
+    if not objs:
+        return {}
+    if not isinstance(objs, list):
+        unreadable_read(ctx, item, "its ids are not resolved to names")
+        return {}
+    out: Dict[Any, Any] = {}
+    for i, obj in enumerate(objs):
+        try:
+            out[key(obj["id"])] = obj["name"]
+        except ITEM_ERRORS as err:
+            item_failed(ctx, "{}[{}]".format(item, i), "", err)
+    return out
 
 
 def num_key(key: Any) -> Tuple[int, int, str]:
@@ -720,7 +762,11 @@ def m_interfaceConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
 def cli_lines(ctx: Ctx) -> List[str]:
     """Command lines of the newest stored backup's running configuration (can be older than the live configuration)."""
     backup = ctx.data("running-config") or {}
-    return [l.strip() for l in (backup.get("runningConfig") or "").splitlines() if l.strip() and not l.strip().startswith("#")]
+    text = (backup.get("runningConfig") or "") if isinstance(backup, dict) else None
+    if not isinstance(text, str):
+        unreadable_read(ctx, "running-config", "settings read from the stored backup's CLI lines (pass-through cap, flow redirection, ...) are not carried")
+        return []
+    return [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
 
 
 def passthrough_max_bandwidth(lines: List[str]) -> Optional[int]:
