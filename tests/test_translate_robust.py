@@ -138,7 +138,7 @@ class MalformedReads(unittest.TestCase):
             "networkRole not a number": (lambda d: d["appliance"].update(networkRole="x"), "toolkit-error", "appliance.networkRole", "networkRole"),
             "cluster mapping a list": (lambda d: d.update({"cluster-profile-mapping": [1]}), "not-readable", "cluster-profile", "clusterProfile"),
             "cluster profile without name": (lambda d: d.update({"cluster-profiles": [{"id": 1}]}), "toolkit-error", "cluster-profile", "clusterProfile"),
-            "region associations a list": (lambda d: d.update({"region-associations": [1]}), "toolkit-error", "region-associations", "region"),
+            "region associations a list": (lambda d: d.update({"region-associations": [1]}), "not-readable", "region-associations", "region"),
             "region without name": (lambda d: d.update({"region-associations": {"9.NE": {"regionId": 2}}}), "toolkit-error", "region-associations", "region"),
             "location a string": (lambda d: d["extra-info"].update(location="x"), "toolkit-error", "extra-info.location", "location"),
             "contact a number": (lambda d: d["extra-info"].update(contact=7), "toolkit-error", "extra-info.contact", "contact"),
@@ -516,6 +516,26 @@ class FailedReads(unittest.TestCase):
                 ledger = []
                 build(cap, ledger)
                 self.assertTrue(any(e["item"] == "system-info" and e["disposition"] == "not-readable" for e in ledger))
+
+class InterfacesForMappers(unittest.TestCase):
+    """Mappers that read the interfaces themselves see the same readability as build(): no toolkit error for an unreadable entry."""
+
+    def test_an_unreadable_interface_entry_makes_interface_readers_not_readable(self):
+        for name, bad in (("entry null", lambda ips: ips.__setitem__(0, None)), ("vlan not a number", lambda ips: ips[0].update(vlan="x"))):
+            with self.subTest(name):
+                def change(d):
+                    d["template-groups"][0].update(selectedTemplateNames=[])
+                    d["nac"] = NAC
+                    bad(d["deployment"]["modeIfs"][1]["applianceIPs"])
+                out, ledger = translate(change)
+                self.assertNotIn("nac", out)
+                self.assertEqual([e["item"] for e in ledger if e["disposition"] == "toolkit-error" and e["item"].startswith("mapper")], [])
+                self.assertTrue(any(e["disposition"] == "not-readable" and e["target"] == "nac" for e in ledger))
+
+    def test_a_region_read_of_another_shape_is_not_readable(self):
+        out, ledger = translate(lambda d: d.update({"region-associations": "x"}))
+        self.assertNotIn("region", out["applianceInfo"])
+        self.assertTrue(any(e["disposition"] == "not-readable" and e["item"] == "region-associations" for e in ledger))
 
 if __name__ == "__main__":
     unittest.main()

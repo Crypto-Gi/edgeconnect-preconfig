@@ -64,6 +64,10 @@ class Ctx:
         found = dep.get("modeIfs", []) if isinstance(dep, dict) else None
         if not isinstance(found, list):
             raise Unreadable("the interfaces (deployment.modeIfs) could not be read")
+        for m in found:  # the interface an entry names may be the one a section needs
+            entries = m.get("applianceIPs") if isinstance(m, dict) and isinstance(m.get("ifName"), str) else None
+            if not isinstance(entries, list) or not all(isinstance(a, dict) and str(a.get("vlan") or 0).isdecimal() for a in entries):
+                raise Unreadable("an interface entry (deployment.modeIfs) could not be read")
         return found
 
     def readable(self, key: str) -> None:

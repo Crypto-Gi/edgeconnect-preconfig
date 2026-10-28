@@ -288,7 +288,11 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
             note("appliance.networkRole", "mapped", "applianceInfo.networkRole", "verified across reference Orchestrators: code 1 = hub (all overlay hubs), code 0 = non-hub; nrhub has no sample")
         else:
             note("appliance.networkRole", "unresolved", "applianceInfo.networkRole", "code {} has no known meaning".format(app["networkRole"]))
-    if not failed_read(ctx, "region-associations", "the region is not written", "applianceInfo.region"):
+    if failed_read(ctx, "region-associations", "the region is not written", "applianceInfo.region"):
+        pass
+    elif not isinstance(cap.data("region-associations") or {}, dict):
+        unreadable_read(ctx, "region-associations", "the region is not written", "applianceInfo.region")
+    else:
         with guarded(ctx, "region-associations", "applianceInfo.region"):
             region = (cap.data("region-associations") or {}).get(nepk, {})
             if region.get("regionId") == 0:
