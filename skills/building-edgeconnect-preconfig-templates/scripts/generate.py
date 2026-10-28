@@ -200,7 +200,8 @@ def generate(reference: Dict[str, Any], out: Path, site: str, fixed: Optional[Li
     for name, col in builder.columns.items():
         shown = "" if col["secret"] or col["example"] in ("", None) else "`{}`".format(col["example"])
         rows.append("| `{}` | {} | {} | {} |".format(name, describe(col, limits), shown, ", ".join("`{}`".format(p) for p in [col["path"]] + col.get("also_at", []))))
-    (out / "columns.md").write_text("# Columns of {}\n\nFill one row per site in a copy of `{}.csv`. The reference value is the source appliance's.\n\n".format(site, site) + "\n".join(rows) + "\n", encoding="utf-8")
+    (out / "columns.md").write_text("# Columns of {}\n\n- `{}.csv`: empty sheet (headers only) for new sites.\n- `example.csv`: this appliance's own values, secrets blank - copy it to start your sites.csv.\n\n"
+                                     "Fill one row per site. The reference value is the source appliance's.\n\n".format(site, site) + "\n".join(rows) + "\n", encoding="utf-8")
     return meta
 
 

@@ -388,6 +388,18 @@ class Build(unittest.TestCase):
             cli.cmd_build(["--orchestrator", "lab", "--appliance", "Br 1", "--out", str(out)])
         self.assertEqual(calls, [["--target-ecos", "9.6.2.1"], []])
 
+    def test_build_lists_both_csv_files_and_what_each_is_for(self):
+        def translate_into(out, capture, site, release, extra):
+            out.mkdir(parents=True)
+            return "verdict: Complete for preconfig."
+        with tempfile.TemporaryDirectory() as tmp, self.fake_capture(tmp), mock.patch.object(cli, "VALIDATORS", {"lab"}), \
+                mock.patch.object(cli, "translate_into", side_effect=translate_into), mock.patch.object(cli, "checked", return_value=[]), \
+                contextlib.redirect_stdout(io.StringIO()) as printed:
+            cli.cmd_build(["--orchestrator", "lab", "--appliance", "Br 1", "--out", str(Path(tmp) / "out")])
+        lines = printed.getvalue().splitlines()
+        self.assertIn("  br_1.csv            empty sheet (headers only) for new sites", lines)
+        self.assertIn("  example.csv         this appliance's own values, secrets blank - copy it to start your sites.csv", lines)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -83,7 +83,8 @@ checking and validating on lab ...
 Saved ~/edgeconnect/preconfig-output/ref-branch  (/validate on lab: accepted)
   reference.yaml      the appliance as preconfig YAML
   ref-branch.jinja2   the template
-  example.csv         one row: this appliance's own values
+  ref-branch.csv      empty sheet (headers only) for new sites
+  example.csv         this appliance's own values, secrets blank - copy it to start your sites.csv
   summary.md          what was carried and what was not; verdict: Incomplete for preconfig: 4 gap(s), 0 toolkit error(s).
 ```
 

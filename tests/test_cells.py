@@ -91,6 +91,11 @@ class Cells(unittest.TestCase):
         row = dict(self.row, **edit)
         return cell_problems(self.columns, row, self.limits) + subnet_problems(self.columns, row)
 
+    def test_columns_md_says_what_each_csv_is_for(self):
+        head = (self.out / "columns.md").read_text().split("\n\n")[1]
+        self.assertEqual(head, "- `t.csv`: empty sheet (headers only) for new sites.\n"
+                               "- `example.csv`: this appliance's own values, secrets blank - copy it to start your sites.csv.")
+
     def test_example_row_passes_and_columns_know_their_format(self):
         self.assertEqual(self.problems(), [])
         self.assertEqual(self.columns["lan0_ip"]["format"], "ip/prefix")
