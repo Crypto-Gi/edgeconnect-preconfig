@@ -2,6 +2,8 @@ import base64
 import contextlib
 import io
 import json
+import random
+import re
 import sys
 import tempfile
 import time
@@ -347,7 +349,80 @@ class RedactTest(unittest.TestCase):
                     self.assertEqual(redact_secrets({"t": out})[0]["t"], out)  # a second pass changes nothing
         self.assertEqual(redact_secrets({"t": json.dumps({"a": "pass: 'x", "b": "don't"})})[0]["t"], "{\"a\": \"pass: <SECRET:text>\", \"b\": \"don't\"}")
         out = redact_secrets({"t": '{"note":"pass=x\\\\","y":"z"}'})[0]["t"]
-        self.assertEqual(out, '{"note":"pass=<SECRET:text>","y":"z"}')
+        self.assertEqual(out, '{"note":"pass=<SECRET:text>\\\\","y":"z"}')  # guard-ok: a backslash run before a quote is left (review of 7c44603)
+
+    def test_free_text_prompt_at_the_end_of_a_json_string_keeps_the_next_key(self):
+        for obj in ({"banner": "Password: ", "motd": "hello"}, {"prompt": "Enter password: ", "x": 1}, {"a": "pass:", "b": "c"},
+                    {"a": "token = ", "b": "c d"}, {"a": "psk: '", "b": "c'"}, {"Password: ": "Sierra1x"}):
+            for text in (json.dumps(obj), json.dumps(json.dumps(obj))):
+                with self.subTest(text):
+                    self.assertEqual(redact_secrets({"t": text})[0]["t"], text)
+        self.assertEqual(redact_secrets({"t": '{"a": "token = " , "b": "c d"}'})[0]["t"], '{"a": "token = " , "b": "c d"}')
+        text = json.dumps(json.dumps({"a": 'pass: x"y', "b": 1}))  # double-encoded: the value stops before the escaped quote
+        self.assertEqual(redact_secrets({"t": text})[0]["t"], json.dumps(json.dumps({"a": 'pass: <SECRET:text>"y', "b": 1})))
+
+    def test_free_text_unquoted_key_must_end_in_a_secret_word(self):
+        self.assertRedacts({
+            "token-lifetime: 1h psk-mode: main pskType: ascii md5-auth: enabled md5sum: d41d8cd9":
+                "token-lifetime: 1h psk-mode: main pskType: ascii md5-auth: enabled md5sum: d41d8cd9",
+            "password-complexity: high passwordless: enabled passwd-file: /etc/x tokenize: yes secretariat: hq":
+                "password-complexity: high passwordless: enabled passwd-file: /etc/x tokenize: yes secretariat: hq",
+            "sharedKey: Romeo1x enablePassword: Romeo2x x-psk: Romeo3x": "sharedKey: <SECRET:text> enablePassword: <SECRET:text> x-psk: <SECRET:text>",
+            '{"tokenize":"Romeo4x"}': '{"tokenize":"<SECRET:text>"}',  # a quoted key holding a secret word is redacted, like a field
+            "{'tokenize': 'Romeo5x'}": "{'tokenize': '<SECRET:text>'}",
+            "x-adminPassword: Romeo6x adminPasswd: Romeo7x ospfMd5: Romeo8x adminPassword: 12345":
+                "x-adminPassword: <SECRET:text> adminPasswd: <SECRET:text> ospfMd5: <SECRET:text> adminPassword: <SECRET:text>",
+        })
+
+    def test_free_text_prose_filler_ignores_trailing_punctuation(self):
+        self.assertRedacts({
+            "A password is required.": "A password is required.",
+            "Password is mandatory, contact NOC.": "Password is mandatory, contact NOC.",
+            "the secret is out.": "the secret is out.",
+            "password is a.b9.": "password is <SECRET:text>",
+            "password is e.g. this": "password is e.g. this",
+        })
+
+    def test_random_json_text_stays_valid_and_keeps_other_values(self):
+        rng = random.Random(20261028)
+        secret_keys = ["password", "adminPassword", "psk", "secret", "token", "md5", "x_password", "apiKey", "pre-shared-key", "tokenLifetime"]
+        other_keys = ["name", "desc", "banner", "prompt", "keyId", "mode", "bypass", "passThrough", "motd"]
+        pieces = ["a", "Q9", "\\", "\\\\", '"', "'", " ", "Password: ", "Enter password: ", "pass:", "token = ", 'x"y', "]", "}", ",", " is ", "1", "-"]
+        hint = re.compile(r"(?i)pass|pw|secret|psk|token|key|md5")
+
+        def value(depth):
+            pick = rng.random()
+            if depth < 3 and pick < 0.15:
+                return [value(depth + 1) for _ in range(rng.randint(0, 3))]
+            if depth < 3 and pick < 0.3:
+                return {rng.choice(secret_keys + other_keys): value(depth + 1) for _ in range(rng.randint(0, 3))}
+            if pick < 0.45:
+                return rng.choice([rng.randint(-9, 99999), True, False, None])
+            return "".join(rng.choice(pieces) for _ in range(rng.randint(0, 6)))
+
+        def same(before, after, secret):
+            if isinstance(before, dict):
+                self.assertEqual(set(after), set(before))
+                for key in before:
+                    same(before[key], after[key], key in secret_keys)
+            elif isinstance(before, list):
+                if not secret:  # a secret key's array becomes one placeholder item
+                    self.assertEqual(len(after), len(before))
+                    for b, a in zip(before, after):
+                        same(b, a, False)
+            elif not isinstance(before, str) or not secret and not hint.search(before):
+                self.assertEqual(after, before)
+
+        for _ in range(1500):
+            obj = {rng.choice(secret_keys + other_keys): value(0) for _ in range(3)}
+            for text in (json.dumps(obj), json.dumps(json.dumps(obj))):
+                with self.subTest(text):
+                    out = redact_secrets({"t": text})[0]["t"]
+                    after, before = json.loads(out), json.loads(text)
+                    if isinstance(before, str):
+                        after, before = json.loads(after), json.loads(before)
+                    same(before, after, False)
+                    self.assertEqual(redact_secrets({"t": out})[0]["t"], out)
 
     def test_long_runs_stay_linear(self):
         n = 2000

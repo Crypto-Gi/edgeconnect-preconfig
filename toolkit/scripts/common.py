@@ -35,28 +35,38 @@ _CRYPT = re.compile(r"\$(1|2[aby]?|5|6|y)\$[./A-Za-z0-9$]{8,}")
 _CLI_SECRET = re.compile(r"(?im)(\b(?:password|passwd|secret|psk|pre-shared-key|passphrase|auth-key|authentication-key|md5|api-key|token)\b[ \t]+"
                          r"(?!(?:is|-+>?)[ \t])(?:\d[ \t]+)?)(?![:=])(\S+)")  # "password = x" is free text, below
 # free text (banners, comments, JSON in CLI lines): "pass: x", "secret = x", "adminPassword is x1", "\"apiKey\":\"x\"". The separator
-# (':', '=', an arrow, or "is"/"-" before a value holding a digit or symbol, so "password is required" stays) keeps "pass-through"
-# untouched. A key is a secret word (_TEXT_WORD: an optional "x_" prefix, a "_key" suffix, a word key may start after '-' as in
-# "x-psk") or any name holding a keyed-field word (_SECRET_WORDS: "adminPassword", "private_key").
-# A number is a secret only after a _TEXT_WORD key in prose ("password: 12345"); JSON numbers and "token-lifetime: 3600" stay.
-# A quoted value ends at its closing quote; escapes are read as pairs, and inside a \"-quoted value \\\" is an escaped quote. After a
-# quoted JSON key a bare value ends at ',' or '}', a secret array (one nesting level) becomes one placeholder item and an object is left
-# to its own keys. Other free text ends at whitespace, at \" or at a quote followed by a delimiter. Every value pattern has disjoint
-# alternatives so no input backtracks more than linearly (Python 3.9 has no atomic groups); a key's secret word must start within
-# 64 characters of the name, which keeps one long word from being rescanned per rule. null/true/false are not secrets.
+# (':', '=', an arrow, or "is"/"-" before a value holding a digit or a symbol other than .,;:!?, so "password is required." stays)
+# keeps "pass-through" untouched. A key is a secret word (_TEXT_WORD: an optional "x_" prefix, a "_key" suffix, a word key may start
+# after '-' as in "x-psk"), a quoted name holding a keyed-field word (_SECRET_WORDS, as for fields: "adminPassword", "tokenize"), or an
+# unquoted name ending in one ("adminPassword", "private_key"; not "token-lifetime", "pskType", "md5sum"). A JSON number, true, false
+# or null is not a secret (fields skip non-strings); a number in prose is ("password: 12345"). A quoted value ends at its closing
+# quote; escapes are read as pairs. Inside a \"-quoted value \\\" is an escaped quote and a bare " is allowed only where it cannot
+# close a string; a '-quoted value holds no " or \". A quote followed by ',', ':', '}' or ']' closes a string and never opens a value,
+# so {"banner": "Password: ", "motd": "x"} keeps its next key. After a quoted JSON key a bare value ends at ',' or '}', a secret array
+# (one nesting level) becomes one placeholder item and an object is left to its own keys. Other free text ends at whitespace, at a
+# backslash run before a quote, or at a quote followed by a delimiter. Every value pattern has disjoint alternatives so no input
+# backtracks more than linearly (Python 3.9 has no atomic groups); a key's secret word must sit within 64 characters of the name's
+# start, which keeps one long word from being rescanned per rule. null/true/false are not secrets.
 _TEXT_WORD = (r"(?:\w{0,64}_)?(?:pass(?:word|wd|code|phrase)?|pwd|pw|secret|psk|pre[_-]?shared[_-]?key|auth(?:entication)?[_-]?key|api[_-]?key"
-              r"|token|md5)(?:[_-]key)?")
-_TEXT_WORD_RE = re.compile("(?i)" + _TEXT_WORD)
-_TEXT_KEY = r"(?=\w)(?<![\w<])(?P<key>" + _TEXT_WORD + r"|(?<!-)(?=[\w-]{0,64}?(?:" + _SECRET_WORDS + r"))[\w-]+)"
-_TEXT_SEP = r"(?:[ \t]*(?:[:=]>?|-+>)[ \t]*|[ \t]+(?:is|-+)[ \t]+(?=\S*[^\sA-Za-z]))"
-_TEXT_QUOTED = re.compile(r"(?i)(?P<pre>" + _TEXT_KEY + r"(?:\\?[\"'])?" + _TEXT_SEP + r"(?P<esc>\\)?(?P<q>[\"']))(?P<val>(?(esc)"
-                          r"(?:\\\\(?:\\[^\n]|[^\\\n])|\\[^\\\n]|[^\\\n])*?|(?:\\[^\n]|[^\\\n\"])*?))(?P<end>(?(esc)\\)(?P=q))")
-_JSON_STR = r"(?:\\\"(?:[^\\\"\n]|\\(?!\"))*\\\"|\"(?:\\[^\n]|[^\\\"\n])*\")"
+              r"|token)(?:[_-]key)?")
+_TEXT_END_WORDS = r"passw(?:or)?d|passphrase|secret|psk|pre_?shared|(?:private|auth|authentication|api|ike|shared)_?key|token|md5"
+_KEY_START = r"(?=\w)(?<![\w<])(?P<key>" + _TEXT_WORD
+_KEY_QUOTED = r"|(?<=[\"'])(?=[\w-]{0,64}?(?:" + _SECRET_WORDS + r"))[\w-]+(?=\\?[\"'])"
+_KEY_UNQUOTED = r"|(?<!-)[\w-]{0,64}?(?:" + _TEXT_END_WORDS + r")(?![\w-])"
+_TEXT_KEY = _KEY_START + _KEY_QUOTED + _KEY_UNQUOTED + ")"
+_JSON_KEY = _KEY_START + _KEY_QUOTED + ")"  # the rules below that need a quote after the key, and the one that cannot have one,
+_FREE_KEY = _KEY_START + _KEY_UNQUOTED + ")"  # skip the other key form's scan
+_TEXT_SEP = r"(?:[ \t]*(?:[:=]>?|-+>)[ \t]*|[ \t]+(?:is|-+)[ \t]+(?=\S*?[^\sA-Za-z.,;:!?]))"
+_NOT_A_CLOSE = r"(?![ \t]*[,:}\]])"
+_TEXT_QUOTED = re.compile(r"(?i)(?P<pre>" + _TEXT_KEY + r"(?:\\?[\"'])?" + _TEXT_SEP + r"(?P<esc>\\)?(?P<q>\"|'(?P<sq>))" + _NOT_A_CLOSE
+                          + r")(?P<val>(?(esc)(?:\\\\(?:\\[^\n]|[^\\\n])|\\[^\\\n]|\"" + _NOT_A_CLOSE + r"|[^\\\n\"])*?|(?(sq)(?:\\[^\n\"]|[^\\\n\"])*?"
+                          r"|(?:\\[^\n]|[^\\\n\"])*?)))(?P<end>(?(esc)\\)(?P=q))")
+_JSON_STR = r"(?:\\\"(?:\\\\(?:\\[^\n]|[^\\\n])|\\[^\\\n\"]|[^\\\n\"])*\\\"|\"(?:\\[^\n]|[^\\\"\n])*\")"  # \"-quoted: as in _TEXT_QUOTED
 _JSON_OTHER = r"[^\[\]{}\"\\\n]"
-_TEXT_JSON_ARRAY = re.compile(r"(?i)(?P<pre>" + _TEXT_KEY + r"(?P<esc>\\?)\"[ \t]*:[ \t]*\[)(?P<val>(?:" + _JSON_STR + r"|\[(?:" + _JSON_STR
+_TEXT_JSON_ARRAY = re.compile(r"(?i)(?P<pre>" + _JSON_KEY + r"(?P<esc>\\?)\"[ \t]*:[ \t]*\[)(?P<val>(?:" + _JSON_STR + r"|\[(?:" + _JSON_STR
                               + "|" + _JSON_OTHER + r")*\]|" + _JSON_OTHER + r")*)\]")
-_TEXT_JSON_BARE = re.compile(r"(?i)(?P<pre>" + _TEXT_KEY + r"\\?\"[ \t]*:[ \t]*)(?P<val>[^\s\\\",}{\[][^\s\\\",}]*)")
-_TEXT_FREE = re.compile(r"(?i)(?P<pre>" + _TEXT_KEY + _TEXT_SEP + r")(?P<val>\\?[\"']?(?:[^\s\\\"']|\\\\|\\(?![\\\"])|[\"'](?![\s,;)}\]\"'\\]|$))+)")  # an unclosed quote is taken with the value
+_TEXT_JSON_BARE = re.compile(r"(?i)(?P<pre>" + _JSON_KEY + r"\\?\"[ \t]*:[ \t]*)(?P<val>[^\s\\\",}{\[][^\s\\\",}]*)")
+_TEXT_FREE = re.compile(r"(?i)(?P<pre>" + _FREE_KEY + _TEXT_SEP + r")(?P<val>(?:\\?[\"']" + _NOT_A_CLOSE + r")?(?:[^\s\\\"']|\\+(?![\\\"])|[\"'](?![\s,;:)}\]\"'\\]|$))+)")  # an unclosed quote is taken with the value
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
 _NOT_SECRET = ("null", "true", "false")
 
@@ -75,7 +85,7 @@ def _redact_text(text: str) -> str:
     sub(_TEXT_QUOTED, lambda m: False, lambda m: "<SECRET:text>" + m["end"])
     sub(_TEXT_JSON_ARRAY, lambda m: '"' not in m["val"], lambda m: m["esc"] + '"<SECRET:text>' + m["esc"] + '"]')
     sub(_TEXT_JSON_BARE, lambda m: _NUMBER.fullmatch(m["val"]), lambda m: "<SECRET:text>")
-    sub(_TEXT_FREE, lambda m: _NUMBER.fullmatch(m["val"]) and not _TEXT_WORD_RE.fullmatch(m["key"]), lambda m: "<SECRET:text>")
+    sub(_TEXT_FREE, lambda m: False, lambda m: "<SECRET:text>")
     return text
 
 
