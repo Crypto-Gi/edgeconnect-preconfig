@@ -167,7 +167,7 @@ def nac_merge_owned(cap: "Capture") -> Optional[Dict[str, Any]]:
 def ledger_local_nac(value: Optional[Dict[str, Any]], owned: Dict[str, Any], note: Any, read: bool = True) -> None:
     """Under a merge nac template the section is not written; the appliance's own NAC objects are ledgered, never the template's.
 
-    /validate answers HTTP 500 unless all six NAC lists are non-empty (semir_vlab, 2026-10-28), and the lists the template fills hold
+    /validate answers HTTP 500 unless all six NAC lists are non-empty (lab, 2026-10-28), and the lists the template fills hold
     only its objects: a section /validate accepts would write the template's own objects, which a template group's settings never are."""
     note("template nac", "template-group", "nac", "the 'nac' template merges (merge: true) with the appliance's NAC: the section is not written")
     if not read:
