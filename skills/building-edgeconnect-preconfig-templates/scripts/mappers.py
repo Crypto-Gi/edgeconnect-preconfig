@@ -881,9 +881,8 @@ def m_interfaceConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     out = []
     for i in info:
         name = i["ifname"]
-        if re.match(r"^mgmt\d+$", name) and not (i.get("admin") and i.get("ifSpeed") in ("auto", "") and i.get("ifDuplex") in ("auto", "")):
-            ctx.note("interface-state[{}]".format(name), "outside-preconfig", "interfaceConfig", "{} is admin {}, speed {}, duplex {}; management ports are never carried "
-                     "(the management plane stays as the target has it)".format(name, "up" if i.get("admin") else "down", i.get("ifSpeed"), i.get("ifDuplex")))
+        if name == "mgmt0" and not i.get("admin"):  # mgmt1 down is the usual state: not ledgered
+            ctx.note("interface-state[mgmt0]", "outside-preconfig", "interfaceConfig", "mgmt0 is admin down; management ports are never carried (the management plane stays as the target has it)")
         if not re.match(r"^(lan|wan|tlan|twan|twlan|blan|bwan)\d+$", name):
             continue
         if i.get("ifSpeed") in ("auto", "") and i.get("ifDuplex") in ("auto", "") and i.get("admin"):  # "": a bonded blanN/bwanN has no speed of its own

@@ -1538,6 +1538,15 @@ class ManagementPorts(unittest.TestCase):
     """interfaceConfig never carries mgmt ports (the management plane is off-limits); their state is ledgered, never claimed as default."""
     UP = {"admin": True, "ifSpeed": "auto", "ifDuplex": "auto"}
 
+    def test_only_mgmt0_down_is_ledgered(self):
+        info = [dict(self.UP, ifname="mgmt0"), dict(self.UP, ifname="mgmt1", admin=False), dict(self.UP, ifname="lan0")]
+        c, notes = ctx({"interface-state": {"ifInfo": info}})
+        self.assertIsNone(m_interfaceConfig(c))
+        self.assertEqual([n["item"] for n in notes if n["disposition"] != "default-omitted"], [])  # mgmt1 down is the usual state
+        c, notes = ctx({"interface-state": {"ifInfo": [dict(self.UP, ifname="mgmt0", ifSpeed="100", ifDuplex="full")]}})
+        m_interfaceConfig(c)
+        self.assertEqual([n["item"] for n in notes if n["disposition"] != "default-omitted"], [])  # mgmt0 up: speed and duplex are not ledgered
+
     def test_mgmt_admin_down_is_ledgered_not_carried(self):
         info = [dict(self.UP, ifname="mgmt0", admin=False), dict(self.UP, ifname="wan0"), dict(self.UP, ifname="lan0"), dict(self.UP, ifname="mgmt1")]
         c, notes = ctx({"interface-state": {"ifInfo": info}})
