@@ -263,7 +263,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     info: Dict[str, Any] = {"hostname": app["hostName"]}
     if groups is not None:  # an id written as the group name would name a group that does not exist
         with guarded(ctx, "appliance.groupId", "applianceInfo.group"):
-            info["group"] = groups.get(app["groupId"], app["groupId"])
+            if app["groupId"] in groups or not ctx.failed("applianceInfo.group", "groups"):  # its name may be in the item that failed
+                info["group"] = groups.get(app["groupId"], app["groupId"])
     with guarded(ctx, "appliance.site", "applianceInfo.site"):
         info["site"] = app["site"]
     prof_what = "the cluster profile is not written"
@@ -412,7 +413,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     mode_ifs = dep.get("modeIfs")
     if not isinstance(mode_ifs, list):  # interfaces replace the target's on apply: never invented or written empty
         unreadable_read(ctx, "deployment.modeIfs", "deploymentInfo (interfaces, DHCP, router advertisements, HA) is not written", "deploymentInfo")
-    for i, mode_if in enumerate(mode_ifs if isinstance(mode_ifs, list) else []):
+    for i, mode_if in enumerate(mode_ifs if isinstance(mode_ifs, list) and not ctx.unread_maps else []):  # unread names: not written at all (below)
         try:
             if_name, ips = mode_if["ifName"], mode_if["applianceIPs"]
             if not isinstance(ips, list):
@@ -463,8 +464,14 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
                     fo_wanted.add(if_name)
                 continue
             interfaces.append(item)
-            if wan and a["label"] != "" and item["interfaceLabel"] is None:
-                label_gaps.append(name)
+            if a["label"] != "" and item["interfaceLabel"] is None:
+                ctx.note("deployment.modeIfs[{}]".format(name), "unresolved", "deploymentInfo.deploymentInterfaces[].interfaceLabel",
+                         "interface label id {} is not among the interface labels (deployment.sysConfig.ifLabels); written as null, set it by hand".format(a["label"]))
+                if wan:
+                    label_gaps.append(name)
+            if item["zone"] is None:
+                ctx.note("deployment.modeIfs[{}]".format(name), "unresolved", "deploymentInfo.deploymentInterfaces[].zone",
+                         "zone id {} of segment {} is not among the zones (deployment.sysConfig.vrfZonesMap); written as null, set it by hand".format(a["zone"], item["segment"]))
             try:
                 dhcp_cfg = a.get("dhcpd") or {}
                 server = dhcp_cfg.get("server") if dhcp_cfg.get("type") == "server" else None

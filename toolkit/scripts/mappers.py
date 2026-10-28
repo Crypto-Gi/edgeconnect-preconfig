@@ -37,7 +37,7 @@ class Ctx:
         where, target = "deployment.sysConfig.", "deploymentInfo.deploymentInterfaces"
 
         def names(key: str, item: str, objs: Any) -> Dict[str, Any]:
-            found = id_names(self, item, objs, section=target)
+            found = id_names(self, item, objs, section=target, strict=True)  # one id without a name would be written as null
             if found is None:
                 self.unread_maps.add(key)
             return found or {}
@@ -57,6 +57,14 @@ class Ctx:
         self.zones = {vrf: names("vrfZonesMap", "{}vrfZonesMap.{}".format(where, vrf), list(m.values())) if isinstance(m, dict) else {} for vrf, m in zone_map.items()}
         self.roles = names("roles", where + "roles", cfg.get("roles"))
         self.route_labels: Optional[Dict[str, str]] = None  # read from the running-config on first use
+
+    def mode_ifs(self) -> List[Any]:
+        """deployment.modeIfs; Unreadable when the read has another shape, never taken as "no interfaces"."""
+        dep = self.data("deployment") or {}
+        found = dep.get("modeIfs", []) if isinstance(dep, dict) else None
+        if not isinstance(found, list):
+            raise Unreadable("the interfaces (deployment.modeIfs) could not be read")
+        return found
 
     def readable(self, key: str) -> None:
         if key in self.unread_maps:
@@ -160,21 +168,23 @@ def unreadable_read(ctx: Ctx, item: str, what: str, section: str = "") -> None:
     ctx.note(item, "not-readable", section, "the read has an unexpected shape, so {}; check them by hand".format(what))
 
 
-def id_names(ctx: Ctx, item: str, objs: Any, key: Callable[[Any], Any] = str, section: str = "") -> Optional[Dict[Any, Any]]:
+def id_names(ctx: Ctx, item: str, objs: Any, key: Callable[[Any], Any] = str, section: str = "", strict: bool = False) -> Optional[Dict[Any, Any]]:
     """{key(id): name} of a list of {id, name} objects (as dict comprehension: a later id wins). A read of another type is ledgered
-    not-readable and gives None; an object of another shape is ledgered toolkit-error and skipped, so one bad object never loses the others."""
+    not-readable and gives None; an object of another shape is ledgered toolkit-error and skipped, and with strict the map is then None too."""
     if not objs:
         return {}
     if not isinstance(objs, list):
         unreadable_read(ctx, item, "its ids are not resolved to names", section)
         return None
     out: Dict[Any, Any] = {}
+    complete = True
     for i, obj in enumerate(objs):
         try:
             out[key(obj["id"])] = obj["name"]
         except ITEM_ERRORS as err:
             item_failed(ctx, "{}[{}]".format(item, i), section, err)
-    return out
+            complete = False
+    return out if complete or not strict else None
 
 
 def num_key(key: Any) -> Tuple[int, int, str]:
@@ -310,7 +320,7 @@ def m_inboundPortForwarding(ctx: Ctx) -> Optional[Dict[str, Any]]:
     if not source:
         return None
     wan_label_by_if = {}
-    for m in (ctx.data("deployment") or {}).get("modeIfs", []):
+    for m in ctx.mode_ifs():
         for a in m.get("applianceIPs", []):
             if a.get("wanSide") and a.get("label"):
                 vlan = int(a.get("vlan") or 0)
@@ -884,7 +894,7 @@ def m_multicast(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         return None
     flags = {str(e.get("vrf_id")): e.get("enable") for e in (ctx.data("multicast-enable") or []) if isinstance(e, dict)}
     known = set()
-    for m in (ctx.data("deployment") or {}).get("modeIfs", []):
+    for m in ctx.mode_ifs():
         for a in m["applianceIPs"]:
             vlan = int(a.get("vlan") or 0)
             known |= {"{}.{}".format(m["ifName"], vlan) if vlan > 0 else m["ifName"], m["ifName"], ctx.label(a["label"])}
@@ -917,7 +927,7 @@ def vrrp_prio(act: Dict[str, Any], type_key: str) -> Dict[str, Any]:
 
 def probe_tunnel(ctx: Ctx, ifname: str) -> Optional[str]:
     """The one user passthrough tunnel whose local IP is on interface ifname, else None."""
-    ips = {a.get("ip") for m in (ctx.data("deployment") or {}).get("modeIfs", []) for a in m.get("applianceIPs", [])
+    ips = {a.get("ip") for m in ctx.mode_ifs() for a in m.get("applianceIPs", [])
            if a.get("ip") and ("{}.{}".format(m["ifName"], int(a.get("vlan") or 0)) if int(a.get("vlan") or 0) > 0 else m["ifName"]) == ifname}
     names = [t["alias"] for t in (ctx.data("passthrough-tunnels") or {}).values() if not managed(t) and t.get("sourceIpAddress") in ips]
     return names[0] if len(names) == 1 else None
@@ -1152,8 +1162,9 @@ def m_nac(ctx: Ctx) -> Optional[Dict[str, Any]]:
         return out
     name_by_if = {}
     dep = ctx.data("deployment") or {}
+    ctx.readable("ifLabels")
     lan_labels = {str(l["id"]): l["name"] for l in ((dep.get("sysConfig") or {}).get("ifLabels") or {}).get("lan") or []}
-    for m in dep.get("modeIfs", []):
+    for m in ctx.mode_ifs():
         for a in m["applianceIPs"]:
             vlan = int(a.get("vlan") or 0)
             # NAC takes LAN labels only; the appliance also keeps trusted entries for WAN interfaces

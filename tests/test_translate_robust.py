@@ -206,10 +206,12 @@ class MalformedReads(unittest.TestCase):
         self.assertNotIn("haConfig", out["deploymentInfo"])
         self.assertLedgered(ledger, "not-readable", "ha-groups")
 
-    def test_a_sys_config_map_item_of_another_shape_is_skipped(self):
-        cases = {
+    def test_a_sys_config_map_item_of_another_shape_makes_the_map_unreadable(self):
+        cases = {  # one id without a name would be written as null wherever it is used
             "vrf item": (lambda d: d["deployment"]["sysConfig"]["vrfs"].insert(0, "x"), "deployment.sysConfig.vrfs"),
             "zone item": (lambda d: d["deployment"]["sysConfig"]["vrfZonesMap"]["0"].update(b=None), "deployment.sysConfig.vrfZonesMap"),
+            "zone without name": (lambda d: d["deployment"]["sysConfig"]["vrfZonesMap"]["0"]["a"].pop("name"), "deployment.sysConfig.vrfZonesMap"),
+            "label without name": (lambda d: d["deployment"]["sysConfig"]["ifLabels"]["lan"][0].pop("name"), "deployment.sysConfig.ifLabels"),
             "role item": (lambda d: d["deployment"]["sysConfig"]["roles"].insert(0, None), "deployment.sysConfig.roles"),
         }
         for name, (change, item) in cases.items():
@@ -221,8 +223,9 @@ class MalformedReads(unittest.TestCase):
                 self.assertLedgered(notes, "toolkit-error", item)
                 out, ledger = translate(change)
                 self.assertLedgered(ledger, "toolkit-error", item)
-                self.assertEqual(interfaces(out), ["lan0", "lan0.90", "wan0"])
-                self.assertEqual(out["deploymentInfo"]["deploymentInterfaces"][0]["segment"], "Default")
+                self.assertNotIn("deploymentInfo", out)
+                self.assertTrue(any(e["disposition"] == "not-readable" and e["target"] == "deploymentInfo" for e in ledger))
+                self.assertFalse(any(e["item"] == "deployment.modeIfs" and e["disposition"] == "mapped" for e in ledger))
 
     def test_an_unreadable_sys_config_map_writes_no_deployment_info(self):
         cases = {
@@ -473,6 +476,26 @@ class FailedReads(unittest.TestCase):
                         bad(ips[0])
                 out, ledger = translate(change)
                 self.assertFalse(any(e["item"] == "deployment.dhcpFailover" and e["disposition"] == "runtime" for e in ledger))
+
+    def test_wrong_blame_is_not_added(self):
+        out, ledger = translate(lambda d: d["deployment"]["sysConfig"].update(vrfs="x"))
+        self.assertEqual([e["item"] for e in ledger if e["disposition"] == "toolkit-error"], [])
+        def nac_modeifs_null(d):
+            d["template-groups"][0].update(selectedTemplateNames=[])
+            d["nac"] = NAC
+            d["deployment"]["modeIfs"] = None
+        out, ledger = translate(nac_modeifs_null)
+        self.assertNotIn("nac", out)
+        self.assertEqual([e["item"] for e in ledger if e["disposition"] == "toolkit-error"], [])
+        self.assertTrue(any(e["disposition"] == "not-readable" and e["target"] == "nac" for e in ledger))
+
+    def test_a_dangling_label_or_zone_id_is_ledgered(self):
+        for name, change in (("label", lambda d: d["deployment"]["modeIfs"][1]["applianceIPs"][0].update(label="77")),
+                             ("zone", lambda d: d["deployment"]["modeIfs"][1]["applianceIPs"][0].update(zone=77))):
+            with self.subTest(name):
+                out, ledger = translate(change)
+                self.assertEqual(interfaces(out), ["lan0", "lan0.90", "wan0"])
+                self.assertTrue(any(e["disposition"] == "unresolved" and "77" in e["note"] for e in ledger))
 
     def test_vxlan_maps_are_not_called_vtep_less_when_the_backup_is_unreadable(self):
         for name, cfg in (("not an object", "x"), ("text not a string", {"runningConfig": 5}), ("no stored backup", [])):
