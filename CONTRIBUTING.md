@@ -42,7 +42,7 @@ edgeconnect-preconfig/
 │   ├── assets/demo.gif                       # README demo (a lab run, names and addresses replaced)
 │   └── decisions/                            # Decision records
 ├── toolkit/                                  # <-- the code: edit here; runs without any agent
-│   ├── VERSION                               # toolkit version (1.3.0)
+│   ├── VERSION                               # toolkit version
 │   ├── references/                           # 9.6/9.7/10.0 default templates, endpoint-catalogue, known-constraints, lessons, validate-behaviour, variable-ranking.json
 │   └── scripts/                              # 16 runtime scripts (cli, capture, cache_check, translate, mappers, decisions, variables, generate, cells, render, check, validate, upload, synth, options, common)
 ├── skills/

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1 (2026-10-28)
+
+Documentation only; the converter is unchanged from 1.3.0.
+
+- **Skill guidance for 1.3.0 behaviour**: `SKILL.md` now tells the agent to ask for the target appliances' ECOS and pass `--target-ecos`, to lead its report with any `Warning: apply will fail` line, to name the route labels the target Orchestrator must already have and the interfaces the target must already have, and that `not-readable` also covers failed or malformed reads and sections withheld because a template group may provide them but its templates, or the template association, could not be read. The toolkit-error row now says a failure can hit one item or a whole section. It also notes that capture redacts credentials in free text.
+- **README**: the `build` row names `--target-ecos` and what happens without it.
+
 ## 1.3.0 (2026-10-28)
 
 Combines three changes that were open as separate pull requests (#4, #5, #6).
