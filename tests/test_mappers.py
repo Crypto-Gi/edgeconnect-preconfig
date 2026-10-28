@@ -1474,6 +1474,22 @@ class DhcpRemotePoolOptions(unittest.TestCase):
         c, _ = ctx({"dhcp-remote-subnets": [first, second], "running-config": {"runningConfig": cli}})
         self.assertEqual(m_dhcpRemoteAddressPoolConfig(c).get("options"), [{"option": 15, "value": "corp.example lab.example"}])  # the latest pool is the one written
 
+    def test_a_malformed_option_keeps_the_pool(self):
+        for bad in (None, "x", {"option": 3}, {"option": "router", "value": "192.0.2.1"}):
+            with self.subTest(bad=bad):
+                c, notes = ctx({"dhcp-remote-subnets": [dict(self.POOL, options=[self.POOL["options"][0], bad, self.POOL["options"][1]])], "running-config": {"runningConfig": self.CLI}})
+                try:
+                    out = m_dhcpRemoteAddressPoolConfig(c)
+                except Exception as err:  # translate's section-level catch would drop the whole pool
+                    out = "raised {!r}".format(err)
+                self.assertEqual(out.get("options") if isinstance(out, dict) else out, [{"option": 1, "value": "255.255.255.255"}, {"option": 42, "value": "192.0.2.7"}])
+                self.assertEqual([(n["item"], n["target"]) for n in notes if n["disposition"] == "toolkit-error"], [("dhcp-remote-subnets.options[1]", "dhcpRemoteAddressPoolConfig.options")])
+
+    def test_options_of_another_shape_keep_the_pool(self):
+        c, notes = ctx({"dhcp-remote-subnets": [dict(self.POOL, options={"1": "x", "42": "y"})]})
+        self.assertEqual(m_dhcpRemoteAddressPoolConfig(c)["dhcpAddressMask"], "192.168.8.0/24")
+        self.assertEqual([n["item"] for n in notes if n["disposition"] == "toolkit-error"], ["dhcp-remote-subnets.options[0]"])
+
     def test_an_option_with_its_code_is_written_as_is(self):
         c, notes = ctx({"dhcp-remote-subnets": [dict(self.POOL, options=[{"option": 6, "value": "192.0.2.53"}])]})
         self.assertEqual(m_dhcpRemoteAddressPoolConfig(c).get("options"), [{"option": 6, "value": "192.0.2.53"}])

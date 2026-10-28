@@ -862,7 +862,14 @@ def m_dhcpRemoteAddressPoolConfig(ctx: Ctx) -> Optional[Any]:
 def pool_options(ctx: Ctx, pool: Dict[str, Any]) -> List[Dict[str, Any]]:
     """[{option, value}] of a remote pool. The API returns each option's value without its code (ECOS 9.7); the code is the key of the stored
     backup's /cn/dhcpd/config/subnet/<pool>/dhcp_options/<code> line, used only when the backup holds exactly the pool's option values."""
-    src = pool.get("options") or []
+    raw = pool.get("options") or []
+    src = []
+    for i, o in enumerate(raw if isinstance(raw, list) else [raw]):  # one malformed option is ledgered and left out, never the whole pool
+        if isinstance(o, dict) and "value" in o and str(o.get("option", 0)).isdecimal():
+            src.append(o)
+        else:
+            ctx.note("dhcp-remote-subnets.options[{}]".format(i), "toolkit-error", "dhcpRemoteAddressPoolConfig.options",
+                     "pool {} option {!r} not written: unexpected shape; a toolkit bug to report".format(pool["subnet"], o))
     if all("option" in o for o in src):
         return [{"option": int(o["option"]), "value": o["value"]} for o in src]
     found = (re.match(r"^internal set modify - /cn/dhcpd/config/subnet/(\S+)/dhcp_options/(\d+)/value value string (.*)$", l) for l in cli_lines(ctx))
