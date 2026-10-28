@@ -208,6 +208,18 @@ class RedactTest(unittest.TestCase):
             with self.subTest(text):
                 self.assertEqual(redact_secrets({"t": text})[0]["t"], want)
 
+    def test_free_text_credentials_quote_edges(self):
+        cases = {
+            'password: "Ab12 rest': 'password: <SECRET:text> rest',
+            'password: "ab\ncd"': 'password: <SECRET:text>\ncd"',
+            '{"password":"","user":"admin"}': '{"password":"","user":"admin"}',
+            "password: 'two words' x": "password: '<SECRET:text>' x",
+            "the secret password: Tango9x": "the secret <SECRET:text> <SECRET:text>",  # over-redacting the keyword is the safe side
+        }
+        for text, want in cases.items():
+            with self.subTest(text):
+                self.assertEqual(redact_secrets({"t": text})[0]["t"], want)
+
     def test_nac_server_key_is_secret_but_tag_key_is_not(self):
         out, paths = redact_secrets({"nac": {"server": [{"host": "192.0.2.5", "authport": 1812, "key": "radius-shared"}]},
                                      "tags": [{"key": "site", "value": "a"}]})

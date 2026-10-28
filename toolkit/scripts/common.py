@@ -35,14 +35,20 @@ _CLI_SECRET = re.compile(r"(?im)(\b(?:password|passwd|secret|psk|pre-shared-key|
 # "pass-through" and "token-lifetime" untouched. A quoted value is taken up to its closing quote; a bare value after a quoted JSON key
 # ends at ',' or '}'; other free text ends at whitespace, a quote or a backslash. null/true/false are not secrets.
 _TEXT_KEY = r"(?<!<)\b(?:pass(?:word|wd|code|phrase)?|pwd|pw|secret|psk|pre-shared-key|auth-key|authentication-key|api-key|token)"
-_TEXT_QUOTED = re.compile(r"(?i)(" + _TEXT_KEY + r"(?:\\?\")?[ \t]*[:=][ \t]*(\\?\"))(.+?)(\2)")
+_TEXT_QUOTED = re.compile(r"(?i)(" + _TEXT_KEY + r"(?:\\?\")?[ \t]*[:=][ \t]*(\\?[\"']))([^\n]*?)(\2)")
 _TEXT_JSON_BARE = re.compile(r"(?i)(" + _TEXT_KEY + r"\\?\"[ \t]*:[ \t]*)([^\s\\\",}]+)")
-_TEXT_FREE = re.compile(r"(?i)(" + _TEXT_KEY + r"[ \t]*[:=][ \t]*)([^\s\\\"]+)")
+_TEXT_FREE = re.compile(r"(?i)(" + _TEXT_KEY + r"[ \t]*[:=][ \t]*)(\\?[\"']?[^\s\\\"']+)")  # an unclosed quote is taken with the value
 _NOT_SECRET = ("null", "true", "false")
 
 
+def _keep(value: str) -> bool:
+    """An empty value, a placeholder already written, or null/true/false: nothing to redact (leading quotes ignored)."""
+    v = value.lstrip("\\\"'")
+    return not v or v.startswith("<SECRET:") or v.lower() in _NOT_SECRET
+
+
 def _redact_text(text: str) -> str:
-    keep = lambda v: v.startswith("<SECRET:") or v.lower() in _NOT_SECRET
+    keep = _keep
     text = _TEXT_QUOTED.sub(lambda m: m.group(0) if keep(m.group(3)) else m.group(1) + "<SECRET:text>" + m.group(4), text)
     text = _TEXT_JSON_BARE.sub(lambda m: m.group(0) if keep(m.group(2)) else m.group(1) + "<SECRET:text>", text)
     return _TEXT_FREE.sub(lambda m: m.group(0) if keep(m.group(2)) else m.group(1) + "<SECRET:text>", text)
@@ -386,8 +392,7 @@ def redact_secrets(value: Any, path: str = "$") -> Tuple[Any, List[str]]:
             if secret_key:
                 found.append(where)
                 return "<SECRET:{}>".format(where)
-            text = _CLI_SECRET.sub(lambda m: m.group(1) + "<SECRET:text>", _CRYPT.sub("<SECRET:hash>", _PEM.sub("<SECRET:pem>", item)))
-            text = _redact_text(text)
+            text = _CLI_SECRET.sub(lambda m: m.group(1) + "<SECRET:text>", _redact_text(_CRYPT.sub("<SECRET:hash>", _PEM.sub("<SECRET:pem>", item))))
             if text != item:
                 found.append(where)
             return text
