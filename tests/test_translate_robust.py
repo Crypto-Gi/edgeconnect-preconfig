@@ -459,6 +459,21 @@ class FailedReads(unittest.TestCase):
         self.assertNotIn("dhcpHA", out["deploymentInfo"]["dhcpInfo"][0])
         self.assertTrue(any(e["item"] == "deployment.dhcpFailover" and e["disposition"] == "unresolved" for e in ledger))
 
+    def test_an_unknown_dhcp_entry_counts_as_possibly_wanting_failover(self):
+        def base(d):
+            d["deployment"]["dhcpFailover"] = {"lan0": {"role": "primary", "my_ip": "10.0.0.1", "my_port": 647, "peer_ip": "10.0.0.2", "peer_port": 647}}
+        for name, bad in (("dhcpd x", lambda a: a.update(dhcpd="x")), ("vlan x", lambda a: a.update(vlan="x")), ("entry null", None)):
+            with self.subTest(name):
+                def change(d):
+                    base(d)
+                    ips = d["deployment"]["modeIfs"][1]["applianceIPs"]
+                    if bad is None:
+                        ips[0] = None
+                    else:
+                        bad(ips[0])
+                out, ledger = translate(change)
+                self.assertFalse(any(e["item"] == "deployment.dhcpFailover" and e["disposition"] == "runtime" for e in ledger))
+
     def test_vxlan_maps_are_not_called_vtep_less_when_the_backup_is_unreadable(self):
         for name, cfg in (("not an object", "x"), ("text not a string", {"runningConfig": 5}), ("no stored backup", [])):
             with self.subTest(name):

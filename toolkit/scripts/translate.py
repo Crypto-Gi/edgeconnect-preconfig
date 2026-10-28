@@ -420,6 +420,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
         except ITEM_ERRORS as err:
             item_failed(ctx, "deployment.modeIfs[{}]".format(mode_if.get("ifName", i) if isinstance(mode_if, dict) else i), "deploymentInfo.deploymentInterfaces", err)
             if_failed = True
+            if isinstance(mode_if, dict) and isinstance(mode_if.get("ifName"), str):
+                fo_wanted.add(mode_if["ifName"])  # unknown entries may have wanted failover: no "no server has failover" claim
             continue
         if ha_if and if_name == ha_if:
             ha_mode_entries.extend(ips)
@@ -457,6 +459,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
             except ITEM_ERRORS as err:
                 item_failed(ctx, "deployment.modeIfs[{}] applianceIPs[{}]".format(if_name, j), "deploymentInfo.deploymentInterfaces", err)
                 if_failed = True
+                if isinstance(if_name, str):
+                    fo_wanted.add(if_name)
                 continue
             interfaces.append(item)
             if wan and a["label"] != "" and item["interfaceLabel"] is None:
@@ -510,6 +514,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
                     dhcp.append(entry)
             except ITEM_ERRORS as err:
                 item_failed(ctx, "deployment.modeIfs[{}].dhcpd".format(name), "deploymentInfo.dhcpInfo", err)
+                if isinstance(if_name, str):
+                    fo_wanted.add(if_name)
             try:
                 ra = a.get("ra")
                 if ra and ":" not in str(a.get("ip")):
