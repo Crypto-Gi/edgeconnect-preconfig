@@ -929,12 +929,19 @@ def m_thirdPartyServicesAssociation(ctx: Ctx) -> Optional[Dict[str, Any]]:
 
 
 def m_multicast(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
-    source = ctx.data("multicast-config")
+    source, enable = ctx.data("multicast-config"), ctx.data("multicast-enable")
+    one = isinstance(source, dict)  # ECOS before 9.7 (seen on 9.5.7 and 9.6.4): one object without vrf_id, and enable as {"enable": ...}
+    if one:
+        on = enable.get("enable") if isinstance(enable, dict) else None
+        if not on and not any(source.get(k) for k in ("rp", "pim", "igmp", "filter_name")):
+            ctx.note("multicast-config", "default-omitted", "multicast", "multicast disabled and not configured")
+            return None
+        source, enable = [dict(source, vrf_id=0)], [{"vrf_id": 0, "enable": on}]
     if not isinstance(source, list):
         if source:
-            ctx.note("multicast-config", "unresolved", "multicast", "this release returns multicast as one object keyed pim0, pim1..., without interface names; the mapping to interfaces is unknown")
+            ctx.note("multicast-config", "unresolved", "multicast", "the multicast read has an unexpected shape ({}), not written".format(type(source).__name__))
         return None
-    flags = {str(e.get("vrf_id")): e.get("enable") for e in (ctx.data("multicast-enable") or []) if isinstance(e, dict)}
+    flags = {str(e.get("vrf_id")): e.get("enable") for e in (enable or []) if isinstance(e, dict)}
     known = set()
     for m in ctx.mode_ifs():
         for a in m["applianceIPs"]:
@@ -946,6 +953,9 @@ def m_multicast(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         try:
             enabled = flags.get(str(seg["vrf_id"]))
             for stale in sorted(k for k in (seg.get("pim") or {}) if k not in known):
+                if re.match(r"^pim\d+$", stale):  # 'interface pimN virtual pim' in the running-config; the 9.7 list read does not report them
+                    ctx.note("multicast-config", "runtime", "multicast.pim", "pim entry '{}' is a virtual PIM interface, not an interface or label a preconfig can name; not written".format(stale))
+                    continue
                 ctx.note("multicast-config", "runtime", "multicast.pim", "pim entry '{}' matches no interface or label of this appliance (stale); the validator rejects it".format(stale))
             pim = [{"interfaceName": k, "pimEnable": v["enable"], "igmpEnable": bool((seg.get("igmp") or {}).get(k, {}).get("enable")), "drPriority": v["dr_priority"], "helloInterval": v["hello_interval"],
                     "joinPruneInterval": v["join_prune_interval"]} for k, v in sorted((seg.get("pim") or {}).items()) if k in known]
@@ -958,6 +968,8 @@ def m_multicast(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     if source and not out:  # every segment failed (ledgered above); an empty source list is written as before
         return None
     ctx.note("multicast-config", "mapped", "multicast", "{} segment(s); igmpEnable true when the interface is listed under igmp (assumption); enable written as a string true/false/none".format(len(out)))
+    if one:
+        ctx.note("multicast-config", "mapped", "multicast", "one object without segment (ECOS before 9.7), written as the Default segment (assumption: multicast before 9.7 is not per segment)")
     return out
 
 

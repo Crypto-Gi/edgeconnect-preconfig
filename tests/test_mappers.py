@@ -1478,5 +1478,34 @@ class DhcpRemotePoolOptions(unittest.TestCase):
         self.assertEqual(m_dhcpRemoteAddressPoolConfig(c).get("options"), [{"option": 6, "value": "192.0.2.53"}])
 
 
+class MulticastOneObject(unittest.TestCase):
+    """ECOS before 9.7 returns multicast as one object without vrf_id (seen on 9.5.7 and 9.6.4): it is the Default segment's; named
+    interfaces are written, the virtual PIM interfaces (pimN) are ledgered as runtime."""
+    PIM = {"dr_priority": 1, "enable": True, "hello_interval": 30, "join_prune_interval": 30}
+
+    def test_configured_object_is_the_default_segment(self):
+        c, notes = ctx({"deployment": DEP, "multicast-enable": {"enable": True},
+                        "multicast-config": {"rp": "192.0.2.9", "pim": {"lan0": self.PIM, "pim0": self.PIM, "pim1": self.PIM}, "igmp": {"lan0": {"enable": True}}, "filter_name": ""}})
+        self.assertEqual(m_multicast(c), [{"segment": "Default", "enable": "true", "rpAddresses": "192.0.2.9", "filterName": None,
+                                           "pim": [{"interfaceName": "lan0", "pimEnable": True, "igmpEnable": True, "drPriority": 1, "helloInterval": 30, "joinPruneInterval": 30}]}])
+        self.assertEqual(sorted(n["note"].split("'")[1] for n in notes if n["disposition"] == "runtime"), ["pim0", "pim1"])
+        self.assertTrue(all("virtual PIM interface" in n["note"] for n in notes if n["disposition"] == "runtime"), notes)
+        self.assertFalse([n for n in notes if n["disposition"] in ("unresolved", "toolkit-error")], notes)
+
+    def test_switched_off_but_configured_and_other_unknown_entries(self):
+        c, notes = ctx({"deployment": DEP, "multicast-enable": {"enable": False}, "multicast-config": {"rp": "192.0.2.9", "pim": {"pimlan": self.PIM}, "igmp": {}, "filter_name": ""}})
+        out = m_multicast(c)
+        self.assertEqual((out[0]["enable"], out[0]["rpAddresses"], out[0]["pim"]), ("false", "192.0.2.9", []))
+        self.assertEqual([n["note"] for n in notes if n["disposition"] == "runtime"], ["pim entry 'pimlan' matches no interface or label of this appliance (stale); the validator rejects it"])
+        self.assertTrue([n for n in notes if n["disposition"] == "mapped" and "written as the Default segment (assumption" in n["note"]], notes)
+
+    def test_unconfigured_object_is_default_omitted(self):
+        c, notes = ctx({"deployment": DEP, "multicast-enable": {"enable": False}, "multicast-config": {"rp": "", "pim": {}, "igmp": {}, "filter_name": ""}})
+        self.assertIsNone(m_multicast(c))
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "multicast-config"], ["default-omitted"])
+        c, notes = ctx({"deployment": DEP, "multicast-enable": {"enable": True}, "multicast-config": {"rp": "", "pim": {}, "igmp": {}, "filter_name": ""}})
+        self.assertEqual(m_multicast(c)[0]["enable"], "true")  # switched on with nothing else set is still a setting
+
+
 if __name__ == "__main__":
     unittest.main()
