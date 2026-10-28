@@ -4,6 +4,7 @@ import io
 import json
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -189,7 +190,9 @@ class RedactTest(unittest.TestCase):
         self.assertEqual(out["cli"], 'web proxy-server "{\\"host\\":\\"192.0.2.8\\",\\"username\\":\\"u\\",\\"password\\":\\"<SECRET:text>\\"}"')
         out, _ = redact_secrets({"note": '{"password":"Golf7x"} and password="Hotel8x"'})
         self.assertEqual(out["note"], '{"password":"<SECRET:text>"} and password="<SECRET:text>"')
-        out, _ = redact_secrets({"note": '{"pwd":12345,"next":1}'})  # an unquoted value ends at the next JSON delimiter
+        out, _ = redact_secrets({"note": '{"pwd":12345,"next":1}'})  # guard-ok: a JSON number is left alone, like a keyed field (review of a3adc51)
+        self.assertEqual(out["note"], '{"pwd":12345,"next":1}')
+        out, _ = redact_secrets({"note": '{"pwd":abc12,"next":1}'})  # an unquoted word value ends at the next JSON delimiter
         self.assertEqual(out["note"], '{"pwd":<SECRET:text>,"next":1}')
 
     def test_free_text_credentials_whole_value(self):
@@ -226,8 +229,11 @@ class RedactTest(unittest.TestCase):
                 out, paths = redact_secrets({"t": text})
                 self.assertEqual(out["t"], want)
                 self.assertEqual(paths, ["$.t"] if want != text else [])
-                if text.startswith("{"):
-                    json.loads(out["t"])  # redaction never breaks JSON structure
+                try:
+                    json.loads(text)
+                except ValueError:
+                    continue
+                json.loads(out["t"])  # redaction never breaks JSON structure
 
     def test_free_text_compound_key_names(self):
         self.assertRedacts({
@@ -249,7 +255,8 @@ class RedactTest(unittest.TestCase):
             '{"secretKeyId":"Mike4x"}': '{"secretKeyId":"<SECRET:text>"}',  # same as a keyed field of that name
             # not secrets: a word that only contains "pass", a secret word with a suffix, booleans
             '{"passThrough":"on","bypass":"Nov5x","md5Enabled":true}': '{"passThrough":"on","bypass":"Nov5x","md5Enabled":true}',
-            "token-lifetime: 3600 pass-through: on xpassword: Oscar6x": "token-lifetime: 3600 pass-through: on xpassword: Oscar6x",
+            "token-lifetime: 3600 pass-through: on": "token-lifetime: 3600 pass-through: on",
+            "xpassword: Oscar6x": "xpassword: <SECRET:text>",  # guard-ok: any name holding a keyed-field word, as for quoted keys (review of a3adc51)
         })
 
     def test_free_text_value_with_quotes_and_backslashes(self):
@@ -258,6 +265,7 @@ class RedactTest(unittest.TestCase):
             "password: Ab\\cd9 next": "password: <SECRET:text> next",
             '{"password":"ab\\"cd9","x":1}': '{"password":"<SECRET:text>","x":1}',
             "password: 'it\\'s9x' next": "password: '<SECRET:text>' next",
+            'password: \\"ab\\ncd9x\\" next': 'password: \\"<SECRET:text>\\" next',  # an escape inside a \\"-quoted value
             'note "pass: Alpha1x" end': 'note "pass: <SECRET:text>" end',  # a quote before whitespace ends the value
             "pass: (Bravo2x), next": "pass: <SECRET:text> next",
             '{"x":"pass: Charlie3x","y":1}': '{"x":"pass: <SECRET:text>","y":1}',  # a quote before a delimiter ends the value
@@ -285,6 +293,70 @@ class RedactTest(unittest.TestCase):
             "pass island": "pass island",
             "md5 => Golf7x": "md5 => <SECRET:text>",
         })
+
+    def test_free_text_json_numbers_are_left_alone(self):
+        self.assertRedacts({
+            '{"tokenLifetime":3600}': '{"tokenLifetime":3600}',
+            '{"passwordMinLength":8,"md5KeyId":1}': '{"passwordMinLength":8,"md5KeyId":1}',
+            '{"psk":12345,"secret":-1.5e3,"pw":null}': '{"psk":12345,"secret":-1.5e3,"pw":null}',
+            '{"secret":[1,2]}': '{"secret":[1,2]}',
+            "token-lifetime: 3600 tokenLifetime=3600": "token-lifetime: 3600 tokenLifetime=3600",
+            "password: 12345": "password: <SECRET:text>",  # a plain secret word in prose still takes a number
+        })
+
+    def test_free_text_unquoted_compound_keys(self):
+        self.assertRedacts({
+            "adminPassword: Echo5x": "adminPassword: <SECRET:text>",
+            "adminPassword=Echo5x": "adminPassword=<SECRET:text>",
+            "privateKey: Golf7x": "privateKey: <SECRET:text>",
+            "private_key=Golf7x": "private_key=<SECRET:text>",
+            "ike_key: Hotel8x": "ike_key: <SECRET:text>",
+            "md5: India9x": "md5: <SECRET:text>",
+            "md5=India9x": "md5=<SECRET:text>",
+            "md5: 12345": "md5: <SECRET:text>",
+            "admin_pwd: Papa1x pass_key: Quebec1x admin_password: 12345": "admin_pwd: <SECRET:text> pass_key: <SECRET:text> admin_password: <SECRET:text>",
+            "{'password': 'Juliet1x'}": "{'password': '<SECRET:text>'}",
+            "{'adminPassword': 'Juliet1x'}": "{'adminPassword': '<SECRET:text>'}",
+            '{"secret":[["Kilo2x"]]}': '{"secret":["<SECRET:text>"]}',
+            "passThrough: on bypass: on keyId: k1 authType: pap auth-vlan: 10": "passThrough: on bypass: on keyId: k1 authType: pap auth-vlan: 10",
+        })
+
+    def test_free_text_prose_fillers_need_a_value_that_is_not_a_word(self):
+        self.assertRedacts({
+            "password is required": "password is required",
+            "the token is valid for 3600s": "the token is valid for 3600s",
+            "password - see vault": "password - see vault",
+            "admin_password is set": "admin_password is set",
+            "password is Abc123!": "password is <SECRET:text>",
+            "password => alpha": "password => <SECRET:text>",
+        })
+
+    def test_free_text_redaction_keeps_json_valid(self):
+        objects = [
+            {"note": "pass=x\\", "y": "z"}, {"psk": "a\\"}, {"psk": "\\\""}, {"psk": "ab\"cd\\\\"}, {"a": "pass: 'x", "b": "don't"},
+            {"note": "password: \"abc\" ok", "x": 1}, {"desc": "password: x\"", "x": 1}, {"desc": "password='a\"b'", "x": 1},
+            {"secret": ["a]b", "c\"]d"]}, {"psk": ["a", "b"], "nest": {"token": ["c"]}}, {"psk": "a,b}c", "x": 1},
+            {"passwordMinLength": 8, "tokenLifetime": 3600, "md5KeyId": 1}, {"secret": [["x"]], "pw": [1]},
+        ]
+        for obj in objects:
+            for text in (json.dumps(obj), json.dumps(obj, separators=(",", ":")), json.dumps(json.dumps(obj))):
+                with self.subTest(text):
+                    out = redact_secrets({"t": text})[0]["t"]
+                    if text.startswith("{"):
+                        self.assertEqual(json.loads(out).keys(), obj.keys())  # no key is swallowed into a value
+                    self.assertEqual(redact_secrets({"t": out})[0]["t"], out)  # a second pass changes nothing
+        self.assertEqual(redact_secrets({"t": json.dumps({"a": "pass: 'x", "b": "don't"})})[0]["t"], "{\"a\": \"pass: <SECRET:text>\", \"b\": \"don't\"}")
+        out = redact_secrets({"t": '{"note":"pass=x\\\\","y":"z"}'})[0]["t"]
+        self.assertEqual(out, '{"note":"pass=<SECRET:text>","y":"z"}')
+
+    def test_long_runs_stay_linear(self):
+        n = 2000
+        for text in ('banner "password: \\"' + "\\\\" * n + "x", 'password: "' + "\\" * n, "password: " + "\\" * n, 'password: "' + '\\"' * n,
+                     '"secret":[' + '"a",' * n, '"secret":[' + "[" * n, "pw " + "-" * n * 50, "a-" * n * 50, '"' + "a-" * n * 50,
+                     "password" + " " * n * 50, '"' * n * 50, "password is " * n, "x_" * n * 50, '"pw":' * n * 10):
+            start = time.perf_counter()
+            redact_secrets({"t": text})
+            self.assertLess(time.perf_counter() - start, 1.0, text[:40])
 
     def test_nac_server_key_is_secret_but_tag_key_is_not(self):
         out, paths = redact_secrets({"nac": {"server": [{"host": "192.0.2.5", "authport": 1812, "key": "radius-shared"}]},
