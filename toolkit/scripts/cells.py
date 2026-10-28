@@ -68,11 +68,19 @@ def describe(meta: Dict[str, Any], limits: Dict[Tuple[str, str], Dict[str, Any]]
     return {"int": "whole number", "float": "number", "bool": "true or false", "comma-list": "names separated by commas"}.get(meta["type"], "text")
 
 
+# Secrets /validate rejects when empty ("NAC - server key can not be empty"); other secrets (OSPF, BGP keys) may be blank
+REQUIRED_SECRET = re.compile(r"^nac\.server\[\d+\]\.key$")
+
+
 def cell_problems(columns: Dict[str, Dict[str, Any]], row: Dict[str, str], limits: Dict[Tuple[str, str], Dict[str, Any]]) -> List[str]:
     problems = []
     for name, meta in columns.items():
         cell = row.get(name)
-        if cell is None or meta.get("secret"):
+        if cell is None:
+            continue
+        if meta.get("secret"):
+            if cell == "" and REQUIRED_SECRET.match(meta.get("path", "")):
+                problems.append("secret column {} is empty: fill it in the CSV (the toolkit never stores secrets)".format(name))
             continue
         fmt = meta.get("format")
         mode = (row.get(meta["mode_column"]) or "") if meta.get("mode_column") else meta.get("mode")

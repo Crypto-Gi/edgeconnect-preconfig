@@ -112,6 +112,18 @@ class Cells(unittest.TestCase):
         self.assertEqual(len(message), 1)
         self.assertIn("lan0_start: 198.51.100.10 is not inside the subnet of lan0_ip", message[0])
 
+    def test_an_empty_secret_is_refused_only_where_orchestrator_rejects_it(self):
+        ref = dict(REFERENCE, nac={"server": [{"id": 1, "host": "192.0.2.5", "key": "<SECRET:nac.server.1.key>"}]},
+                   ospfSystemConfig={"interfaces": [{"interfaceName": "lan0", "authenticationKey": "<SECRET:ospf.lan0.authKey>"}]})
+        meta = generate(ref, Path(tempfile.mkdtemp()), "t", names=VARIABLE, decide=lambda p, v, s: p in VARIABLE or s, host_paths=HOST, release="9.7.1.42046")
+        key = next(n for n, c in meta["columns"].items() if c["path"] == "nac.server[0].key")
+        ospf = next(n for n, c in meta["columns"].items() if c["path"] == "ospfSystemConfig.interfaces[0].authenticationKey")
+        self.assertTrue(meta["columns"][key]["secret"] and meta["columns"][ospf]["secret"])
+        row = dict(self.row, **{key: "", ospf: ""})
+        self.assertEqual(cell_problems(meta["columns"], row, self.limits),
+                         ["secret column {} is empty: fill it in the CSV (the toolkit never stores secrets)".format(key)])
+        self.assertEqual(cell_problems(meta["columns"], dict(row, **{key: "s3cret", ospf: " pass phrase "}), self.limits), [])  # a secret is typed as is, never format-checked
+
     def test_render_and_upload_cli(self):
         sites = self.out / "sites.csv"
         with sites.open("w", newline="") as handle:
