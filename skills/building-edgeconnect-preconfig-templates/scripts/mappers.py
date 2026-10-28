@@ -244,15 +244,38 @@ def ospf_interface(name: str, i: Dict[str, Any]) -> Dict[str, Any]:
             "authenticationKey": nul(i["authKey"]), "md5Key": i["md5Key"], "md5Password": nul(i["md5Password"]), "comment": nul(i["comment"])}
 
 
-def deployed(ctx: Ctx, item: str, target: str, ifs: Dict[str, Any]) -> Dict[str, Any]:
-    """The routing interfaces of ifs that the preconfig creates: deployment entries (ifName or ifName.vlan) and user loopbacks and VTIs.
-    The others are ledgered and left out: Orchestrator-managed loopbacks/VTIs (gms_marked), and interfaces nothing in the preconfig deploys,
-    which apply cannot configure."""
+def carried_ifs(ctx: Ctx) -> Tuple[set, set]:
+    """(interfaces the preconfig creates, Orchestrator-managed ones): deployment entries (ifName or ifName.vlan) and user loopbacks and VTIs;
+    gms_marked loopbacks and VTIs. Unreadable when the interfaces read is."""
     names, gms = {"{}.{}".format(m["ifName"], int(a.get("vlan") or 0)) if int(a.get("vlan") or 0) > 0 else m["ifName"] for m in ctx.mode_ifs() for a in m["applianceIPs"]}, set()
     for ident in ("loopbacks", "vtis"):
         src = ctx.data(ident)
         for k, v in (src.items() if isinstance(src, dict) else []):
             (gms if managed(v) else names).add(k)
+    return names, gms
+
+
+def note_ref(ctx: Ctx, item: str, target: str, what: str, iface: Any) -> None:
+    """Ledger a written field that names an interface the preconfig does not create. The value is kept: it is the source's own setting and the
+    target may already have the interface (an interface label name counts as carried)."""
+    if iface in (None, "", "any", "default"):
+        return
+    try:
+        names, gms = carried_ifs(ctx)
+    except Unreadable:  # ledgered where the interfaces are read
+        return
+    if iface in names or iface in ctx.labels.values():
+        return
+    if iface in gms:
+        ctx.note(item, "orchestrator-managed", target, "{} references interface {}, an Orchestrator-managed interface (gms_marked); the target's Orchestrator must create it".format(what, iface))
+    else:
+        ctx.note(item, "unresolved", target, "{} references interface {}, which this preconfig does not create; the target must already have it".format(what, iface))
+
+
+def deployed(ctx: Ctx, item: str, target: str, ifs: Dict[str, Any]) -> Dict[str, Any]:
+    """The routing interfaces of ifs that the preconfig creates (carried_ifs). The others are ledgered and left out: Orchestrator-managed
+    loopbacks/VTIs (gms_marked), and interfaces nothing in the preconfig deploys, which apply cannot configure."""
+    names, gms = carried_ifs(ctx)
     for name in sorted(set(ifs) - names):
         if name in gms:
             ctx.note(item, "orchestrator-managed", target, "OSPF interface {} is an Orchestrator-managed interface (gms_marked); not written".format(name))
@@ -442,6 +465,8 @@ def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str,
                 item_failed(ctx, "{} neighbor {}".format(label, ip), target, err)
             continue
         out["neighbors"].append(nb)
+        if label != "check":
+            note_ref(ctx, "{} neighbor {}".format(label, ip), target + ".sourceIpInterface", "BGP neighbor " + ip, nb["sourceIpInterface"])
         ctx.unmapped("{} neighbor {}".format(label, ip), n, BGP_NEIGHBOR_USED, target)
     if failed and not out["neighbors"]:  # neighbors replace on apply: an empty list would remove the target's
         raise ValueError("no BGP neighbor could be read")
@@ -510,6 +535,7 @@ def m_vrrp(ctx: Ctx) -> Optional[Dict[str, Any]]:
             item_failed(ctx, "vrrp group {}".format(v.get("groupId") if isinstance(v, dict) else v), "vrrp", err)
             continue
         out.append(entry)
+        note_ref(ctx, "vrrp group {}".format(v["groupId"]), "vrrp.interfaceName", "VRRP group {}".format(v["groupId"]), entry["interfaceName"])
         ctx.unmapped("vrrp group {}".format(v["groupId"]), v, {"groupId", "interface", "enable", "vipaddr", "adv_timer", "priority", "tracker", "version", "preempt", "auth", "desc", "pkt_trace", "holddown"} | runtime, "vrrp")
     if not out:
         return None
@@ -670,6 +696,7 @@ def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.
     for key, value in (("comment", cfg.get("comment") or conf.get("comment")), ("tag", cfg.get("dir") or conf.get("tag"))):  # subnets3 calls the tag dir, /subnets/all calls it tag
         if value:
             route[key] = value
+    note_ref(ctx, "subnets", target + ".interfaceName", "route " + st["prefix"], if_name)
     return route
 
 
@@ -1079,6 +1106,7 @@ def m_ipSlaRule(ctx: Ctx) -> Optional[Dict[str, Any]]:
                     monitor["tunnelName"] = op["tunnel-name"]
                 if op.get("src-port-label") or op.get("src-port-name"):
                     monitor["sourceInterfaceName"] = op.get("src-port-label") or op.get("src-port-name")
+                    note_ref(ctx, "ipsla-managers[{}]".format(k), "ipSlaRule.ipslaMonitor.sourceInterfaceName", "IP SLA rule " + k, monitor["sourceInterfaceName"])
                 if str(op.get("force-dns")).lower() == "true":
                     monitor["forceDnsThroughProbePath"] = True
                 if monitor.get("sourceInterfaceName") and not monitor.get("interfaceName") and not monitor.get("tunnelName"):
@@ -1203,6 +1231,7 @@ def m_vxlan(ctx: Ctx) -> Optional[Dict[str, Any]]:
                 item_failed(ctx, "vxlan-vni-map[{}]".format(seg_id), "vxlan", err)
         maps.sort(key=lambda x: int(x["vni"]))
         ctx.note("vxlan, vxlan-vni-map", "mapped", "vxlan", "vtep interface {} and {} VNI map(s)".format(live["vtepIf"], len(maps)))
+        note_ref(ctx, "vxlan", "vxlan.vtepSrcInterface", "the VXLAN VTEP", live["vtepIf"])
         return {"destinationUdpPort": int(live.get("port", 4789)), "vtepSrcInterface": live["vtepIf"], "vniVrfMaps": maps}
     lines = cli_lines(ctx)
     vtep = next((m.group(1) for l in lines for m in [re.match(r"^vxlan vtep-interface (\S+)$", l)] if m), None)
@@ -1225,6 +1254,7 @@ def m_vxlan(ctx: Ctx) -> Optional[Dict[str, Any]]:
         ctx.readable("vrfs")  # the CLI names segments: their zone ids resolve per segment id
     maps = sorted([{"vni": v["vni"], "segment": seg, "zone": ctx.zone(next((k for k, n in ctx.vrfs.items() if n == seg), "0"), v.get("zone", 0)), "role": ctx.role(v.get("role-id", 0)) or "default"} for seg, v in sorted(vni.items()) if "vni" in v], key=lambda x: int(x["vni"]))
     cli_note(ctx, "vxlan", "vtep interface and VNI maps")
+    note_ref(ctx, "vxlan", "vxlan.vtepSrcInterface", "the VXLAN VTEP", vtep)
     return {"destinationUdpPort": live.get("port", 4789), "vtepSrcInterface": vtep, "vniVrfMaps": maps}
 
 

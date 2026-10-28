@@ -1601,7 +1601,7 @@ class InterfaceRouteNextHopZero(unittest.TestCase):
         c = Ctx(FakeCap({"deployment": DEP, "subnets": {"subnets": {"entries": [self.IFROUTE, self.ANY_IF, {"state": ROUTE}]}}}), notes)
         c.target_release, c.target_ecos = release, ecos  # what translate --target-release and --target-ecos set
         from mappers import m_localRoutes
-        return [(r["routeIpSubnet"], r["interfaceName"]) for r in m_localRoutes(c)["routes"]], [n["note"] for n in notes if n["disposition"] == "unresolved"]
+        return [(r["routeIpSubnet"], r["interfaceName"]) for r in m_localRoutes(c)["routes"]], [n["note"] for n in notes if n["disposition"] == "unresolved" and "next hop 0.0.0.0" in n["note"]]
 
     def test_ecos_97_and_later_drops(self):
         for ecos in ("9.7.1.0", "10.0.0.1"):
@@ -1711,6 +1711,63 @@ class OspfOnDeployedInterfaces(unittest.TestCase):
                         "ospf-interfaces-all-vrfs": {"0": {"lan0": OSPF_IF, "lan2": OSPF_IF, "vti1": OSPF_IF}, "1": {"lan0.71": OSPF_IF, "lan0.72": OSPF_IF, "lan3": OSPF_IF, "lan3.1": OSPF_IF}}})
         self.assertEqual([[i["interfaceName"] for i in s["interfaces"]] for s in m_segmentOspfConfig(c)], [["lan0", "vti1"], ["lan0.71", "lan3.1"]])
         self.assertEqual(self.dropped(notes), [("unresolved", "OSPF interface lan0.72"), ("unresolved", "OSPF interface lan2"), ("unresolved", "OSPF interface lan3")])
+
+
+class InterfaceReferences(unittest.TestCase):
+    """A field that names an interface the preconfig does not create is kept (the source's real value; the target may have the interface)
+    and ledgered: orchestrator-managed for a gms_marked loopback or VTI, unresolved otherwise. The same check as the OSPF interfaces."""
+    LOOPBACKS = {"lo20000": {"admin": True, "ipaddr": "192.0.2.2", "nmask": 32, "label": "", "vrf_id": 0, "zone": 0, "gms_marked": True}}
+
+    def refs(self, notes):
+        return sorted((n["disposition"], n["note"]) for n in notes if "references interface" in n["note"])
+
+    def test_bgp_source_interfaces(self):
+        neighbors = {"192.0.2.2": dict(NEIGHBOR, lcl_interface="lo20000"), "192.0.2.3": dict(NEIGHBOR, lcl_interface="lo20001"), "192.0.2.4": dict(NEIGHBOR, lcl_interface="lan0"),
+                     "192.0.2.5": dict(NEIGHBOR, lcl_interface="any")}
+        c, notes = ctx({"deployment": DEP, "loopbacks": self.LOOPBACKS, "bgp-system": {"enable": True, "asn": 65000}, "bgp-neighbors": neighbors})
+        self.assertEqual([n["sourceIpInterface"] for n in m_bgpSystemConfig(c)["neighbors"]], ["lo20000", "lo20001", "lan0", "any"])  # kept as the source has them
+        self.assertEqual(self.refs(notes), [
+            ("orchestrator-managed", "BGP neighbor 192.0.2.2 references interface lo20000, an Orchestrator-managed interface (gms_marked); the target's Orchestrator must create it"),
+            ("unresolved", "BGP neighbor 192.0.2.3 references interface lo20001, which this preconfig does not create; the target must already have it")])
+
+    def test_vxlan_vrrp_route_and_ip_sla(self):
+        c, notes = ctx({"deployment": DEP, "vxlan": {"port": 4789, "vtepIf": "lo20001"}, "vxlan-vni-map": {}})
+        self.assertEqual(m_vxlan(c)["vtepSrcInterface"], "lo20001")
+        self.assertEqual([d for d, _ in self.refs(notes)], ["unresolved"])
+        group = {"groupId": 1, "interface": "lan0.9", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 1, "priority": 100, "version": 2, "preempt": True, "pkt_trace": False, "holddown": 10}
+        c, notes = ctx({"deployment": DEP, "vrrp": [group, dict(group, groupId=2, interface="lan0")]})
+        self.assertEqual([g["interfaceName"] for g in m_vrrp(c)["vrrpEntries"]], ["lan0.9", "lan0"])
+        self.assertEqual(self.refs(notes), [("unresolved", "VRRP group 1 references interface lan0.9, which this preconfig does not create; the target must already have it")])
+        from mappers import m_localRoutes
+        c, notes = ctx({"deployment": DEP, "subnets": {"subnets": {"entries": [{"state": dict(ROUTE, ifName="lan7")}, {"state": dict(ROUTE, prefix="203.0.113.0/24")}]}}})
+        self.assertEqual([r["interfaceName"] for r in m_localRoutes(c)["routes"]], ["lan7", "lan0"])
+        self.assertEqual(self.refs(notes), [("unresolved", "route 198.51.100.0/24 references interface lan7, which this preconfig does not create; the target must already have it")])
+        from mappers import m_ipSlaRule
+        op = {"type": "ip-monitor", "ip-monitor-ip": "192.0.2.98", "tunnel-name": "to_peer", "src-port-name": "lo20000"}
+        c, notes = ctx({"deployment": DEP, "loopbacks": self.LOOPBACKS, "ipsla-managers": {"MGR_1": {"enable": True, "interval": "1", "comment": "", "upAction": "def-alarm",
+                                                                                                    "downAction": "alarm", "operation": {"OPR_1": op}}}})
+        self.assertEqual(m_ipSlaRule(c)["ruleEntries"][0]["ipslaMonitor"]["sourceInterfaceName"], "lo20000")
+        self.assertEqual([d for d, _ in self.refs(notes)], ["orchestrator-managed"])
+
+    def test_segment_bgp_cli_vxlan_and_unreadable_interfaces(self):
+        c, notes = ctx({"deployment": DEP3, "bgp-system-all-vrfs": {"0": {"enable": True, "asn": 65000}, "1": {"enable": True, "asn": 65000}},
+                        "bgp-neighbors-all-vrfs": {"1": {"192.0.2.3": dict(NEIGHBOR, lcl_interface="lo20001")}}})
+        m_segmentBgpSystems(c)
+        self.assertEqual([n["item"] for n in notes if "references interface" in n["note"]], ["bgp-system-all-vrfs[1] neighbor 192.0.2.3"])  # not the "check" probe
+        c, notes = ctx({"deployment": DEP, "running-config": {"runningConfig": "vxlan vtep-interface lo20001\n"}})
+        self.assertEqual(m_vxlan(c)["vtepSrcInterface"], "lo20001")
+        self.assertEqual([d for d, _ in self.refs(notes)], ["unresolved"])
+        group = {"groupId": 1, "interface": "lan0.9", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 1, "priority": 100, "version": 2, "preempt": True, "pkt_trace": False, "holddown": 10}
+        c, notes = ctx({"deployment": dict(DEP, modeIfs="odd"), "vrrp": [group]})
+        self.assertEqual([g["interfaceName"] for g in m_vrrp(c)["vrrpEntries"]], ["lan0.9"])  # an unreadable interfaces read never stops the section
+        self.assertEqual(self.refs(notes), [])
+
+    def test_label_names_count_as_carried(self):
+        from mappers import m_ipSlaRule
+        op = {"type": "ip-monitor", "ip-monitor-ip": "192.0.2.98", "src-port-label": "Voice"}
+        c, notes = ctx({"deployment": DEP, "ipsla-managers": {"MGR_1": {"enable": True, "interval": "1", "comment": "", "upAction": "def-alarm", "downAction": "alarm", "operation": {"OPR_1": op}}}})
+        m_ipSlaRule(c)
+        self.assertEqual(self.refs(notes), [])
 
 
 if __name__ == "__main__":
