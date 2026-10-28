@@ -387,7 +387,7 @@ class RedactTest(unittest.TestCase):
         rng = random.Random(20261028)
         secret_keys = ["password", "adminPassword", "psk", "secret", "token", "md5", "x_password", "apiKey", "pre-shared-key", "tokenLifetime"]
         other_keys = ["name", "desc", "banner", "prompt", "keyId", "mode", "bypass", "passThrough", "motd"]
-        pieces = ["a", "Q9", "\\", "\\\\", '"', "'", " ", "Password: ", "Enter password: ", "pass:", "token = ", 'x"y', "]", "}", ",", " is ", "1", "-"]
+        pieces = ["a", "Q9", "\\", "\\\\", '"', "'", " ", "Password: ", "Enter password: ", "pass:", "token = ", 'x"y', "]", "}", ",", ":", " is ", "1", "-"]
         hint = re.compile(r"(?i)pass|pw|secret|psk|token|key|md5")
 
         def value(depth):
@@ -398,7 +398,24 @@ class RedactTest(unittest.TestCase):
                 return {rng.choice(secret_keys + other_keys): value(depth + 1) for _ in range(rng.randint(0, 3))}
             if pick < 0.45:
                 return rng.choice([rng.randint(-9, 99999), True, False, None])
-            return "".join(rng.choice(pieces) for _ in range(rng.randint(0, 6)))
+            text = [rng.choice(pieces) for _ in range(rng.randint(0, 6))]
+            text.insert(rng.randint(0, len(text)), "Z{}q".format(rng.randint(100000, 999999)))  # a marker to look for in the output
+            return "".join(text)
+
+        def secrets(item):
+            """Markers of the strings a secret key holds directly or in an array of scalars (one nesting level)."""
+            if isinstance(item, list):
+                return [m for v in item for m in secrets(v)]
+            if not isinstance(item, dict):
+                return []
+            found = []
+            for key, v in item.items():
+                flat = v if isinstance(v, list) and all(not isinstance(x, (dict, list)) or isinstance(x, list) and all(
+                    not isinstance(y, (dict, list)) for y in x) for x in v) else None
+                if key in secret_keys and (isinstance(v, str) or flat is not None):
+                    found += re.findall(r"Z\d+q", json.dumps(v))
+                found += secrets(v)
+            return found
 
         def same(before, after, secret):
             if isinstance(before, dict):
@@ -423,6 +440,29 @@ class RedactTest(unittest.TestCase):
                         after, before = json.loads(after), json.loads(before)
                     same(before, after, False)
                     self.assertEqual(redact_secrets({"t": out})[0]["t"], out)
+                    for marker in secrets(obj):
+                        self.assertNotIn(marker, out)  # every value a secret key holds is gone
+
+    def test_free_text_value_may_start_with_json_punctuation(self):
+        self.assertRedacts({
+            '{"password":",Ab1x"}': '{"password":"<SECRET:text>"}',
+            '{"password":":x9"}': '{"password":"<SECRET:text>"}',
+            '{"password":"]x9","b":1}': '{"password":"<SECRET:text>","b":1}',
+            '{"psk":"}"}': '{"psk":"<SECRET:text>"}',
+            'x "{\\"password\\":\\",Ab1x\\"}"': 'x "{\\"password\\":\\"<SECRET:text>\\"}"',
+            'password: ":Ab1x"': 'password: "<SECRET:text>"',
+            'psk = "]x9"': 'psk = "<SECRET:text>"',
+            "pass: '}a1'": "pass: '<SECRET:text>'",
+            "password: 'a\"b c'": "password: '<SECRET:text>'",
+            '{"label":"Password:","hint":"min 8"}': '{"label":"Password:","hint":"min 8"}',
+            '{"banner": "Password: ", "motd": "hello"}': '{"banner": "Password: ", "motd": "hello"}',
+            json.dumps({"banner": "Password: ", "motd": "hello", "n": [1]}, indent=2): json.dumps({"banner": "Password: ", "motd": "hello", "n": [1]}, indent=2),
+            "private-key: Q1x rsa-private-key: Q2x ike-key: Q3x shared-key: Q4x md5-key: Q5x":
+                "private-key: <SECRET:text> rsa-private-key: <SECRET:text> ike-key: <SECRET:text> shared-key: <SECRET:text> md5-key: <SECRET:text>",
+            '{"private-key":["Q6x"]}': '{"private-key":["<SECRET:text>"]}',
+            'note "Password: ",': 'note "Password: ",',  # a cut-off line still ends the string
+            json.dumps({"banner": "Password: "}, indent=2): json.dumps({"banner": "Password: "}, indent=2),
+        })
 
     def test_long_runs_stay_linear(self):
         n = 2000
