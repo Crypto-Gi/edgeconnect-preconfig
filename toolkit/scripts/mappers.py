@@ -32,20 +32,35 @@ class Ctx:
         dep = dep if isinstance(dep, dict) else {}
         cfg = dep.get("sysConfig") or {}  # `or`: keys can be present but null
         cfg = cfg if isinstance(cfg, dict) else {}
-        where = "deployment.sysConfig."
+        # a map whose whole read is unusable: resolving a name through it raises Unreadable, so no section is written with names missing
+        self.unread_maps: set = set()
+        where, target = "deployment.sysConfig.", "deploymentInfo.deploymentInterfaces"
+
+        def names(key: str, item: str, objs: Any) -> Dict[str, Any]:
+            found = id_names(self, item, objs, section=target)
+            if found is None:
+                self.unread_maps.add(key)
+            return found or {}
+
         sides = cfg.get("ifLabels") or {}
         if not isinstance(sides, dict):
-            unreadable_read(self, where + "ifLabels", "interface labels are not resolved to names")
+            unreadable_read(self, where + "ifLabels", "interface labels are not resolved to names", target)
+            self.unread_maps.add("ifLabels")
             sides = {}
-        self.labels = {k: v for side, items in sides.items() for k, v in id_names(self, "{}ifLabels.{}".format(where, side), items).items()}
-        self.vrfs = id_names(self, where + "vrfs", cfg.get("vrfs"))
+        self.labels = {k: v for side, items in sides.items() for k, v in names("ifLabels", "{}ifLabels.{}".format(where, side), items).items()}
+        self.vrfs = names("vrfs", where + "vrfs", cfg.get("vrfs"))
         zone_map = cfg.get("vrfZonesMap") or {}
         if not isinstance(zone_map, dict):
-            unreadable_read(self, where + "vrfZonesMap", "zones are not resolved to names")
+            unreadable_read(self, where + "vrfZonesMap", "zones are not resolved to names", target)
+            self.unread_maps.add("vrfZonesMap")
             zone_map = {}
-        self.zones = {vrf: id_names(self, "{}vrfZonesMap.{}".format(where, vrf), list(m.values())) if isinstance(m, dict) else {} for vrf, m in zone_map.items()}
-        self.roles = id_names(self, where + "roles", cfg.get("roles"))
+        self.zones = {vrf: names("vrfZonesMap", "{}vrfZonesMap.{}".format(where, vrf), list(m.values())) if isinstance(m, dict) else {} for vrf, m in zone_map.items()}
+        self.roles = names("roles", where + "roles", cfg.get("roles"))
         self.route_labels: Optional[Dict[str, str]] = None  # read from the running-config on first use
+
+    def readable(self, key: str) -> None:
+        if key in self.unread_maps:
+            raise Unreadable("the {} names (deployment.sysConfig.{}) could not be read".format({"ifLabels": "interface label", "vrfs": "segment", "vrfZonesMap": "zone", "roles": "role"}[key], key))
 
     def data(self, ident: str, prefer: str = "live") -> Any:
         return self.cap.data(ident, prefer)
@@ -56,6 +71,7 @@ class Ctx:
             self.notes.append(entry)
 
     def label(self, ident: Any) -> Optional[str]:
+        self.readable("ifLabels")
         return self.labels.get(str(ident)) if str(ident) not in ("", "None") else None
 
     def route_label(self, ident: Any, item: str, what: str, target: str) -> Optional[str]:
@@ -76,12 +92,15 @@ class Ctx:
         return name
 
     def segment(self, vrf: Any) -> Optional[str]:
+        self.readable("vrfs")
         return self.vrfs.get(str(vrf))
 
     def zone(self, vrf: Any, zone: Any) -> Optional[str]:
+        self.readable("vrfZonesMap")
         return self.zones.get(str(vrf), {}).get(str(zone))
 
     def role(self, ident: Any) -> Optional[str]:
+        self.readable("roles")
         name = self.roles.get(str(ident))
         return None if name in (None, "default") else name
 
@@ -127,20 +146,20 @@ def unreadable_read(ctx: Ctx, item: str, what: str, section: str = "") -> None:
     ctx.note(item, "not-readable", section, "the read has an unexpected shape, so {}; check them by hand".format(what))
 
 
-def id_names(ctx: Ctx, item: str, objs: Any, key: Callable[[Any], Any] = str) -> Dict[Any, Any]:
-    """{key(id): name} of a list of {id, name} objects (as dict comprehension: a later id wins). A list of another type is ledgered
-    not-readable, an object of another shape toolkit-error; both are skipped, so one bad object never loses the others."""
+def id_names(ctx: Ctx, item: str, objs: Any, key: Callable[[Any], Any] = str, section: str = "") -> Optional[Dict[Any, Any]]:
+    """{key(id): name} of a list of {id, name} objects (as dict comprehension: a later id wins). A read of another type is ledgered
+    not-readable and gives None; an object of another shape is ledgered toolkit-error and skipped, so one bad object never loses the others."""
     if not objs:
         return {}
     if not isinstance(objs, list):
-        unreadable_read(ctx, item, "its ids are not resolved to names")
-        return {}
+        unreadable_read(ctx, item, "its ids are not resolved to names", section)
+        return None
     out: Dict[Any, Any] = {}
     for i, obj in enumerate(objs):
         try:
             out[key(obj["id"])] = obj["name"]
         except ITEM_ERRORS as err:
-            item_failed(ctx, "{}[{}]".format(item, i), "", err)
+            item_failed(ctx, "{}[{}]".format(item, i), section, err)
     return out
 
 
@@ -662,6 +681,7 @@ def m_localRoutes(ctx: Ctx) -> Optional[Dict[str, Any]]:
 
 
 def m_segmentLocalRoutes(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
+    ctx.readable("vrfs")  # without segment names, "no segment has routes" cannot be told
     raw = routes_table(ctx, "subnets-all-vrfs")
     data = raw or {}
     if not per_segment(ctx):

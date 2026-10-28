@@ -22,7 +22,7 @@ from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, WORK_DIR, find_default_temp
 from generate import generate  # noqa: E402
 from decisions import list_mode, make_decide, propose  # noqa: E402
 from variables import classify, read_sheet, sheet_items, write_sheet  # noqa: E402
-from mappers import ITEM_ERRORS, MAPPERS, Ctx, cli_lines, guarded, id_names, item_failed, own_sharing, passthrough_max_bandwidth, unreadable_read  # noqa: E402  guard-ok: imported after the sys.path insert
+from mappers import ITEM_ERRORS, MAPPERS, Ctx, cli_lines, guarded, id_names, item_failed, own_sharing, passthrough_max_bandwidth, Unreadable, unreadable_read  # noqa: E402  guard-ok: imported after the sys.path insert
 
 HARDEN = {0: "All", 1: "harden", 2: "stateful", 3: "statefulSNAT"}  # verified via Swagger + live apply-and-diff
 NETWORK_ROLE = {0: "non-hub", 1: "hub"}  # verified across multiple Orchestrators: code 1 = overlay hub; code 0 = non-hub; nrhub: no sample, unresolved
@@ -248,7 +248,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
         unreadable_read(ctx, "extra-info", "location, contact and the IPsec UDP port are not carried", "applianceInfo")
         extra = None
     nepk = cap.run["appliance"]["nePk"]
-    groups = id_names(ctx, "groups", cap.data("groups"), key=lambda ident: ident)
+    groups = id_names(ctx, "groups", cap.data("groups"), key=lambda ident: ident) or {}
     out: Dict[str, Any] = {}
 
     info: Dict[str, Any] = {"hostname": app["hostName"]}
@@ -372,6 +372,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
         unreadable_read(ctx, "deployment.dhcpFailover", "DHCP failover (dhcpHA) is not carried", "deploymentInfo.dhcpInfo[].dhcpHA")
         failover = {}
     fo_done: set = set()
+    fo_tried: set = set()  # attempted, so a failover block that failed to read is not reported as "no server has failover"
+    if_failed, attempted, label_gaps = False, 0, []  # haConfig orders and pairs every WAN link: built only when all were read
     mode_ifs = dep.get("modeIfs")
     if not isinstance(mode_ifs, list):  # interfaces replace the target's on apply: never invented or written empty
         unreadable_read(ctx, "deployment.modeIfs", "deploymentInfo (interfaces, DHCP, router advertisements, HA) is not written", "deploymentInfo")
@@ -382,11 +384,13 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
                 raise TypeError("applianceIPs is {}, not a list".format(type(ips).__name__))
         except ITEM_ERRORS as err:
             item_failed(ctx, "deployment.modeIfs[{}]".format(mode_if.get("ifName", i) if isinstance(mode_if, dict) else i), "deploymentInfo.deploymentInterfaces", err)
+            if_failed = True
             continue
         if ha_if and if_name == ha_if:
             ha_mode_entries.extend(ips)
             continue
         for j, a in enumerate(ips):
+            attempted += 1
             try:
                 vlan = int(a.get("vlan") or 0)
                 name = "{}.{}".format(if_name, vlan) if vlan > 0 else if_name
@@ -417,8 +421,11 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
                     item["role"] = roles[str(a.get("role", 0))]
             except ITEM_ERRORS as err:
                 item_failed(ctx, "deployment.modeIfs[{}] applianceIPs[{}]".format(if_name, j), "deploymentInfo.deploymentInterfaces", err)
+                if_failed = True
                 continue
             interfaces.append(item)
+            if wan and a["label"] != "" and item["interfaceLabel"] is None:
+                label_gaps.append(name)
             try:
                 dhcp_cfg = a.get("dhcpd") or {}
                 server = dhcp_cfg.get("server") if dhcp_cfg.get("type") == "server" else None
@@ -440,7 +447,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
                     if server.get("host"):
                         entry["staticIpAssignments"] = [{"hostname": h, "macAddress": v["mac"], "ipAddress": v["ip"]} for h, v in sorted(server["host"].items())]
                     fo = failover.get(if_name) if server.get("failover") else None
-                    if fo and if_name not in fo_done:  # one failover block per physical interface, shared by its VLANs
+                    if fo and if_name not in fo_tried:  # one failover block per physical interface, shared by its VLANs
+                        fo_tried.add(if_name)
                         entry["dhcpHA"] = {"dhcpFailoverRole": fo["role"], "ipAddress": fo["my_ip"], "ipAddressPort": fo["my_port"], "peerIpAddress": fo["peer_ip"],
                                            "peerIpAddressPort": fo["peer_port"], "mclt": fo.get("mclt", 3600), "split": fo.get("split", 128),
                                            "maxResponseDelay": fo.get("max_resp_delay", 10), "maxUnackedUpdates": fo.get("max_unack_updates", 10),
@@ -491,7 +499,14 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     interfaces.sort(key=_if_sort_key)
     di["deploymentInterfaces"] = interfaces
-    if isinstance(mode_ifs, list):
+    write_di = isinstance(mode_ifs, list)  # interfaces replace the target's on apply: never written with names missing, or empty for a failure
+    if write_di and ctx.unread_maps:
+        unreadable_read(ctx, "deployment.sysConfig", "deploymentInfo is not written: its interfaces need the {} names".format(", ".join(sorted(ctx.unread_maps))), "deploymentInfo")
+        write_di = False
+    elif write_di and attempted and not interfaces:
+        ctx.note("deployment.modeIfs", "not-readable", "deploymentInfo", "none of the {} interface entries could be read, so deploymentInfo is not written; check the interfaces by hand".format(attempted))
+        write_di = False
+    if write_di:
         note("deployment.modeIfs", "mapped", "deploymentInfo.deploymentInterfaces", "{} interfaces; interface = ifName.vlan; label/zone/segment ids resolved to names".format(len(interfaces)))
         note("deployment.modeIfs[].harden", "mapped", "deploymentInterfaces[].firewallMode", "verified: 0 All, 1 harden, 2 stateful, 3 statefulSNAT")
         note("deployment.modeIfs[] wan dhcp lease", "runtime", "", "leased address, mask and next hop of DHCP WAN interfaces are runtime state; left empty")
@@ -508,7 +523,10 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
                 my_ha = group
                 break
     try:
-        if ha_if and my_ha and ha_mode_entries:
+        if write_di and ha_if and my_ha and ha_mode_entries:
+            if if_failed or label_gaps:
+                raise ValueError("haConfig orders and pairs every WAN link, and an interface or its label could not be read{}".format(
+                    " ({})".format(", ".join(label_gaps)) if label_gaps else ""))
             peer_nepk = next((m.get("nePk") for m in my_ha.get("appliances", []) if m.get("nePk") != nepk), None)
             all_apps = cap.data("appliances-all") or []
             peer_app = next((x for x in (all_apps if isinstance(all_apps, list) else []) if isinstance(x, dict) and (x.get("nePk") or x.get("id")) == peer_nepk), {})
@@ -524,7 +542,10 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
             for v in sorted(by_vlan):
                 a = by_vlan[v]
                 if a.get("wanSide"):
-                    lbl = labels.get(str(a["label"])) or ""
+                    lbl = labels.get(str(a["label"]))
+                    if lbl is None and str(a["label"]) != "":
+                        raise ValueError("label {} of peer link VLAN {} does not resolve".format(a["label"], v))
+                    lbl = lbl or ""
                     order_labels.append(lbl)
                     peer_infos.append({
                         "interfaceLabel": lbl,
@@ -558,6 +579,10 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
             note("ha-groups, deployment.modeIfs[haIf]", "mapped", "deploymentInfo.haConfig", "EdgeHA peer {}, interface {}, {} peer WAN links; {} auto-generated HA subinterfaces excluded from deploymentInterfaces".format(peer_nepk, ha_if, len(peer_infos), len(ha_mode_entries)))
     except ITEM_ERRORS as err:  # all or nothing: a peer list with a link missing would replace the target's on apply
         item_failed(ctx, "ha-groups, deployment.modeIfs[haIf]", "deploymentInfo.haConfig", err)
+    if write_di and ha_if and ha_mode_entries and my_ha is None and not ctx.failed("deploymentInfo.haConfig"):
+        ctx.note("ha-groups", "not-readable", "deploymentInfo.haConfig", "{} carries HA subinterfaces but no HA group read lists this appliance, so haConfig is not written; check EdgeHA by hand".format(ha_if))
+    if not write_di:
+        dhcp, relay_leases, ra_skipped, ras, fo_done, fo_tried = [], [], [], [], set(), set()
     if dhcp:
         di["dhcpInfo"] = dhcp
         note("deployment.modeIfs[].dhcpd", "mapped", "deploymentInfo.dhcpInfo", "{} DHCP servers; empty ntp/netbios lists omitted".format(len(dhcp)))
@@ -569,17 +594,17 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     if ras:
         di["raInfo"] = ras
         note("deployment.modeIfs[].ra", "mapped", "deploymentInfo.raInfo", "{} router advertisements; numbers written as strings like the default template".format(len(ras)))
-    if isinstance(mode_ifs, list):
+    if write_di:
         out["deploymentInfo"] = di
     if fo_done:
         note("deployment.dhcpFailover", "mapped", "deploymentInfo.dhcpInfo[].dhcpHA", "failover on {}".format(", ".join(sorted(fo_done))))
-    if set(failover) - fo_done and isinstance(mode_ifs, list):
+    if set(failover) - fo_tried and write_di:
         note("deployment.dhcpFailover", "runtime", "deploymentInfo.dhcpInfo[].dhcpHA",
-             "{}: failover settings kept by the appliance but no DHCP server there has failover enabled".format(", ".join(sorted(set(failover) - fo_done))))
+             "{}: failover settings kept by the appliance but no DHCP server there has failover enabled".format(", ".join(sorted(set(failover) - fo_tried))))
     try:
         owned_fields = {} if IGNORE_OWNERSHIP else template_fields(cap)
     except ITEM_ERRORS as err:  # every field template then counts as providing its whole section, which is not written
-        item_failed(ctx, "template-groups templates", ", ".join(s for spec in FIELD_TEMPLATES.values() for s in spec["sections"]), err)
+        item_failed(ctx, "template-groups templates", ", ".join(s for name in sorted(selected_templates(cap) & set(FIELD_TEMPLATES)) for s in FIELD_TEMPLATES[name]["sections"]), err)
         owned_fields = {}
     try:
         nac_owned = None if IGNORE_OWNERSHIP else nac_merge_owned(cap)
@@ -587,9 +612,16 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
         item_failed(ctx, "template-groups nac", "nac", err)
         nac_owned = None
     template_owned = selected_templates(cap) - set(owned_fields) - ({"nac"} if nac_owned is not None else set())
+    # association unread: a section some template group selects may come from a template, so it is not written from the appliance
+    maybe_owned = set() if isinstance(template_groups, list) or IGNORE_OWNERSHIP else {
+        TEMPLATE_SECTION.get(t, t) for g in (group_reads if isinstance(group_reads, list) else []) if isinstance(g, dict) for t in selected_names(g)}
+    maybe_owned |= {s for name in maybe_owned & set(FIELD_TEMPLATES) for s in FIELD_TEMPLATES[name]["sections"]}
     for section, mapper in MAPPERS.items():
         if section in template_owned and not IGNORE_OWNERSHIP:
             note("template " + section, "template-group", section, "template '{}' is selected in an associated template group: the section is not written".format(section))
+            continue
+        if section in maybe_owned:
+            note("template " + section, "not-readable", section, "the template association could not be read and a template group selects '{}', so a template may provide the section: not written; check it by hand".format(section))
             continue
         before = len(ledger)
         try:
@@ -598,6 +630,9 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
                 del ledger[before:]  # the mapper's notes describe a section that is not written
                 ledger_local_nac(value, nac_owned, note, cap.data("nac") is not None)
                 continue
+        except Unreadable as err:
+            note("mapper " + section, "not-readable", section, "the {} section is not written: {}; check it by hand".format(section, err))
+            continue
         except Exception as err:
             note("mapper " + section, "toolkit-error", section, "the {} mapper failed ({}: {}), so the section was not written: a toolkit bug to report, not a limit of preconfig".format(section, type(err).__name__, err))
             continue

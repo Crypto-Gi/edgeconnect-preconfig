@@ -100,6 +100,16 @@ class MalformedReads(unittest.TestCase):
                 self.assertLedgered(ledger, "not-readable", "template-association")
                 self.assertIn("deploymentInfo", out)
 
+    def test_an_unread_association_writes_no_section_a_group_may_provide(self):
+        out, ledger = translate(lambda d: d["template-association"].update(templateIds=7))
+        self.assertTrue(any(e["item"] == "template nac" and e["disposition"] == "not-readable" and e["target"] == "nac" for e in ledger))
+
+    def test_unreadable_field_templates_name_only_their_sections(self):
+        def change(d):
+            d["template-groups"][0].update(selectedTemplateNames=["nac", "vrrp"], templates=["x"])
+        out, ledger = translate(change)
+        self.assertEqual([e["target"] for e in ledger if e["item"] == "template-groups templates"], ["vrrp"])
+
     def test_a_template_group_of_another_shape_is_skipped(self):
         for bad in ("x", {"selectedTemplateNames": ["nac"]}, {"name": "G1", "selectedTemplateNames": 7}):
             with self.subTest(group=bad):
@@ -170,6 +180,17 @@ class MalformedReads(unittest.TestCase):
                 self.assertNotIn("haConfig", out["deploymentInfo"])
                 self.assertLedgered(ledger, "toolkit-error", "ha-groups")
                 self.assertEqual(interfaces(out), ["lan0", "lan0.90", "wan0"])
+        out, ledger = translate(lambda d: d["deployment"]["modeIfs"][0]["applianceIPs"][0].update(harden=9))  # an own WAN link not read
+        self.assertNotIn("haConfig", out["deploymentInfo"])  # its haInterfaceOrder would miss the link
+        self.assertLedgered(ledger, "toolkit-error", "ha-groups")
+        for where in (0, 2):  # an own WAN link's or a peer link's label that does not resolve
+            with self.subTest(label_of=where):
+                out, ledger = translate(lambda d: d["deployment"]["modeIfs"][where]["applianceIPs"][0].update(label="9"))
+                self.assertNotIn("haConfig", out["deploymentInfo"])
+                self.assertLedgered(ledger, "toolkit-error", "ha-groups")
+        out, ledger = translate(lambda d: d.update({"ha-groups": {}}))  # HA interfaces but no group lists the appliance
+        self.assertNotIn("haConfig", out["deploymentInfo"])
+        self.assertLedgered(ledger, "not-readable", "ha-groups")
         out, ledger = translate(lambda d: d.update({"ha-groups": {"g0": "x", **d["ha-groups"]}}))  # another group of another shape: skipped
         self.assertEqual(out["deploymentInfo"]["haConfig"]["haIpPool"], "169.254.1.0/24")
         self.assertLedgered(ledger, "toolkit-error", "ha-groups[g0]")
@@ -177,26 +198,64 @@ class MalformedReads(unittest.TestCase):
         self.assertNotIn("haConfig", out["deploymentInfo"])
         self.assertLedgered(ledger, "not-readable", "ha-groups")
 
-    def test_sys_config_lists_of_another_shape(self):
+    def test_a_sys_config_map_item_of_another_shape_is_skipped(self):
         cases = {
-            "vrf item": (lambda d: d["deployment"]["sysConfig"]["vrfs"].insert(0, "x"), "toolkit-error", "deployment.sysConfig.vrfs"),
-            "label side": (lambda d: d["deployment"]["sysConfig"]["ifLabels"].update(lan="x"), "not-readable", "deployment.sysConfig.ifLabels.lan"),
-            "labels a list": (lambda d: d["deployment"]["sysConfig"].update(ifLabels=[1]), "not-readable", "deployment.sysConfig.ifLabels"),
-            "zones a list": (lambda d: d["deployment"]["sysConfig"].update(vrfZonesMap=[1]), "not-readable", "deployment.sysConfig.vrfZonesMap"),
-            "zone item": (lambda d: d["deployment"]["sysConfig"]["vrfZonesMap"]["0"].update(b=None), "toolkit-error", "deployment.sysConfig.vrfZonesMap"),
-            "role item": (lambda d: d["deployment"]["sysConfig"]["roles"].insert(0, None), "toolkit-error", "deployment.sysConfig.roles"),
+            "vrf item": (lambda d: d["deployment"]["sysConfig"]["vrfs"].insert(0, "x"), "deployment.sysConfig.vrfs"),
+            "zone item": (lambda d: d["deployment"]["sysConfig"]["vrfZonesMap"]["0"].update(b=None), "deployment.sysConfig.vrfZonesMap"),
+            "role item": (lambda d: d["deployment"]["sysConfig"]["roles"].insert(0, None), "deployment.sysConfig.roles"),
         }
-        for name, (change, disposition, item) in cases.items():
+        for name, (change, item) in cases.items():
             with self.subTest(name):
                 data = copy.deepcopy(DATA)
                 change(data)
                 notes = []
                 Ctx(FakeCap(data), notes)  # the mappers' own copy of the maps
-                self.assertLedgered(notes, disposition, item)
+                self.assertLedgered(notes, "toolkit-error", item)
                 out, ledger = translate(change)
-                self.assertLedgered(ledger, disposition, item)
+                self.assertLedgered(ledger, "toolkit-error", item)
                 self.assertEqual(interfaces(out), ["lan0", "lan0.90", "wan0"])
                 self.assertEqual(out["deploymentInfo"]["deploymentInterfaces"][0]["segment"], "Default")
+
+    def test_an_unreadable_sys_config_map_writes_no_deployment_info(self):
+        cases = {
+            "vrfs an object": (lambda d: d["deployment"]["sysConfig"].update(vrfs={"x": 1}), "deployment.sysConfig.vrfs"),
+            "vrfs a string": (lambda d: d["deployment"]["sysConfig"].update(vrfs="x"), "deployment.sysConfig.vrfs"),
+            "label side": (lambda d: d["deployment"]["sysConfig"]["ifLabels"].update(lan="x"), "deployment.sysConfig.ifLabels.lan"),
+            "labels a list": (lambda d: d["deployment"]["sysConfig"].update(ifLabels=[1]), "deployment.sysConfig.ifLabels"),
+            "zones a list": (lambda d: d["deployment"]["sysConfig"].update(vrfZonesMap=[1]), "deployment.sysConfig.vrfZonesMap"),
+            "roles an object": (lambda d: d["deployment"]["sysConfig"].update(roles={"x": 1}), "deployment.sysConfig.roles"),
+        }
+        for name, (change, item) in cases.items():
+            with self.subTest(name):
+                data = copy.deepcopy(DATA)
+                change(data)
+                notes = []
+                Ctx(FakeCap(data), notes)
+                self.assertLedgered(notes, "not-readable", item)
+                out, ledger = translate(change)
+                self.assertNotIn("deploymentInfo", out)  # interfaces replace on apply: not written with names missing or empty
+                self.assertTrue(any(e["disposition"] == "not-readable" and e["target"] == "deploymentInfo" for e in ledger))
+                self.assertFalse(any(e["item"] == "deployment.modeIfs" and e["disposition"] == "mapped" for e in ledger))
+                self.assertEqual(out["applianceInfo"]["group"], "Net")
+
+    def test_unreadable_segment_names_are_not_reported_as_no_segments(self):
+        def change(d):
+            d["deployment"]["sysConfig"].update(vrfs={"x": 1})
+            d["system-info"] = {"auto_subnet": {"vrf": {"0": {}, "1": {}}}}
+        out, ledger = translate(change)
+        self.assertNotIn("segmentLocalRoutes", out)
+        self.assertFalse(any(e["disposition"] == "default-omitted" and e["target"].startswith("segmentLocalRoutes") for e in ledger))
+        self.assertTrue(any(e["disposition"] == "not-readable" and e["target"] == "segmentLocalRoutes" for e in ledger))
+
+    def test_no_interface_read_writes_no_deployment_info(self):
+        def change(d):
+            for m in d["deployment"]["modeIfs"]:
+                for a in m["applianceIPs"]:
+                    a["vrf"] = 5  # no such segment
+        out, ledger = translate(change)
+        self.assertNotIn("deploymentInfo", out)
+        self.assertLedgered(ledger, "not-readable", "deployment.modeIfs")
+        self.assertFalse(any(e["item"] == "deployment.modeIfs" and e["disposition"] == "mapped" for e in ledger))
 
     def test_an_interface_of_another_shape_is_skipped(self):
         out, ledger = translate(lambda d: d["deployment"]["modeIfs"][0]["applianceIPs"][0].update(harden=9))
@@ -215,6 +274,13 @@ class MalformedReads(unittest.TestCase):
         self.assertEqual(interfaces(out), ["lan0", "lan0.90", "wan0"])
         self.assertNotIn("raInfo", out["deploymentInfo"])
         self.assertLedgered(ledger, "toolkit-error", "deployment.modeIfs[lan0.90].ra")
+        def failover(d):
+            d["deployment"]["dhcpFailover"] = {"lan0": {"role": "primary"}}  # no my_ip
+            d["deployment"]["modeIfs"][1]["applianceIPs"][0]["dhcpd"]["server"]["failover"] = True
+        out, ledger = translate(failover)
+        self.assertNotIn("dhcpInfo", out["deploymentInfo"])
+        self.assertLedgered(ledger, "toolkit-error", "deployment.modeIfs[lan0].dhcpd")
+        self.assertFalse(any(e["item"] == "deployment.dhcpFailover" for e in ledger))  # not "no DHCP server there has failover enabled"
         out, ledger = translate(lambda d: d["deployment"].update(dhcpFailover=[1]))
         self.assertEqual(len(out["deploymentInfo"]["dhcpInfo"]), 1)
         self.assertLedgered(ledger, "not-readable", "deployment.dhcpFailover")
