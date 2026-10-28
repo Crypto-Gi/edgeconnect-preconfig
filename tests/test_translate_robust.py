@@ -33,26 +33,31 @@ DATA = {
                                  "vrfs": [{"id": "0", "name": "Default"}], "vrfZonesMap": {"0": {"a": {"id": 0, "name": "Trusted"}}}, "roles": [{"id": "0", "name": "default"}]},
                    "modeIfs": [{"ifName": "wan0", "applianceIPs": [WAN]}, {"ifName": "lan0", "applianceIPs": [LAN, LAN6]}, {"ifName": "lan1", "applianceIPs": [dict(WAN, vlan=4000)]}]},
     "ha-groups": {"g1": {"subnet": "169.254.1.0/24", "mask": 30, "vlanStart": 4000, "appliances": [{"nePk": "9.NE"}, {"nePk": "8.NE"}]}},
+    "appliances-all": [{"nePk": "8.NE", "serial": "00-11-22", "hostName": "h2"}],
+    "security-maps": {"map1": {"12_13": {"prio": {"1000": {"gms_marked": False}}}}},
+    "admin-distance": {"ebgp": 20},
 }
 
 
 class FakeCap:
     folder = "synthetic"
 
-    def __init__(self, data):
+    def __init__(self, data, failed=()):
         self.run = {"appliance": {"nePk": "9.NE"}}
-        self._d = data
+        self._d = {k: v for k, v in data.items() if k not in failed}
+        # the capture index: every read made, and the ones that failed (HTTP 500) with no usable copy
+        self.index = [{"id": k, "label": "live", "status": "ok"} for k in self._d] + [{"id": k, "label": "live", "status": "error", "http": 500} for k in failed]
 
     def data(self, ident, prefer="live"):
         return copy.deepcopy(self._d.get(ident))
 
 
-def translate(change=None):
+def translate(change=None, failed=()):
     data = copy.deepcopy(DATA)
     if change:
         change(data)
     ledger = []
-    return build(FakeCap(data), ledger), ledger
+    return build(FakeCap(data, failed), ledger), ledger
 
 
 def lines(ledger, disposition):
@@ -87,9 +92,9 @@ class MalformedReads(unittest.TestCase):
         self.assertEqual(out["applianceInfo"]["group"], "Net")
         self.assertLedgered(ledger, "toolkit-error", "groups")
 
-    def test_a_groups_read_of_another_shape_keeps_the_group_id(self):
+    def test_a_groups_read_of_another_shape_writes_no_group(self):
         out, ledger = translate(lambda d: d.update(groups=7))
-        self.assertEqual(out["applianceInfo"]["group"], "1.Network")
+        self.assertNotIn("group", out["applianceInfo"])  # the raw id "1.Network" would name a group that does not exist
         self.assertLedgered(ledger, "not-readable", "groups")
 
     def test_an_unusable_template_association_writes_no_template_groups(self):
@@ -131,7 +136,7 @@ class MalformedReads(unittest.TestCase):
             "site missing": (lambda d: d["appliance"].pop("site"), "toolkit-error", "appliance.site", "site"),
             "groupId missing": (lambda d: d["appliance"].pop("groupId"), "toolkit-error", "appliance.groupId", "group"),
             "networkRole not a number": (lambda d: d["appliance"].update(networkRole="x"), "toolkit-error", "appliance.networkRole", "networkRole"),
-            "cluster mapping a list": (lambda d: d.update({"cluster-profile-mapping": [1]}), "toolkit-error", "cluster-profile", "clusterProfile"),
+            "cluster mapping a list": (lambda d: d.update({"cluster-profile-mapping": [1]}), "not-readable", "cluster-profile", "clusterProfile"),
             "cluster profile without name": (lambda d: d.update({"cluster-profiles": [{"id": 1}]}), "toolkit-error", "cluster-profile", "clusterProfile"),
             "region associations a list": (lambda d: d.update({"region-associations": [1]}), "toolkit-error", "region-associations", "region"),
             "region without name": (lambda d: d.update({"region-associations": {"9.NE": {"regionId": 2}}}), "toolkit-error", "region-associations", "region"),
@@ -188,7 +193,10 @@ class MalformedReads(unittest.TestCase):
                 out, ledger = translate(lambda d: d["deployment"]["modeIfs"][where]["applianceIPs"][0].update(label="9"))
                 self.assertNotIn("haConfig", out["deploymentInfo"])
                 self.assertLedgered(ledger, "toolkit-error", "ha-groups")
-        out, ledger = translate(lambda d: d.update({"ha-groups": {}}))  # HA interfaces but no group lists the appliance
+        out, ledger = translate(lambda d: d.update({"ha-groups": {}}))  # read fine, no group lists the appliance: as before, no line
+        self.assertNotIn("haConfig", out["deploymentInfo"])
+        self.assertFalse(any(e["item"] == "ha-groups" and e["disposition"] == "not-readable" for e in ledger))
+        out, ledger = translate(failed=("ha-groups",))
         self.assertNotIn("haConfig", out["deploymentInfo"])
         self.assertLedgered(ledger, "not-readable", "ha-groups")
         out, ledger = translate(lambda d: d.update({"ha-groups": {"g0": "x", **d["ha-groups"]}}))  # another group of another shape: skipped
@@ -399,6 +407,66 @@ class SubnetSharingRead(unittest.TestCase):
                 self.assertTrue(any(e["item"] == "system-info" and e["disposition"] == "not-readable" and "localRoutes" in e["target"] for e in ledger))
                 self.assertFalse(any(e["disposition"] == "default-omitted" and (e["item"].startswith("system-info") or e["target"] == "segmentLocalRoutes") for e in ledger))
                 self.assertTrue(any(e["disposition"] == "not-readable" and e["target"].startswith("segmentLocalRoutes") for e in ledger))
+
+class FailedReads(unittest.TestCase):
+    """Third review: a read the capture made but could not complete (no usable copy) is not-readable, never an empty value."""
+    assertLedgered = MalformedReads.assertLedgered
+
+    def test_each_failed_read_writes_nothing_from_it(self):
+        cases = {  # read -> (where the value would be, ledger item)
+            "template-association": (lambda out: "templateGroups" in out, "template-association"),
+            "overlay-config": (lambda out: "businessIntentOverlays" in out, "overlay-config"),
+            "overlay-association": (lambda out: "businessIntentOverlays" in out, "overlay-association"),
+            "extra-info": (lambda out: {"location", "contact"} & set(out["applianceInfo"]) or "ipsecUdpPort" in out["deploymentInfo"], "extra-info"),
+            "running-config": (lambda out: "passThroughShapedTraffic" in out["deploymentInfo"], "running-config"),
+            "groups": (lambda out: "group" in out["applianceInfo"], "groups"),
+            "cluster-profiles": (lambda out: "clusterProfile" in out["applianceInfo"], "cluster-profile"),
+            "cluster-profile-mapping": (lambda out: "clusterProfile" in out["applianceInfo"], "cluster-profile"),
+            "region-associations": (lambda out: "region" in out["applianceInfo"], "region-associations"),
+            "ha-groups": (lambda out: "haConfig" in out["deploymentInfo"], "ha-groups"),
+            "appliances-all": (lambda out: {"haPeerSerial", "haPeerHostname"} & set(out["deploymentInfo"]["haConfig"]), "appliances-all"),
+            "security-maps": (lambda out: False, "security-maps"),
+            "admin-distance": (lambda out: False, "admin-distance"),
+        }
+        out, ledger = translate()
+        self.assertEqual(out["deploymentInfo"]["haConfig"]["haPeerSerial"], "001122")
+        for ident, (written, item) in cases.items():
+            with self.subTest(ident):
+                out, ledger = translate(failed=(ident,))
+                self.assertFalse(written(out))
+                self.assertLedgered(ledger, "not-readable", item)
+                self.assertFalse(any(e["disposition"] in ("mapped", "default-omitted") and e["item"].startswith(ident) for e in ledger))
+                self.assertEqual(interfaces(out), ["lan0", "lan0.90", "wan0"])
+
+    def test_names_from_reads_of_another_shape_are_not_written_as_ids(self):
+        for ident, field in (("groups", "group"), ("cluster-profiles", "clusterProfile"), ("cluster-profile-mapping", "clusterProfile")):
+            with self.subTest(ident):
+                out, ledger = translate(lambda d: d.update({ident: "x"}))
+                self.assertNotIn(field, out["applianceInfo"])  # not the raw id, not silently dropped
+                self.assertTrue(any(e["disposition"] == "not-readable" and e["item"].startswith(ident.split("-mapping")[0]) for e in ledger))
+
+    def test_no_stored_backup_is_not_a_default(self):
+        out, ledger = translate(lambda d: d.update({"running-config": []}))
+        self.assertNotIn("passThroughShapedTraffic", out["deploymentInfo"])
+        self.assertFalse(any(e["item"] == "running-config" and e["disposition"] == "default-omitted" for e in ledger))
+        self.assertTrue(any(e["item"] == "running-config" and e["disposition"] == "not-readable" for e in ledger))
+
+    def test_a_failover_server_without_failover_settings_is_ledgered(self):
+        def change(d):
+            d["deployment"]["dhcpFailover"] = {}
+            d["deployment"]["modeIfs"][1]["applianceIPs"][0]["dhcpd"]["server"]["failover"] = True
+        out, ledger = translate(change)
+        self.assertNotIn("dhcpHA", out["deploymentInfo"]["dhcpInfo"][0])
+        self.assertTrue(any(e["item"] == "deployment.dhcpFailover" and e["disposition"] == "unresolved" for e in ledger))
+
+    def test_vxlan_maps_are_not_called_vtep_less_when_the_backup_is_unreadable(self):
+        for name, cfg in (("not an object", "x"), ("text not a string", {"runningConfig": 5}), ("no stored backup", [])):
+            with self.subTest(name):
+                out, ledger = translate(lambda d: d.update({"vxlan-vni-map": {"0": {"vni": 1001}}, "running-config": cfg}), failed=("vxlan",))
+                self.assertNotIn("vxlan", out)
+                self.assertFalse(any(e["disposition"] == "outside-preconfig" and e["target"] == "vxlan" for e in ledger))
+                self.assertTrue(any(e["disposition"] == "not-readable" and e["target"] == "vxlan" for e in ledger))
+
 
 if __name__ == "__main__":
     unittest.main()

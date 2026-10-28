@@ -22,7 +22,7 @@ from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, WORK_DIR, find_default_temp
 from generate import generate  # noqa: E402
 from decisions import list_mode, make_decide, propose  # noqa: E402
 from variables import classify, read_sheet, sheet_items, write_sheet  # noqa: E402
-from mappers import ITEM_ERRORS, MAPPERS, Ctx, cli_lines, guarded, id_names, item_failed, own_sharing, passthrough_max_bandwidth, Unreadable, unreadable_read  # noqa: E402  guard-ok: imported after the sys.path insert
+from mappers import ITEM_ERRORS, MAPPERS, Ctx, cli_lines, failed_read, guarded, id_names, item_failed, own_sharing, passthrough_max_bandwidth, Unreadable, unreadable_read  # noqa: E402  guard-ok: imported after the sys.path insert
 
 HARDEN = {0: "All", 1: "harden", 2: "stateful", 3: "statefulSNAT"}  # verified via Swagger + live apply-and-diff
 NETWORK_ROLE = {0: "non-hub", 1: "hub"}  # verified across multiple Orchestrators: code 1 = overlay hub; code 0 = non-hub; nrhub: no sample, unresolved
@@ -249,26 +249,37 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     if not app.get("hostName") or not dep.get("sysConfig") or not isinstance(dep["sysConfig"], dict):
         raise NothingToConvert("capture {!r} lacks appliance or deployment.sysConfig data (appliance may be offline with no Orchestrator cache)".format(str(cap.folder)))
     ctx = Ctx(cap, ledger)
-    extra = cap.data("extra-info") or {}
-    if not isinstance(extra, dict):
-        unreadable_read(ctx, "extra-info", "location, contact and the IPsec UDP port are not carried", "applianceInfo")
+    # every read below: a read that failed (failed_read) or has another shape is ledgered not-readable and nothing is written from it
+    extra_what = "location, contact and the IPsec UDP port are not carried"
+    extra = None if failed_read(ctx, "extra-info", extra_what, "applianceInfo") else cap.data("extra-info") or {}
+    if extra is not None and not isinstance(extra, dict):
+        unreadable_read(ctx, "extra-info", extra_what, "applianceInfo")
         extra = None
     nepk = cap.run["appliance"]["nePk"]
-    groups = id_names(ctx, "groups", cap.data("groups"), key=lambda ident: ident) or {}
+    groups = None if failed_read(ctx, "groups", "the appliance's group is not written", "applianceInfo.group") else \
+        id_names(ctx, "groups", cap.data("groups"), key=lambda ident: ident, section="applianceInfo.group")
     out: Dict[str, Any] = {}
 
     info: Dict[str, Any] = {"hostname": app["hostName"]}
-    with guarded(ctx, "appliance.groupId", "applianceInfo.group"):
-        info["group"] = groups.get(app["groupId"], app["groupId"])
+    if groups is not None:  # an id written as the group name would name a group that does not exist
+        with guarded(ctx, "appliance.groupId", "applianceInfo.group"):
+            info["group"] = groups.get(app["groupId"], app["groupId"])
     with guarded(ctx, "appliance.site", "applianceInfo.site"):
         info["site"] = app["site"]
-    with guarded(ctx, "cluster-profile-mapping, cluster-profiles", "applianceInfo.clusterProfile"):
-        prof_map = cap.data("cluster-profile-mapping") or {}
-        profs = {str(p["id"]): p["name"] for p in (cap.data("cluster-profiles") or []) if isinstance(p, dict) and p.get("id") is not None}
-        matched_prof = next((profs[str(pid)] for pid, sites in prof_map.items() if isinstance(sites, list) and app.get("site") in sites and str(pid) in profs), None)
-        if matched_prof:
-            info["clusterProfile"] = matched_prof
-            note("cluster-profile-mapping, cluster-profiles", "mapped", "applianceInfo.clusterProfile", "site '{}' mapped to cluster profile '{}'".format(app.get("site"), matched_prof))
+    prof_what = "the cluster profile is not written"
+    prof_read = [failed_read(ctx, ident, prof_what, "applianceInfo.clusterProfile") for ident in ("cluster-profiles", "cluster-profile-mapping")]
+    for ident, shape in (("cluster-profiles", list), ("cluster-profile-mapping", dict)):
+        if not isinstance(cap.data(ident) or shape(), shape):
+            unreadable_read(ctx, ident, prof_what, "applianceInfo.clusterProfile")
+            prof_read.append(True)
+    if not any(prof_read):
+        with guarded(ctx, "cluster-profile-mapping, cluster-profiles", "applianceInfo.clusterProfile"):
+            prof_map = cap.data("cluster-profile-mapping") or {}
+            profs = {str(p["id"]): p["name"] for p in (cap.data("cluster-profiles") or []) if isinstance(p, dict) and p.get("id") is not None}
+            matched_prof = next((profs[str(pid)] for pid, sites in prof_map.items() if isinstance(sites, list) and app.get("site") in sites and str(pid) in profs), None)
+            if matched_prof:
+                info["clusterProfile"] = matched_prof
+                note("cluster-profile-mapping, cluster-profiles", "mapped", "applianceInfo.clusterProfile", "site '{}' mapped to cluster profile '{}'".format(app.get("site"), matched_prof))
     with guarded(ctx, "appliance.networkRole", "applianceInfo.networkRole"):
         role = NETWORK_ROLE.get(int(app["networkRole"]))
         if role:
@@ -276,12 +287,13 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
             note("appliance.networkRole", "mapped", "applianceInfo.networkRole", "verified across reference Orchestrators: code 1 = hub (all overlay hubs), code 0 = non-hub; nrhub has no sample")
         else:
             note("appliance.networkRole", "unresolved", "applianceInfo.networkRole", "code {} has no known meaning".format(app["networkRole"]))
-    with guarded(ctx, "region-associations", "applianceInfo.region"):
-        region = (cap.data("region-associations") or {}).get(nepk, {})
-        if region.get("regionId") == 0:
-            note("region-associations", "default-omitted", "applianceInfo.region", "regionId 0 'Default' = no region; owner to confirm")
-        elif region:
-            info["region"] = region["regionName"]
+    if not failed_read(ctx, "region-associations", "the region is not written", "applianceInfo.region"):
+        with guarded(ctx, "region-associations", "applianceInfo.region"):
+            region = (cap.data("region-associations") or {}).get(nepk, {})
+            if region.get("regionId") == 0:
+                note("region-associations", "default-omitted", "applianceInfo.region", "regionId 0 'Default' = no region; owner to confirm")
+            elif region:
+                info["region"] = region["regionName"]
     for key in ("location", "contact") if extra is not None else ():
         with guarded(ctx, "extra-info." + key, "applianceInfo." + key):
             info[key] = dict(extra.get(key) or {})
@@ -293,23 +305,32 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     out["applianceInfo"] = info
     note("appliance, extra-info, groups", "mapped", "applianceInfo", "hostname, group, site, location, contact; softwareVersion and clusterProfile have no source value; latitude/longitude not exposed")
 
-    association = cap.data("template-association") or {}
-    template_groups = association.get("templateIds", []) if isinstance(association, dict) else None
-    if isinstance(template_groups, list):
-        out["templateGroups"] = {"groups": template_groups}
-        note("template-association", "mapped", "templateGroups.groups", "association only; the groups' own settings are not copied")
-    else:  # the list replaces the target's groups on apply: an unread association is not "no groups"
-        unreadable_read(ctx, "template-association", "templateGroups is not written and no section is taken as provided by a template", "templateGroups.groups")
-    group_reads = cap.data("template-groups") or []
+    assoc_what = "templateGroups is not written and a section any template group selects is not written from the appliance"
+    if failed_read(ctx, "template-association", assoc_what, "templateGroups.groups"):
+        template_groups = None
+    else:
+        association = cap.data("template-association") or {}
+        template_groups = association.get("templateIds", []) if isinstance(association, dict) else None
+        if isinstance(template_groups, list):
+            out["templateGroups"] = {"groups": template_groups}
+            note("template-association", "mapped", "templateGroups.groups", "association only; the groups' own settings are not copied")
+        else:  # the list replaces the target's groups on apply: an unread association is not "no groups"
+            unreadable_read(ctx, "template-association", assoc_what, "templateGroups.groups")
+    groups_what = "which sections the associated template groups provide is unknown, so none is taken as provided by a template"
+    group_reads = [] if failed_read(ctx, "template-groups", groups_what) else cap.data("template-groups") or []
     if not isinstance(group_reads, list):
-        unreadable_read(ctx, "template-groups", "no section is taken as provided by a template")
+        unreadable_read(ctx, "template-groups", groups_what)
     for i, group in enumerate(group_reads if isinstance(group_reads, list) else []):
         if not isinstance(group, dict) or not isinstance(group.get("name"), str) or not isinstance(group.get("selectedTemplateNames") or [], list):
             item_failed(ctx, "template-groups[{}]".format(i), "", TypeError("a template group without a name or a list of selected templates"))
 
+    overlay_what = "businessIntentOverlays is not written"
+    overlays_failed = [failed_read(ctx, ident, overlay_what, "businessIntentOverlays.overlays") for ident in ("overlay-config", "overlay-association")]
     overlays_cfg = cap.data("overlay-config") or []
     assoc = cap.data("overlay-association") or {}
-    if isinstance(overlays_cfg, list) and isinstance(assoc, dict):
+    if any(overlays_failed):
+        pass  # the list replaces the target's overlays on apply: a failed read is not "no overlays"
+    elif isinstance(overlays_cfg, list) and isinstance(assoc, dict):
         names: List[Any] = []
         for i, o in enumerate(overlays_cfg):
             with guarded(ctx, "overlay-config[{}]".format(i), "businessIntentOverlays.overlays"):
@@ -343,10 +364,11 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
             else:
                 di_note("extra-info.overlaySettings.ipsecUdpPort", "default-omitted", "deploymentInfo.ipsecUdpPort", "not user defined ({} assigned by Orchestrator per appliance)".format(extra_ipsec.get("ipsecUdpPort", "port")))
     di_note("deployment.sysConfig", "mapped", "deploymentInfo", "mode, serverPerSegment, system bandwidths (maxBW, maxInBW)")
-    with guarded(ctx, "security-maps", ""):
-        firewall = local_firewall_rules(cap)
-        if firewall:
-            note("security-maps", "unresolved", "", firewall)
+    if not failed_read(ctx, "security-maps", "firewall rules Orchestrator did not push are unknown (preconfig has no firewall section): check the appliance's local rules"):
+        with guarded(ctx, "security-maps", ""):
+            firewall = local_firewall_rules(cap)
+            if firewall:
+                note("security-maps", "unresolved", "", firewall)
     note("availabilityTimeSettings", "not-readable", "availabilityTimeSettings", "Orchestrator returns business hours only through POST /stats/config/applianceBusinessHours/get and capture is GET-only, so custom hours and timezone are not copied; set them per site")
     distance = cap.data("admin-distance")
     if distance and "adminDistance" in selected_templates(cap):
@@ -354,6 +376,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     elif isinstance(distance, dict) and distance:
         note("admin-distance", "unresolved", "", "route admin distances ({}) have no preconfig field and are not copied; use an adminDistance template if they differ from the target's".format(
             ", ".join("{} {}".format(k, v) for k, v in sorted(distance.items()))))
+    elif distance is None and "adminDistance" not in selected_templates(cap):
+        failed_read(ctx, "admin-distance", "route admin distances are unknown (no preconfig field): compare them with the target's")
     sse = cap.data("sse-interfaces")
     sse = sse if isinstance(sse, list) else [sse] if isinstance(sse, dict) and sse else []
     if sse:
@@ -363,8 +387,11 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     if pt_bw is not None and pt_bw != 10000000:
         di["passThroughShapedTraffic"] = {"outboundMaxBandwidth": pt_bw}
         di_note("running-config", "mapped", "deploymentInfo.passThroughShapedTraffic", "outboundMaxBandwidth from 'interface pass-through max-bandwidth' in the stored backup")
-    elif cli or not any(e["item"] == "running-config" and e["disposition"] == "not-readable" for e in ledger):
+    elif cli:
         di_note("running-config", "default-omitted", "deploymentInfo.passThroughShapedTraffic", "no pass-through cap in the stored backup, or the default 10000000")
+    elif not any(e["item"] == "running-config" and e["disposition"] == "not-readable" for e in ledger):
+        di_note("running-config", "not-readable", "deploymentInfo.passThroughShapedTraffic", "no stored backup (running-config) was read, so a pass-through cap "
+                "('interface pass-through max-bandwidth', set only in the CLI) is unknown; check it by hand")
 
     ha_if = sys_cfg.get("haIf") or ""
     ha_mode_entries: List[Dict[str, Any]] = []
@@ -374,7 +401,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     ras: List[Dict[str, Any]] = []
     ra_skipped: List[str] = []
     failover = dep.get("dhcpFailover") or {}
-    if not isinstance(failover, dict):
+    failover_read = isinstance(failover, dict)
+    if not failover_read:
         unreadable_read(ctx, "deployment.dhcpFailover", "DHCP failover (dhcpHA) is not carried", "deploymentInfo.dhcpInfo[].dhcpHA")
         failover = {}
     fo_done: set = set()
@@ -440,6 +468,9 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
                 if server:
                     if server.get("failover") and failover.get(if_name):
                         fo_wanted.add(if_name)
+                    elif server.get("failover") and failover_read:
+                        ctx.note("deployment.dhcpFailover", "unresolved", "deploymentInfo.dhcpInfo[].dhcpHA", "the DHCP server on {} has failover on, but the appliance "
+                                 "holds no failover settings for {}, so dhcpHA is not written; check it by hand".format(if_name, if_name))
                     entry: Dict[str, Any] = {"dhcpInterfaceName": name, "dhcpType": "server", "dhcpAddressMask": server["prefix"], "startIpAddress": server["ipStart"],
                                              "endIpAddress": server["ipEnd"]}
                     if server.get("ip_range"):
@@ -521,7 +552,9 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
         note("deployment.modeIfs[] wan dhcp lease", "runtime", "", "leased address, mask and next hop of DHCP WAN interfaces are runtime state; left empty")
         note("deployment.modeIfs[].zone", "mapped", "deploymentInterfaces[].zone", "id resolved through vrfZonesMap; the zone list holds repeated names across segments")
     ha_groups = cap.data("ha-groups") or {}
-    if not isinstance(ha_groups, dict):
+    if ha_if and ha_mode_entries and failed_read(ctx, "ha-groups", "haConfig is not written", "deploymentInfo.haConfig"):
+        ha_groups = {}
+    elif not isinstance(ha_groups, dict):
         if ha_if and ha_mode_entries:
             unreadable_read(ctx, "ha-groups", "haConfig is not written", "deploymentInfo.haConfig")
         ha_groups = {}
@@ -538,6 +571,9 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
                     " ({})".format(", ".join(label_gaps)) if label_gaps else ""))
             peer_nepk = next((m.get("nePk") for m in my_ha.get("appliances", []) if m.get("nePk") != nepk), None)
             all_apps = cap.data("appliances-all") or []
+            peer_what = "haPeerSerial and haPeerHostname are not written"
+            if not failed_read(ctx, "appliances-all", peer_what, "deploymentInfo.haConfig") and not isinstance(all_apps, list):
+                unreadable_read(ctx, "appliances-all", peer_what, "deploymentInfo.haConfig")
             peer_app = next((x for x in (all_apps if isinstance(all_apps, list) else []) if isinstance(x, dict) and (x.get("nePk") or x.get("id")) == peer_nepk), {})
             own_wans = [i["interfaceLabel"] for i in interfaces if i.get("interfaceType") == "wan" and i.get("interfaceLabel")]
             own_idx = 0
@@ -588,8 +624,6 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
             note("ha-groups, deployment.modeIfs[haIf]", "mapped", "deploymentInfo.haConfig", "EdgeHA peer {}, interface {}, {} peer WAN links; {} auto-generated HA subinterfaces excluded from deploymentInterfaces".format(peer_nepk, ha_if, len(peer_infos), len(ha_mode_entries)))
     except ITEM_ERRORS as err:  # all or nothing: a peer list with a link missing would replace the target's on apply
         item_failed(ctx, "ha-groups, deployment.modeIfs[haIf]", "deploymentInfo.haConfig", err)
-    if write_di and ha_if and ha_mode_entries and my_ha is None and not ctx.failed("deploymentInfo.haConfig"):
-        ctx.note("ha-groups", "not-readable", "deploymentInfo.haConfig", "{} carries HA subinterfaces but no HA group read lists this appliance, so haConfig is not written; check EdgeHA by hand".format(ha_if))
     if not write_di:
         dhcp, relay_leases, ra_skipped, ras, fo_done, fo_wanted = [], [], [], [], set(), set()
         ledger[:] = [e for e in ledger if not any(e is d for d in di_notes)]

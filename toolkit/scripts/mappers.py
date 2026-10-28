@@ -142,6 +142,20 @@ def guarded(ctx: Ctx, item: str, section: str) -> Any:
         item_failed(ctx, item, section, err)
 
 
+def read_failed(cap: Any, ident: str) -> bool:
+    """The capture made the read but holds no usable copy, live or cached; a 404 everywhere means absent on this appliance, not failed."""
+    tries = [i for i in getattr(cap, "index", None) or [] if i.get("id") == ident]
+    return bool(tries) and not any(i.get("status") == "ok" for i in tries) and not all(i.get("http") == 404 for i in tries)
+
+
+def failed_read(ctx: Ctx, ident: str, what: str, section: str = "") -> bool:
+    """read_failed, ledgered not-readable: nothing is written from a read that failed, and it is never taken as empty."""
+    if not read_failed(ctx.cap, ident):
+        return False
+    ctx.note(ident, "not-readable", section, "the {} read failed (no usable live or cached copy), so {}; check by hand".format(ident, what))
+    return True
+
+
 def unreadable_read(ctx: Ctx, item: str, what: str, section: str = "") -> None:
     ctx.note(item, "not-readable", section, "the read has an unexpected shape, so {}; check them by hand".format(what))
 
@@ -800,10 +814,13 @@ def m_interfaceConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
 
 def cli_lines(ctx: Ctx) -> List[str]:
     """Command lines of the newest stored backup's running configuration (can be older than the live configuration)."""
+    what = "settings read from the stored backup's CLI lines (pass-through cap, flow redirection, ...) are not carried"
+    if failed_read(ctx, "running-config", what):
+        return []
     backup = ctx.data("running-config") or {}
     text = (backup.get("runningConfig") or "") if isinstance(backup, dict) else None
     if not isinstance(text, str):
-        unreadable_read(ctx, "running-config", "settings read from the stored backup's CLI lines (pass-through cap, flow redirection, ...) are not carried")
+        unreadable_read(ctx, "running-config", what)
         return []
     return [l.strip() for l in text.splitlines() if l.strip() and not l.strip().startswith("#")]
 
@@ -1074,7 +1091,7 @@ def m_vxlan(ctx: Ctx) -> Optional[Dict[str, Any]]:
     if not vtep:
         dormant = ["{} {}".format(ctx.segment(k) or k, v.get("vni")) for k, v in sorted(seg_map.items(), key=lambda kv: str(kv[0]))
                    if isinstance(v, dict) and str(v.get("vni")) not in ("None", "", "0", "-1", "4294967295")] if isinstance(seg_map, dict) else []
-        if dormant and ctx.data("running-config") is None and not (isinstance(live, dict) and "vtepIf" in live):
+        if dormant and not lines and not (isinstance(live, dict) and "vtepIf" in live):  # no readable backup: its VTEP line is unknown
             ctx.note("vxlan-vni-map", "not-readable", "vxlan", "VNI maps ({}), but the VTEP interface could not be read (no /vxlan and no running-config), so they are not written; check by hand".format(", ".join(dormant)))
         elif dormant:  # vtepSrcInterface is required by the format, so the maps cannot be written on their own
             ctx.note("vxlan-vni-map", "outside-preconfig", "vxlan", "VNI maps ({}) but no VTEP interface: the format requires vtepSrcInterface, so they are not written; the target keeps its own".format(", ".join(dormant)))
