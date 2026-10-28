@@ -341,6 +341,37 @@ class Build(unittest.TestCase):
         cap.assert_not_called()
         self.assertIn("not an ECOS release", err.getvalue())
 
+    INFO = {"orchestrator": "lab", "validator": "lab", "capture": "cap", "target_release": "9.7.1.42046"}
+    ECOS_CASES = (({"target_ecos": "9.6.2.1"}, "9.6.2.1"), ({"target_ecos": None}, None), ({}, None))  # build.json: present, null, key absent
+
+    def test_build_site_passes_target_ecos_from_build_json(self):
+        for extra_info, ecos in self.ECOS_CASES:
+            calls = []
+
+            def translate_into(out, capture, site, release, extra):
+                calls.append(extra)
+                raise cli.Fail("stop")
+            with self.subTest(ecos=ecos, info=extra_info), tempfile.TemporaryDirectory() as tmp, mock.patch.object(cli, "translate_into", side_effect=translate_into):
+                with self.assertRaises(cli.Fail):
+                    cli.build_site(Path(tmp), dict(self.INFO, **extra_info), "s1", [])
+                self.assertEqual(calls[0][2:], ["--target-ecos", ecos] if ecos else [])
+
+    def test_compare_builds_the_other_sites_with_target_ecos_from_build_json(self):
+        import translate
+        for extra_info, ecos in self.ECOS_CASES:
+            seen = []
+
+            def build(cap, ledger, target_ecos=None):
+                seen.append(target_ecos)
+                raise translate.NothingToConvert("stop")
+            with self.subTest(ecos=ecos, info=extra_info), tempfile.TemporaryDirectory() as tmp, mock.patch("capture.capture", return_value="cap2"), \
+                    mock.patch.object(translate, "build", side_effect=build), mock.patch.object(translate, "Capture", side_effect=lambda folder: folder), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                (Path(tmp) / "build.json").write_text(json.dumps(dict(self.INFO, **extra_info)))
+                with self.assertRaises(cli.Fail):
+                    cli.cmd_compare([tmp, "site2", "--yes"])
+                self.assertEqual(seen, [ecos])
+
     def test_target_ecos_reaches_translate_and_build_json(self):
         calls = []
 
