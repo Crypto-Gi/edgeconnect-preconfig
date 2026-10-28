@@ -105,6 +105,21 @@ class Report(unittest.TestCase):
             self.assertEqual(translate.main(["--capture", "x", "--site-type", "t", "--out", "/nonexistent-out"]), 2)
         self.assertIn("lacks appliance", err.getvalue())
 
+    def test_every_translation_says_which_target_ecos_it_used(self):
+        import contextlib
+        import io
+        import json
+        import tempfile
+        for flag, ecos, line in ((["--target-ecos", "9.6.2.1"], "9.6.2.1", "Target appliance ECOS: 9.6.2.1 (from --target-ecos)"),
+                                 ([], None, "Target appliance ECOS: unknown (pass --target-ecos; interface routes with next hop 0.0.0.0 are left out)")):
+            with self.subTest(ecos=ecos), tempfile.TemporaryDirectory() as tmp, mock.patch.object(translate, "Capture", return_value=FakeCap()), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(translate.main(["--capture", "x", "--site-type", "t", "--out", tmp] + flag), 0)
+                ledger = json.loads((Path(tmp) / "ledger.json").read_text())
+                self.assertEqual((ledger.get("target_release"), ledger.get("target_ecos", "absent")), ("9.7.1.42046", ecos))
+                self.assertIn("- " + line + ".", (Path(tmp) / "summary.md").read_text().split("## ")[0])
+                self.assertIn(line, out.getvalue())
+
     def test_business_hours_are_checked_by_hand_not_a_gap(self):
         text = translate.summary_md([entry("not-readable", "availabilityTimeSettings")], {}, {"appliance": {}}, "9.7.1.42046")
         self.assertIn("## Not readable", text)

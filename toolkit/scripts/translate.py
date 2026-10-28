@@ -842,7 +842,14 @@ def apply_warnings(ledger: List[Dict[str, Any]]) -> List[str]:
     return [e["note"] for e in ledger if APPLY_FAILS in e["note"]]
 
 
-def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: Dict[str, Any], release: str) -> str:
+def ecos_line(target_ecos: Optional[str]) -> str:
+    """Which target appliance ECOS the ECOS-dependent rules used (one-route rule in mappers.one_route)."""
+    if target_ecos:
+        return "Target appliance ECOS: {} (from --target-ecos)".format(target_ecos)
+    return "Target appliance ECOS: unknown (pass --target-ecos; interface routes with next hop 0.0.0.0 are left out)"
+
+
+def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: Dict[str, Any], release: str, target_ecos: Optional[str] = None) -> str:
     lines = ["# Translation summary", "",
              "- Toolkit: {}. If a newer version exists, refresh it (re-run setup.sh in the install folder; it pulls main and reinstalls the skill) and translate again before reporting gaps.".format(toolkit_version()),
              "- Source: {} {} ({}), Orchestrator release {}; written for Orchestrator release {}.".format(
@@ -852,6 +859,7 @@ def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: 
     if route_labels:  # global Orchestrator objects, like segments and interface labels: /validate rejects a name the target lacks
         lines.append("- Objects the YAML names: route labels the target Orchestrator must already have: {}.".format(", ".join(route_labels)))
     lines += ["- Default template: {} ({}).".format(e["target"], e["note"]) for e in ledger if e["item"] == "default template"]
+    lines.append("- {}.".format(ecos_line(target_ecos)))
     lines += ["- **Warning: apply will fail**: " + w for w in apply_warnings(ledger)] + [""]
     known = set().union(*(d for _, d in REPORT_GROUPS)) | QUIET
     groups = REPORT_GROUPS + [("Unknown disposition: treat as a gap", {e["disposition"] for e in ledger} - known)]
@@ -993,8 +1001,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     probe = Builder()
     probe.find_secrets(reference)
     source = {"orchestrator": cap.run["orchestrator"], "release": cap.run["release"], "appliance": cap.run["appliance"], "capture": str(args.capture)}
-    write_json(out / "ledger.json", {"toolkit": toolkit_version(), "target_release": args.target_release, "default_template": {"file": template.name, "why": template_why}, "source": source, "entries": ledger})
-    (out / "summary.md").write_text(summary_md(ledger, reference, source, args.target_release), encoding="utf-8")
+    write_json(out / "ledger.json", {"toolkit": toolkit_version(), "target_release": args.target_release, "target_ecos": args.target_ecos, "default_template": {"file": template.name, "why": template_why}, "source": source, "entries": ledger})
+    (out / "summary.md").write_text(summary_md(ledger, reference, source, args.target_release, args.target_ecos), encoding="utf-8")
     if section_modes:
         proposal = propose(reference, probe.secret_paths)
         write_json(out / "proposal.json", proposal)
@@ -1021,6 +1029,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("reference sections:", ", ".join(reference))
     print("columns:", len(meta["columns"]), "| ledger:", dict(Counter(e["disposition"] for e in ledger)))
     print("toolkit:", toolkit_version())
+    print(ecos_line(args.target_ecos))
     known = set().union(*(d for _, d in REPORT_GROUPS)) | QUIET
     for title, dispositions in REPORT_GROUPS + [("Unknown disposition (a gap)", {e["disposition"] for e in ledger} - known)]:
         n = sum(1 for e in ledger if e["disposition"] in dispositions)
