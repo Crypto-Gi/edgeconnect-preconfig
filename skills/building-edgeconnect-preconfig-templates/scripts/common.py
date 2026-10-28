@@ -30,9 +30,9 @@ _SERVER_SIBLINGS = ("host", "address", "authport", "acctport", "server", "server
 _PEM = re.compile(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", re.S)
 _CRYPT = re.compile(r"\$(1|2[aby]?|5|6|y)\$[./A-Za-z0-9$]{8,}")
 # [ \t]: a keyword with an empty value must not reach across the line break and redact the next line's first word
-_CLI_SECRET = re.compile(r"(?im)(\b(?:password|passwd|secret|psk|pre-shared-key|passphrase|auth-key|authentication-key|md5|api-key|token)\b[ \t]+(?:\d[ \t]+)?)(\S+)")
-# free text (banners, comments): "pass: x", "password=x", "pwd: x"; a CLI keyword needs the ':' or '=' so "pass-through" stays
-_TEXT_SECRET = re.compile(r"(?i)(\b(?:pass(?:word|wd)?|pwd)[ \t]*[:=][ \t]*)([^\s\\\"]+)")
+_CLI_SECRET = re.compile(r"(?im)(\b(?:password|passwd|secret|psk|pre-shared-key|passphrase|auth-key|authentication-key|md5|api-key|token)\b[ \t]+(?:\d[ \t]+)?)(?![:=])(\S+)")  # "password = x" is free text, below
+# free text (banners, comments, JSON in CLI lines): "pass: x", "password = x", "PW: x", "\"password\":\"x\""; the ':' or '=' keeps "pass-through"
+_TEXT_SECRET = re.compile(r"(?i)(\b(?:pass(?:word|wd|code|phrase)?|pwd|pw)(?:\\?\")?[ \t]*[:=][ \t]*(?:\\?\")?)([^\s\\\",}]+)")  # also "password":"x" in JSON text
 _SERIAL_HEX = re.compile(r"^[0-9A-F]{12}$")
 
 

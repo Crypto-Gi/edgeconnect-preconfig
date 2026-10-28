@@ -178,6 +178,20 @@ class RedactTest(unittest.TestCase):
         out, _ = redact_secrets({"cli": 'web meta "{\\"note\\":\\"pass: abc\\"}"'})  # JSON inside a CLI line: the value ends at the escape
         self.assertEqual(out["cli"], 'web meta "{\\"note\\":\\"pass: <SECRET:text>\\"}"')
 
+    def test_free_text_credentials_review_forms(self):
+        text = "password = Alpha1x\nPassword : Bravo2x\nPW: Charlie3x\npasscode=Delta4x\npassphrase: Echo5x"
+        out, paths = redact_secrets({"banners": {"issue": text}})
+        for value in ("Alpha1x", "Bravo2x", "Charlie3x", "Delta4x", "Echo5x"):
+            self.assertNotIn(value, out["banners"]["issue"])
+        self.assertEqual(paths, ["$.banners.issue"])
+        cli = 'web proxy-server "{\\"host\\":\\"192.0.2.8\\",\\"username\\":\\"u\\",\\"password\\":\\"Foxtrot6x\\"}"'
+        out, _ = redact_secrets({"cli": cli})
+        self.assertEqual(out["cli"], 'web proxy-server "{\\"host\\":\\"192.0.2.8\\",\\"username\\":\\"u\\",\\"password\\":\\"<SECRET:text>\\"}"')
+        out, _ = redact_secrets({"note": '{"password":"Golf7x"} and password="Hotel8x"'})
+        self.assertEqual(out["note"], '{"password":"<SECRET:text>"} and password="<SECRET:text>"')
+        out, _ = redact_secrets({"note": '{"pwd":12345,"next":1}'})  # an unquoted value ends at the next JSON delimiter
+        self.assertEqual(out["note"], '{"pwd":<SECRET:text>,"next":1}')
+
     def test_nac_server_key_is_secret_but_tag_key_is_not(self):
         out, paths = redact_secrets({"nac": {"server": [{"host": "192.0.2.5", "authport": 1812, "key": "radius-shared"}]},
                                      "tags": [{"key": "site", "value": "a"}]})
