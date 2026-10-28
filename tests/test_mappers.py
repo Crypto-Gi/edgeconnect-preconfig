@@ -1300,5 +1300,69 @@ class ReviewRoundThree(unittest.TestCase):
         self.assertTrue(self.unreadable(notes, "bgp-system"), notes)
 
 
+class RouteLabelsAndContact(unittest.TestCase):
+    """Route labels are their own dictionary (/cn/rtlabels in the running-config), not interface labels; a CLI-only contact is ledgered."""
+    RTLABELS = ("internal set modify - /cn/rtlabels/config/1 value uint32 1\n"
+                "internal set modify - /cn/rtlabels/config/1/name value string Internet\n"
+                "internal set modify - /cn/rtlabels/config/2/name value string \"Backup path\"\n")
+    # interface labels reuse the same ids with other names: resolving a route label there writes a wrong value
+    DEP = {"sysConfig": dict(DEP["sysConfig"], ifLabels={"lan": [{"id": "4", "name": "Voice"}], "wan": [{"id": "1", "name": "INET"}, {"id": "2", "name": "MPLS"}, {"id": "7", "name": "LTE"}]}),
+           "modeIfs": DEP["modeIfs"]}
+    ROUTE = {"configured": True, "local": True, "automatic": False, "prefix": "203.0.113.0/24", "nextHop": "192.0.2.1", "ifName": "lan0", "metric": 50, "advert": True,
+             "advert_bgp": False, "advert_ospf": False, "zone_id": "65534", "label": "1"}
+
+    def routes(self, label, rc):
+        from mappers import m_localRoutes
+        data = {"deployment": self.DEP, "subnets": {"subnets": {"entries": [{"state": dict(self.ROUTE, label=label)}]}}}
+        if rc is not None:
+            data["running-config"] = {"runningConfig": rc}
+        c, notes = ctx(data)
+        return m_localRoutes(c)["routes"][0]["routeLabel"], notes
+
+    def test_route_label_comes_from_route_labels(self):
+        self.assertEqual(self.routes("1", self.RTLABELS)[0], "Internet")
+        self.assertEqual(self.routes("2", self.RTLABELS)[0], "Backup path")
+        self.assertEqual(self.routes("0", self.RTLABELS)[0], None)
+
+    def test_unknown_route_label_is_null_and_ledgered(self):
+        for rc in (self.RTLABELS, None):  # id 7 is an interface label only; no running-config at all
+            label, notes = self.routes("7", rc)
+            self.assertIsNone(label)
+            gaps = [n for n in notes if n["disposition"] == "unresolved" and n["target"] == "localRoutes.routes.routeLabel"]
+            self.assertEqual(len(gaps), 1, notes)
+            self.assertIn("203.0.113.0/24", gaps[0]["note"])
+            self.assertIn("7", gaps[0]["note"])
+
+    def test_ip_sla_route_label_comes_from_route_labels(self):
+        from mappers import m_ipSlaRule
+        op = {"type": "port-monitor", "port-name": "wan1"}
+        rule = {"enable": True, "interval": "10", "comment": "", "routeLabelId": 2, "upAction": "def-alarm", "downAction": "alarm", "operation": {"OPR_1": op}}
+        c, _ = ctx({"deployment": self.DEP, "ipsla-managers": {"MGR_1": rule}, "running-config": {"runningConfig": self.RTLABELS}})
+        self.assertEqual(m_ipSlaRule(c)["ruleEntries"][0]["routeLabel"], "Backup path")
+        c, notes = ctx({"deployment": self.DEP, "ipsla-managers": {"MGR_1": dict(rule, routeLabelId=7)}, "running-config": {"runningConfig": self.RTLABELS}})
+        self.assertIsNone(m_ipSlaRule(c)["ruleEntries"][0]["routeLabel"])
+        self.assertTrue([n for n in notes if n["disposition"] == "unresolved" and n["item"] == "ipsla-managers[MGR_1]" and "7" in n["note"]], notes)
+
+    def _build(self, ledger, **extra):
+        dep = dict(copy.deepcopy(DEP), modeIfs=[])
+        data = dict({"appliance": {"hostName": "h1", "groupId": "1.Network", "site": "S1", "networkRole": "0"}, "deployment": dep}, **extra)
+        cap = FakeCap(data)
+        cap.folder = "fake"
+        return build(cap, ledger)
+
+    def test_cli_only_contact_is_ledgered_not_guessed(self):
+        rc = {"runningConfig": 'system hostname h1\nsystem contact "Ann Example, ann@example.com"\n'}
+        ledger = []
+        info = self._build(ledger, **{"running-config": rc, "extra-info": {"contact": None}})["applianceInfo"]
+        self.assertEqual(info["contact"], {})  # one free-text string; the format splits name, email and phoneNumber
+        gaps = [e for e in ledger if e["target"] == "applianceInfo.contact"]
+        self.assertEqual([e["disposition"] for e in gaps], ["unresolved"], ledger)
+        self.assertIn("Ann Example, ann@example.com", gaps[0]["note"])
+        ledger = []
+        info = self._build(ledger, **{"running-config": rc, "extra-info": {"contact": {"name": "NOC", "email": "noc@example.com"}}})["applianceInfo"]
+        self.assertEqual(info["contact"], {"name": "NOC", "email": "noc@example.com"})
+        self.assertEqual([e for e in ledger if e["target"] == "applianceInfo.contact"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

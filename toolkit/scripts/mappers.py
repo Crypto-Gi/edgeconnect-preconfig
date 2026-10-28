@@ -33,6 +33,7 @@ class Ctx:
         self.vrfs = {str(v["id"]): v["name"] for v in cfg.get("vrfs") or []}
         self.zones = {vrf: {str(z["id"]): z["name"] for z in m.values()} if isinstance(m, dict) else {} for vrf, m in (cfg.get("vrfZonesMap") or {}).items()}
         self.roles = {str(r["id"]): r["name"] for r in cfg.get("roles") or []}
+        self.route_labels: Optional[Dict[str, str]] = None  # read from the running-config on first use
 
     def data(self, ident: str, prefer: str = "live") -> Any:
         return self.cap.data(ident, prefer)
@@ -44,6 +45,21 @@ class Ctx:
 
     def label(self, ident: Any) -> Optional[str]:
         return self.labels.get(str(ident)) if str(ident) not in ("", "None") else None
+
+    def route_label(self, ident: Any, item: str, what: str, target: str) -> Optional[str]:
+        """Route-label name for a route-label id. Route labels are their own dictionary (/cn/rtlabels in the running-config), never the interface
+        labels; an id they do not name is written as null and ledgered, not guessed."""
+        if str(ident) in ("", "None", "0"):
+            return None
+        if self.route_labels is None:
+            found = (re.match(r"^internal set modify - /cn/rtlabels/config/(\d+)/name value string (.+)$", l) for l in cli_lines(self))
+            self.route_labels = {m.group(1): re.sub(r'^"(.*)"$', r"\1", m.group(2)) for m in found if m}
+        name = self.route_labels.get(str(ident))
+        if name is None:
+            self.note(item, "unresolved", target, "{} has route label id {}, which the running-config's route labels (/cn/rtlabels) do not name; routeLabel written as null, set it by hand".format(what, ident))
+        else:
+            cli_note(self, target, "route label names from /cn/rtlabels")
+        return name
 
     def segment(self, vrf: Any) -> Optional[str]:
         return self.vrfs.get(str(vrf))
@@ -506,7 +522,7 @@ def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.
     cfg_prefix, cfg = configured_route(ctx, st["prefix"], next_hop, cfg_if) if vrf == "0" else ({}, {})
     route = {"routeIpSubnet": st["prefix"], "nextHop": nul(next_hop), "interfaceName": nul(if_name), "metric": st["metric"], "advertise": cfg_prefix.get("advert", st["advert"]),
              "advertiseToBgp": cfg_prefix.get("advert_bgp", st["advert_bgp"]), "advertiseToOspf": cfg_prefix.get("advert_ospf", st["advert_ospf"]), "zone": zone,
-             "routeLabel": ctx.label(st.get("label")) if str(st.get("label")) != "0" else None}
+             "routeLabel": ctx.route_label(st.get("label"), "subnets", "route {}".format(st["prefix"]), target + ".routeLabel")}
     if vrf != "0":
         ctx.note("subnets-all-vrfs[{}]".format(vrf), "mapped", "segmentLocalRoutes.routes", "route {}: advertise flags taken from route state, which for Default routes disagrees with the configured table (assumption: confirm the flags)".format(st["prefix"]))
     for key, value in (("comment", cfg.get("comment") or conf.get("comment")), ("tag", cfg.get("dir") or conf.get("tag"))):  # subnets3 calls the tag dir, /subnets/all calls it tag
@@ -887,7 +903,7 @@ def m_ipSlaRule(ctx: Ctx) -> Optional[Dict[str, Any]]:
                     up_act = {"upActionType": "clearAlarm"}
             else:
                 up_act = {"upActionType": up_str.get(str(up_raw), "clearAlarm")}
-            rules.append({"enable": v["enable"], "samplingInterval": int(v["interval"]), "comment": nul(v["comment"]), "routeLabel": ctx.label(v["routeLabelId"]) if v.get("routeLabelId") else None,
+            rules.append({"enable": v["enable"], "samplingInterval": int(v["interval"]), "comment": nul(v["comment"]), "routeLabel": ctx.route_label(v.get("routeLabelId"), "ipsla-managers[{}]".format(k), "IP SLA rule {}".format(k), "ipSlaRule.routeLabel"),
                           "ipslaMonitor": monitor, "downAction": down_act, "upAction": up_act})
         except ITEM_ERRORS as err:
             item_failed(ctx, "ipsla-managers[{}]".format(k), "ipSlaRule", err)

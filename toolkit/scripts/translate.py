@@ -253,6 +253,11 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
         info["region"] = region["regionName"]
     info["location"] = dict(extra.get("location") or {})
     info["contact"] = dict(extra.get("contact") or {})
+    cli_contact = next((m.group(1).strip('"') for l in cli_lines(cap) for m in [re.match(r"^system contact (.+)$", l)] if m), None)
+    if cli_contact and not any(info["contact"].values()):
+        # not carried: the CLI holds one free-text string, the format splits name/email/phoneNumber, and a split would be a guess
+        note("running-config", "unresolved", "applianceInfo.contact", "the appliance has a system contact the Orchestrator record lacks: {!r} (stored backup); "
+             "not carried, because applianceInfo.contact splits name, email and phoneNumber and the one free-text string cannot be split without guessing; set it per site".format(cli_contact))
     out["applianceInfo"] = info
     note("appliance, extra-info, groups", "mapped", "applianceInfo", "hostname, group, site, location, contact; softwareVersion and clusterProfile have no source value; latitude/longitude not exposed")
 
