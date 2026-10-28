@@ -278,6 +278,10 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
             prof_map = cap.data("cluster-profile-mapping") or {}
             profs = {str(p["id"]): p["name"] for p in (cap.data("cluster-profiles") or []) if isinstance(p, dict) and p.get("id") is not None}
             matched_prof = next((profs[str(pid)] for pid, sites in prof_map.items() if isinstance(sites, list) and app.get("site") in sites and str(pid) in profs), None)
+            skipped = sum(1 for p in cap.data("cluster-profiles") or [] if not isinstance(p, dict) or p.get("id") is None)
+            if skipped and not matched_prof:  # the site's profile may be the one that could not be read
+                ctx.note("cluster-profiles", "not-readable", "applianceInfo.clusterProfile", "{} cluster profile(s) could not be read, so the site's cluster profile cannot be "
+                         "confirmed and is not written; check it by hand".format(skipped))
             if matched_prof:
                 info["clusterProfile"] = matched_prof
                 note("cluster-profile-mapping, cluster-profiles", "mapped", "applianceInfo.clusterProfile", "site '{}' mapped to cluster profile '{}'".format(app.get("site"), matched_prof))
@@ -308,7 +312,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
         note("running-config", "unresolved", "applianceInfo.contact", "the appliance has a system contact the Orchestrator record lacks: {!r} (stored backup); "
              "not carried, because applianceInfo.contact splits name, email and phoneNumber and the one free-text string cannot be split without guessing; set it per site".format(cli_contact))
     out["applianceInfo"] = info
-    note("appliance, extra-info, groups", "mapped", "applianceInfo", "hostname, group, site, location, contact; softwareVersion and clusterProfile have no source value; latitude/longitude not exposed")
+    note("appliance, extra-info, groups", "mapped", "applianceInfo", "{}; softwareVersion and clusterProfile have no source value; latitude/longitude not exposed".format(
+        ", ".join(f for f in ("hostname", "group", "site", "location", "contact") if f in info)))
 
     assoc_what = "templateGroups is not written and a section any template group selects is not written from the appliance"
     if failed_read(ctx, "template-association", assoc_what, "templateGroups.groups"):
@@ -321,10 +326,11 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
             note("template-association", "mapped", "templateGroups.groups", "association only; the groups' own settings are not copied")
         else:  # the list replaces the target's groups on apply: an unread association is not "no groups"
             unreadable_read(ctx, "template-association", assoc_what, "templateGroups.groups")
-    groups_what = "which sections the associated template groups provide is unknown, so none is taken as provided by a template"
-    group_reads = [] if failed_read(ctx, "template-groups", groups_what) else cap.data("template-groups") or []
-    if not isinstance(group_reads, list):
+    groups_what = "which sections the associated template groups provide is unknown, so no section a template can provide is written from the appliance"
+    group_reads = None if failed_read(ctx, "template-groups", groups_what) else cap.data("template-groups") or []
+    if group_reads is not None and not isinstance(group_reads, list):
         unreadable_read(ctx, "template-groups", groups_what)
+    groups_unknown = bool(template_groups) and not isinstance(group_reads, list)  # groups associated, their templates unknown
     for i, group in enumerate(group_reads if isinstance(group_reads, list) else []):
         if not isinstance(group, dict) or not isinstance(group.get("name"), str) or not isinstance(group.get("selectedTemplateNames") or [], list):
             item_failed(ctx, "template-groups[{}]".format(i), "", TypeError("a template group without a name or a list of selected templates"))
@@ -680,12 +686,17 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     maybe_owned = set() if isinstance(template_groups, list) or IGNORE_OWNERSHIP else {
         TEMPLATE_SECTION.get(t, t) for g in (group_reads if isinstance(group_reads, list) else []) if isinstance(g, dict) for t in selected_names(g)}
     maybe_owned |= {s for name in maybe_owned & set(FIELD_TEMPLATES) for s in FIELD_TEMPLATES[name]["sections"]}
+    if groups_unknown and not IGNORE_OWNERSHIP:  # as with an unread association: any section might come from a template
+        maybe_owned |= set(MAPPERS)
     for section, mapper in MAPPERS.items():
         if section in template_owned and not IGNORE_OWNERSHIP:
             note("template " + section, "template-group", section, "template '{}' is selected in an associated template group: the section is not written".format(section))
             continue
         if section in maybe_owned:
-            note("template " + section, "not-readable", section, "the template association could not be read and a template group selects '{}', so a template may provide the section: not written; check it by hand".format(section))
+            note("template " + section, "not-readable", section, (
+                "the template groups {} are associated but their templates could not be read, so a template may provide the section: not written; check it by hand".format(", ".join(map(str, template_groups)))
+                if groups_unknown else
+                "the template association could not be read and a template group selects '{}', so a template may provide the section: not written; check it by hand".format(section)))
             continue
         before = len(ledger)
         try:

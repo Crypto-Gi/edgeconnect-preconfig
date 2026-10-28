@@ -537,5 +537,48 @@ class InterfacesForMappers(unittest.TestCase):
         self.assertNotIn("region", out["applianceInfo"])
         self.assertTrue(any(e["disposition"] == "not-readable" and e["item"] == "region-associations" for e in ledger))
 
+class TemplateGroupsAndSummaryLines(unittest.TestCase):
+    """Fourth review: an unread template-groups read, the applianceInfo summary line, cluster profiles, a 404 subnet-sharing read."""
+
+    def routes(self, d):
+        d["subnets"] = {"subnets": {"entries": [{"state": dict(ROUTE)}]}}
+
+    def test_unread_template_groups_withhold_what_a_group_may_provide(self):
+        out, ledger = translate(self.routes)
+        self.assertIn("localRoutes", out)
+        out, ledger = translate(self.routes, failed=("template-groups",))
+        self.assertNotIn("localRoutes", out)  # the routes template may set some of its fields
+        self.assertTrue(any(e["item"] == "template localRoutes" and e["disposition"] == "not-readable" for e in ledger))
+        def no_groups(d):
+            self.routes(d)
+            d["template-association"]["templateIds"] = []
+        out, ledger = translate(no_groups, failed=("template-groups",))
+        self.assertIn("localRoutes", out)  # no group associated: nothing can come from a template
+
+    def test_the_appliance_info_line_lists_only_what_was_written(self):
+        for ident, field in (("groups", "group"), ("extra-info", "location")):
+            with self.subTest(ident):
+                out, ledger = translate(failed=(ident,))
+                line = next(e["note"] for e in ledger if e["target"] == "applianceInfo" and e["disposition"] == "mapped")
+                self.assertNotIn(field, line.split(";")[0])
+        out, ledger = translate()
+        self.assertEqual(next(e["note"] for e in ledger if e["target"] == "applianceInfo" and e["disposition"] == "mapped").split(";")[0], "hostname, group, site, location, contact")
+
+    def test_an_unreadable_cluster_profile_item_is_not_dropped_silently(self):
+        out, ledger = translate(lambda d: d.update({"cluster-profiles": ["x", {"id": 2, "name": "P2"}]}))
+        self.assertNotIn("clusterProfile", out["applianceInfo"])
+        self.assertTrue(any(e["item"].startswith("cluster-profile") and e["disposition"] in ("not-readable", "toolkit-error") for e in ledger))
+        out, ledger = translate(lambda d: d.update({"cluster-profiles": ["x", {"id": 1, "name": "P1"}]}))
+        self.assertEqual(out["applianceInfo"]["clusterProfile"], "P1")  # the site's profile is still confirmed
+
+    def test_a_sharing_read_absent_on_the_appliance_is_not_unreadable(self):
+        data = copy.deepcopy(DATA)
+        data["subnets"] = {"subnets": {"entries": [{"state": dict(ROUTE)}]}}
+        cap = FakeCap(data)
+        cap.index.append({"id": "system-info", "label": "live", "status": "error", "http": 404})
+        ledger = []
+        build(cap, ledger)
+        self.assertFalse(any(e["item"] == "system-info" and e["disposition"] == "not-readable" for e in ledger))
+
 if __name__ == "__main__":
     unittest.main()

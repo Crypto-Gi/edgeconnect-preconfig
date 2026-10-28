@@ -625,8 +625,8 @@ def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.
 def sharing_source(ctx: Ctx) -> Optional[Dict[str, Any]]:
     """auto_subnet.vrf of /systemInfo/system; None, ledgered not-readable, when that read failed or has another shape: not "no settings"."""
     data = ctx.data("system-info")
-    if data is None and not any(i.get("id") == "system-info" for i in getattr(ctx.cap, "index", None) or []):
-        return {}  # not captured at all; a read that failed, or came back null, is not "no settings"
+    if data is None and not read_failed(ctx.cap, "system-info") and not any(i.get("id") == "system-info" and i.get("status") == "ok" for i in getattr(ctx.cap, "index", None) or []):
+        return {}  # not captured, or absent (404); a read that failed, or came back null, is not "no settings"
     auto = (data.get("auto_subnet") if data.get("auto_subnet") is not None else {}) if isinstance(data, dict) else None
     vrfs = (auto.get("vrf") or {}) if isinstance(auto, dict) else None
     if not isinstance(vrfs, dict):
