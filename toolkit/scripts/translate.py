@@ -607,12 +607,24 @@ def verdict(ledger: List[Dict[str, Any]]) -> str:
     return "Complete for preconfig" + ("; {} item(s) to check by hand.".format(by_hand) if by_hand else ".")
 
 
+def route_label_names(value: Any) -> set:
+    """Every routeLabel name written anywhere in the reference."""
+    if isinstance(value, dict):
+        return set().union(*(route_label_names(v) for v in value.values()), {value["routeLabel"]} if isinstance(value.get("routeLabel"), str) else set())
+    if isinstance(value, list):
+        return set().union(*(route_label_names(v) for v in value)) if value else set()
+    return set()
+
+
 def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: Dict[str, Any], release: str) -> str:
     lines = ["# Translation summary", "",
              "- Toolkit: {}. If a newer version exists, refresh it (re-run setup.sh in the install folder; it pulls main and reinstalls the skill) and translate again before reporting gaps.".format(toolkit_version()),
              "- Source: {} {} ({}), Orchestrator release {}; written for Orchestrator release {}.".format(
                  source.get("orchestrator"), (source.get("appliance") or {}).get("nePk"), (source.get("appliance") or {}).get("hostName"), source.get("release"), release),
              "- Sections written ({}): {}.".format(len(reference), ", ".join(reference) or "none")]
+    route_labels = sorted(route_label_names(reference))
+    if route_labels:  # global Orchestrator objects, like segments and interface labels: /validate rejects a name the target lacks
+        lines.append("- Objects the YAML names: route labels the target Orchestrator must already have: {}.".format(", ".join(route_labels)))
     lines += ["- Default template: {} ({}).".format(e["target"], e["note"]) for e in ledger if e["item"] == "default template"] + [""]
     known = set().union(*(d for _, d in REPORT_GROUPS)) | QUIET
     groups = REPORT_GROUPS + [("Unknown disposition: treat as a gap", {e["disposition"] for e in ledger} - known)]

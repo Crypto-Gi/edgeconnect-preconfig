@@ -61,6 +61,13 @@ class Report(unittest.TestCase):
         self.assertIn("`x` -> `z`", text)  # an unknown disposition is shown, never hidden
         self.assertIn("1 entries that are mapped, default, runtime state or context", text)
 
+    def test_summary_names_route_labels_the_target_must_have(self):
+        ref = {"segmentLocalRoutes": [{"segment": "Default", "routes": [{"routeIpSubnet": "0.0.0.0/0", "routeLabel": "Internet"}, {"routeIpSubnet": "192.0.2.0/24", "routeLabel": None}]}],
+               "ipSlaRule": {"ruleEntries": [{"routeLabel": "Backup path"}]}}
+        text = translate.summary_md([], ref, {"orchestrator": "lab", "release": "9.7.1.42046", "appliance": {}}, "9.7.1.42046")
+        self.assertIn("route labels the target Orchestrator must already have: Backup path, Internet", text)
+        self.assertNotIn("must already have", translate.summary_md([], {"applianceInfo": {}}, {"orchestrator": "lab", "release": "x", "appliance": {}}, "x"))
+
     def test_running_config_is_a_gap_only_for_sections_it_holds(self):
         class Cap(FakeCap):
             def __init__(self, text):

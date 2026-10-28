@@ -821,6 +821,13 @@ class AuditRegressions(unittest.TestCase):
         self.assertEqual(substitute({"idsIpsConfig": {"mode": "Off", "profile": "Default_S5"}}, inv)["idsIpsConfig"]["profile"], "Default_S5")
         self.assertTrue(notes)
 
+    def test_route_labels_are_substituted_for_the_validator(self):
+        inv = {"segments": ["Default"], "zones": ["Default"], "lan": ["L"], "wan": ["W"], "groups": ["g"], "templateGroups": ["t"], "overlays": ["o"],
+               "routeLabels": ["Internet", "Lab label"]}
+        doc = {"segmentLocalRoutes": [{"segment": "Default", "routes": [{"routeIpSubnet": "0.0.0.0/0", "routeLabel": "Internet"}, {"routeIpSubnet": "192.0.2.0/24", "routeLabel": "Backup"}]}]}
+        out = substitute(doc, inv)
+        self.assertEqual([r["routeLabel"] for r in out["segmentLocalRoutes"][0]["routes"]], ["Internet", "Internet"])  # an unknown name takes the validator's first label
+
     def test_suite_loads_the_shipped_constraints(self):
         self.assertTrue(load_constraints())
 
