@@ -553,7 +553,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
             raise Fail(str(stop))
     allowed = allowed_paths(info["target_release"])
     try:
-        others = [prune(build(Capture(c), []), allowed, []) for c in caps]
+        others = [prune(build(Capture(c), [], info["target_release"]), allowed, []) for c in caps]
     except NothingToConvert as error:
         raise Fail(str(error))
     reference = load_yaml(base / "reference.yaml")

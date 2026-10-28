@@ -25,8 +25,9 @@ def managed(item: Any) -> bool:
 
 
 class Ctx:
-    def __init__(self, cap: Any, notes: List[Dict[str, Any]]) -> None:
+    def __init__(self, cap: Any, notes: List[Dict[str, Any]], target_release: Optional[str] = None) -> None:
         self.cap, self.notes = cap, notes
+        self.target_release = target_release  # the Orchestrator release whose format is written (translate --target-release); None: no release rules
         self.nepk = cap.run["appliance"]["nePk"]
         dep = cap.data("deployment") or {}
         dep = dep if isinstance(dep, dict) else {}
@@ -627,6 +628,11 @@ def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.
     if_name = None if cfg_if == "default" else cfg_if
     if not next_hop:  # apply rejects it: "Next Hop cannot be empty when interface is specified"
         ctx.note("subnets", "unresolved", target, "route {} on {} has no next hop; a preconfig route needs one, so it is not written".format(st.get("prefix"), if_name))
+        return None
+    # apply on ECOS 9.7.1 rejects it ("Interface cannot be specified when Next Hop is 0.0.0.0"); ECOS 9.6.2.1 applies it (lab, 2026-10-28)
+    if next_hop == "0.0.0.0" and if_name and ctx.target_release and tuple(int(n) for n in re.findall(r"\d+", str(ctx.target_release)))[:2] >= (9, 7):
+        ctx.note("subnets", "unresolved", target, "route {} on {} in segment {} not written: ECOS 9.7+ rejects an interface with next hop 0.0.0.0; give the route a next hop or add it by hand".format(
+            st.get("prefix"), if_name, ctx.segment(vrf, strict=False) or vrf))
         return None
     zone_id = conf.get("zone_id", st.get("zone_id"))  # the state reports the zone of the interface in use
     zone = None if str(zone_id) in ("65534", "") else ctx.zone(vrf, zone_id)

@@ -229,7 +229,7 @@ def drop_template_fields(out: Dict[str, Any], owned: Dict[str, Dict[Optional[str
                  "neighbour settings in the '{}' template ({}) are still written per neighbour: not verified whether the template pushes them to every neighbour (assumption: confirm they belong per neighbour)".format(name, ", ".join(sorted(unowned))))
 
 
-def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
+def build(cap: Capture, ledger: List[Dict[str, Any]], target_release: Optional[str] = None) -> Dict[str, Any]:
     """Every independent block reads its source in a guard: a read of an unexpected shape is ledgered (not-readable for a whole read,
     toolkit-error for one item) and skipped, never the whole translation (owner rule, docs/decisions/0015).
     A replace-on-apply list is never written short without a ledger line."""
@@ -248,7 +248,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]]) -> Dict[str, Any]:
     dep = dep if isinstance(dep, dict) else {}
     if not app.get("hostName") or not dep.get("sysConfig") or not isinstance(dep["sysConfig"], dict):
         raise NothingToConvert("capture {!r} lacks appliance or deployment.sysConfig data (appliance may be offline with no Orchestrator cache)".format(str(cap.folder)))
-    ctx = Ctx(cap, ledger)
+    ctx = Ctx(cap, ledger, target_release)
     # every read below: a read that failed (failed_read) or has another shape is ledgered not-readable and nothing is written from it
     extra_what = "location, contact and the IPsec UDP port are not carried"
     extra = None if failed_read(ctx, "extra-info", extra_what, "applianceInfo") else cap.data("extra-info") or {}
@@ -933,7 +933,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     cap = Capture(args.capture)
     ledger: List[Dict[str, Any]] = [{"item": "default template", "disposition": "context", "target": template.name, "note": template_why}]
     try:
-        reference = prune(build(cap, ledger), allowed_paths(args.target_release), ledger)
+        reference = prune(build(cap, ledger, args.target_release), allowed_paths(args.target_release), ledger)
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2
@@ -957,7 +957,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     order = list(default_doc)
     reference = {k: reference[k] for k in sorted(reference, key=lambda x: order.index(x) if x in order else 999)}
     try:
-        others = [] if section_modes else [prune(build(Capture(folder), []), allowed_paths(args.target_release), []) for folder in args.compare or []]
+        others = [] if section_modes else [prune(build(Capture(folder), [], args.target_release), allowed_paths(args.target_release), []) for folder in args.compare or []]
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2
