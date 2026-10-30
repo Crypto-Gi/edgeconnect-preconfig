@@ -117,6 +117,14 @@ class YamlFiles(unittest.TestCase):
         self.assertRegex(out, r"skipped: name conflict +a\.yml +a: 'a' already exists on Orchestrator or earlier in this batch")
         self.assertNotIn("c.yml", out)
 
+    def test_a_file_that_does_not_parse_never_quotes_a_value(self):
+        for text in ("applianceInfo:\n  adminPassword: !!int hunter2\n", "applianceInfo:\n  adminPassword: !!float hunter2\n", 'a: "hunter2" x\n'):
+            with self.subTest(text=text):
+                code, out = self.run_upload(["--yaml", self.file("bad.yml", text)], Client())
+                self.assertEqual(code, 1)
+                self.assertIn("refused: not a preconfig YAML", out)
+                self.assertNotIn("hunter2", out)
+
     def test_secret_placeholders_are_named_and_refused(self):
         client = Client()
         text = GOOD + "nac:\n  server:\n  - host: 192.0.2.5\n    key: <SECRET:not-captured>\n"

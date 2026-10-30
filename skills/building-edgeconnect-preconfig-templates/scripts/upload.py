@@ -327,8 +327,10 @@ def yaml_refusal(path: Path) -> Tuple[Optional[str], str, str]:
     try:
         text = path.read_text(encoding="utf-8")
         doc = None if "{{" in text else parse_yaml(text)
-    except Exception as err:  # unreadable or not YAML
-        return "refused: not a preconfig YAML", "{}: {}".format(type(err).__name__, str(err).splitlines()[0][:200] if str(err) else ""), ""
+    except Exception as err:  # unreadable or not YAML; the message may quote a value (`password: !!int hunter2`), so only where it broke
+        mark = getattr(err, "problem_mark", None)
+        where = "line {}, column {}; ".format(mark.line + 1, mark.column + 1) if mark else ""
+        return "refused: not a preconfig YAML", "{}: {}its message is not shown, as it may quote a value".format(type(err).__name__, where), ""
     if "{{" in text:
         return "refused: not a preconfig YAML", "it holds Jinja {{ }}: a template, not a rendered preconfig", text
     if not isinstance(doc, dict) or not doc:
