@@ -382,6 +382,11 @@ class CompareLayout(unittest.TestCase):
         self.assertEqual((code, built), (2, None))
         self.assertIn("error: BR-2 is given twice", out)
 
+    def test_one_partner_typed_by_hostname_and_by_nepk_is_refused(self):
+        code, out, built = run_compare(REFERENCE, [renamed("br-2"), renamed("2.NE")], nepk=lambda site: "2.NE")
+        self.assertEqual((code, built), (2, None))
+        self.assertIn("error: 2.NE is given twice", out)
+
     def test_a_toolkit_bug_is_not_reported_as_a_bad_capture(self):
         for error in (TypeError("unhashable type: 'list'"), ValueError("unhashable type: 'list'")):
             with mock.patch("translate.build", side_effect=error):

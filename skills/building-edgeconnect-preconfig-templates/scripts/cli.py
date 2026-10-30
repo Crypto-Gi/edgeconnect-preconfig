@@ -731,6 +731,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
             raise Fail(str(stop))
     allowed = allowed_paths(info["target_release"])
     others = []
+    read_ne = set()
     for site, c in zip(a.sites, caps):
         try:
             cap = Capture(c)
@@ -742,8 +743,12 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
             raise Fail("{}: its capture could not be read ({}: {}); run compare again to read it afresh".format(site, type(error).__name__, detail))
         except Exception as error:  # anything else is a bug in the toolkit, not in the capture
             raise Fail("{}: toolkit error {}: {} (please report it)".format(site, type(error).__name__, str(error)[:200]))
-        if base_ne and (cap.run.get("appliance") or {}).get("nePk") == base_ne:
+        ne = (cap.run.get("appliance") or {}).get("nePk")
+        if base_ne and ne == base_ne:
             refuse_base(site)
+        if ne and ne in read_ne:  # one box typed by hostname and by nePk
+            raise Fail("{} is given twice: give each other site once".format(site))
+        read_ne.add(ne)
         others.append(other)
     reference = load_yaml(base / "reference.yaml")
     names = [o["applianceInfo"]["hostname"] for o in others]
