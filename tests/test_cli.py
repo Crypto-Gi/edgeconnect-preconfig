@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -187,6 +188,106 @@ class TopAndAll(unittest.TestCase):
         sheet = by_path(built.call_args.args[3])
         fixed = sorted(p for p, r in sheet.items() if r["decision"] == "fixed")
         self.assertEqual(fixed, [])
+
+
+class FixAndDryRun(unittest.TestCase):
+    """variables --fix and --dry-run (cli-requests R5) on a build folder of REFERENCE: the dry run asks nothing, builds nothing, calls no Orchestrator."""
+
+    def setUp(self):
+        import yaml
+        self.folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(self.folder), True)
+        (self.folder / "build.json").write_text(json.dumps({"site_type": "br", "orchestrator": "lab", "validator": "lab", "capture": "c", "target_release": "9.7.1.42046", "appliance": {}}))
+        (self.folder / "reference.yaml").write_text(yaml.safe_dump(REFERENCE, sort_keys=False))
+        write_sheet(sheet_rows(), self.folder / "variables.csv")
+        for target in (mock.patch("variables.load_ranking", return_value=RANKING), mock.patch.object(cli, "client_for", side_effect=AssertionError("Orchestrator called")),
+                       mock.patch.object(cli, "build_site", side_effect=AssertionError("site built"))):
+            target.start()
+            self.addCleanup(target.stop)
+
+    def run_cli(self, *flags):
+        """cli.main on the folder with an empty stdin (a question ends the run with exit 1); returns code, stdout, stderr and the recorded picker."""
+        from common import Recorder, RunContext, running
+        recorder = Recorder()
+        with running(RunContext(recorder=recorder)), contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err, \
+                mock.patch.object(sys, "stdin", io.StringIO()):
+            try:
+                code = cli.main(["variables", str(self.folder)] + list(flags))
+            except SystemExit as stop:  # argparse: an unknown flag
+                code = stop.code
+        pickers = [r for r in recorder.results if r["kind"] == "picker"]
+        return code, out.getvalue(), err.getvalue(), pickers[0] if pickers else None
+
+    def test_fix_undoes_set(self):
+        host = "radius.server[0].host"  # not in the Top 10
+        _, _, _, plain = self.run_cli("--pick", "top10", "--dry-run")
+        code, _, err, ticked = self.run_cli("--pick", "top10", "--set", host, "--dry-run")
+        self.assertEqual(code, 0, err)
+        column = by_path(ticked["rows"])[host]["column"]
+        self.assertIn(column, ticked["columns"])
+        for fix in (host, column):  # the path, or the column name the dry run showed
+            with self.subTest(fix=fix):
+                code, _, err, undone = self.run_cli("--pick", "top10", "--set", host, "--fix", fix, "--dry-run")
+                self.assertEqual(code, 0, err)
+                self.assertFalse(by_path(undone["rows"])[host]["on"])
+                self.assertEqual(undone["columns"], plain["columns"])
+        self.assertFalse(by_path(plain["rows"])[host]["on"])
+        router = "bgpSystemConfig.routerId"  # ticked by the Top 10: --fix unticks it too
+        self.assertTrue(by_path(plain["rows"])[router]["on"])
+        self.assertFalse(by_path(self.run_cli("--pick", "top10", "--fix", router, "--dry-run")[3]["rows"])[router]["on"])
+
+    def test_a_locked_row_is_refused_with_its_reason(self):
+        for name, why in (("hostname", "hostname"), ("radius.server[0].key", "secret"), ("site", "deployment-page value (docs/decisions/0006)"),
+                          ("deploymentInfo.dhcpInfo[0].gatewayIpAddress", "deployment-page value (docs/decisions/0006)")):
+            with self.subTest(name=name):
+                code, out, err, picker = self.run_cli("--pick", "top10", "--fix", name, "--dry-run")
+                self.assertEqual((code, out, picker), (2, "", None))
+                self.assertEqual(err, "error: --fix: {} cannot be fixed: always per site, {}\n".format(name, why))
+
+    def test_a_follower_is_refused_naming_the_row_it_follows(self):
+        code, _, err, _ = self.run_cli("--pick", "top10", "--fix", "bgpSystemConfig.neighbors[0].peerIpAddress,no_such", "--dry-run")
+        self.assertEqual(code, 2)
+        self.assertEqual(err, "error: --fix: bgpSystemConfig.neighbors[0].peerIpAddress cannot be fixed on its own: it follows "
+                              "local_routes_static_routes_1_next_hop (localRoutes.staticRoutes[1].nextHop); no setting named no_such\n")
+        code, _, err, picker = self.run_cli("--pick", "top10", "--fix", "local_routes_static_routes_1_next_hop", "--dry-run")  # the column both share: the row it follows
+        self.assertEqual(code, 0, err)
+        rows = by_path(picker["rows"])
+        self.assertEqual((rows["localRoutes.staticRoutes[1].nextHop"]["on"], rows["bgpSystemConfig.neighbors[0].peerIpAddress"]["on"]), (False, False))
+
+    def test_fix_takes_a_label_as_set_does_and_names_every_unknown_once(self):
+        path = "deploymentInfo.deploymentInterfaces[0].interfaceName"
+        label = "deploymentInterfaces[lan0].interfaceName"  # what the tick list shows
+        _, _, err, ticked = self.run_cli("--pick", "top10", "--set", label, "--dry-run")
+        self.assertTrue(by_path(ticked["rows"])[path]["on"], err)
+        code, _, err, undone = self.run_cli("--pick", "top10", "--set", label, "--fix", label, "--dry-run")
+        self.assertEqual(code, 0, err)
+        self.assertFalse(by_path(undone["rows"])[path]["on"])
+        code, _, err, _ = self.run_cli("--pick", "top10", "--fix", "a,hostname,b", "--dry-run")
+        self.assertEqual((code, err), (2, "error: --fix: hostname cannot be fixed: always per site, hostname; no setting named a, b\n"))
+
+    def test_dry_run_prints_the_columns_and_records_where_each_value_is(self):
+        before = sorted((str(p), p.stat().st_mtime_ns) for p in self.folder.rglob("*"))
+        code, out, err, picker = self.run_cli("--pick", "top10", "--set", "bgpSystemConfig.asn", "--dry-run")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(sorted((str(p), p.stat().st_mtime_ns) for p in self.folder.rglob("*")), before)  # nothing written
+        self.assertEqual(out, "\n{} columns: {}\n".format(len(picker["columns"]), ", ".join(picker["columns"])))  # the line finish() prints
+        self.assertIsNone(picker["folder"])
+        lines = (self.folder / "reference.yaml").read_text().splitlines()
+        for row in picker["rows"]:
+            with self.subTest(path=row["path"]):
+                if not row["on"]:
+                    self.assertIsNone(row["lines"])
+                    continue
+                first, last = row["lines"]
+                self.assertLessEqual(first, last)
+                held = "\n".join(lines[first - 1:last])
+                if row["value"] not in ("<SECRET>", ""):
+                    self.assertIn(row["value"], held)
+        self.assertEqual(by_path(picker["rows"])["applianceInfo.hostname"]["lines"], [2, 2])
+
+    def test_dry_run_needs_pick(self):
+        code, _, err, _ = self.run_cli("--dry-run")
+        self.assertEqual((code, err), (2, "error: --dry-run needs --pick top10, top20 or all\n"))
 
 
 class CompareLayout(unittest.TestCase):

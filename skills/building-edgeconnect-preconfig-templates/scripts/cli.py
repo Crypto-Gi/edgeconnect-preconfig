@@ -394,6 +394,31 @@ class Picker:
                 self.on[r["path"]] = True
         return unknown
 
+    def fix_by_name(self, names: List[str], reference: Dict[str, Any]) -> List[str]:
+        """--fix: column names or paths made FIXED (the opposite of --set); returns the reason for each name it refused."""
+        columns = {r["path"]: s["column"] for r, s in zip(self.rows, self.sheet(reference))}  # the names a dry run showed
+        problems, unknown, fixed = [], [], []
+        for name in names:
+            hit = [r for r in self.rows if name in (r["path"], r["column"], columns[r["path"]], r["label"])]
+            hit = [r for r in hit if r["follows"] is None] or hit  # a column a follower shares names the row it follows
+            if not hit:
+                unknown.append(name)
+            for r in hit:
+                if r["locked"]:
+                    problems.append("{} cannot be fixed: always per site, {}".format(name, self.locked_why(r)))
+                elif r["follows"] is not None:
+                    problems.append("{} cannot be fixed on its own: it follows {} ({})".format(name, r["follows"]["column"], r["follows"]["path"]))
+                else:
+                    fixed.append(r)
+        for r in fixed:
+            self.on[r["path"]] = False
+        return problems + (["no setting named {}".format(", ".join(unknown))] if unknown else [])
+
+    @staticmethod
+    def locked_why(r: Dict[str, Any]) -> str:
+        return ("hostname" if r["path"] == "applianceInfo.hostname" else "secret" if r["reason"].startswith("secret")
+                else "deployment-page value (docs/decisions/0006)")
+
     def sheet(self, reference: Dict[str, Any]) -> List[Dict[str, str]]:
         """The rows as variables.csv: chosen rows VARIABLE with a column name, followers as their primary."""
         from variables import RESERVED, column_name
@@ -417,18 +442,20 @@ class Picker:
             out.append(row)
         return out
 
-    def record(self, reference: Dict[str, Any], folder: Path) -> None:
-        """Every row as the picker held it, the chosen columns and the folder written, for the run's recorder."""
-        why = {r["path"]: "hostname" if r["path"] == "applianceInfo.hostname" else "secret" if r["reason"].startswith("secret")
-               else "deployment-page value (docs/decisions/0006)" for r in self.rows if r["locked"]}
+    def record(self, reference: Dict[str, Any], folder: Optional[Path], lines: Optional[Dict[str, List[int]]] = None) -> None:
+        """Every row as the picker held it, the chosen columns and the folder written, for the run's recorder.
+
+        A dry run writes no folder (None) and gives lines: each ticked row then also has the lines of its value in reference.yaml."""
         rows = []
         for r, sheet_row in zip(self.rows, self.sheet(reference)):
             secret = r["reason"].startswith("secret")
             rows.append({"n": r.get("n"), "path": r["path"], "section": r["section"], "label": r["label"], "value": "<SECRET>" if secret else r["value"],
-                         "pct": r["pct"], "support": r["support"], "locked": r["locked"], "locked_why": why.get(r["path"]),
+                         "pct": r["pct"], "support": r["support"], "locked": r["locked"], "locked_why": self.locked_why(r) if r["locked"] else None,
                          "follows": r["follows"]["path"] if r["follows"] is not None else None, "on": sheet_row["decision"] == "variable",
                          "column": sheet_row["column"] if sheet_row["decision"] == "variable" else ""})
-        record("picker", rows=rows, columns=self.columns(reference), folder=str(folder))
+            if lines is not None:
+                rows[-1]["lines"] = lines.get(r["path"]) if rows[-1]["on"] else None
+        record("picker", rows=rows, columns=self.columns(reference), folder=str(folder) if folder else None)
 
     def columns(self, reference: Dict[str, Any]) -> List[str]:
         names: List[str] = []
@@ -436,6 +463,28 @@ class Picker:
             if r["decision"] == "variable" and r["column"] not in names:
                 names.append(r["column"])
         return names
+
+
+def value_lines(text: str) -> Dict[str, List[int]]:
+    """Every path of a YAML text (as variables.csv writes it: a.b[0].c) -> [first, last] line, from 1, of its value."""
+    import yaml
+    found: Dict[str, List[int]] = {}
+
+    def walk(node: Any, path: str) -> None:
+        end = node.end_mark.index
+        while end > node.start_mark.index and text[end - 1].isspace():  # a block ends where the next key starts
+            end -= 1
+        found[path] = [node.start_mark.line + 1, node.end_mark.line + 1 - text.count("\n", end, node.end_mark.index)]
+        if isinstance(node, yaml.MappingNode):
+            for key, item in node.value:
+                walk(item, "{}.{}".format(path, key.value) if path else str(key.value))
+        elif isinstance(node, yaml.SequenceNode):
+            for index, item in enumerate(node.value):
+                walk(item, "{}[{}]".format(path, index))
+    root = yaml.compose(text, Loader=yaml.SafeLoader)
+    if root is not None:
+        walk(root, "")
+    return found
 
 
 def interact(picker: Picker, mode: str, read: Callable[[str], str]) -> bool:
@@ -552,9 +601,13 @@ def read_sheet_rows(path: Path) -> List[Dict[str, str]]:
         return [dict(r, linked_to=r.get("linked_to") or "") for r in csv.DictReader(handle) if r.get("path")]
 
 
-def finish(picker: Picker, reference: Dict[str, Any], default_name: str, name: Optional[str], yes: bool, read: Callable[[str], str]) -> Optional[str]:
+def show_columns(picker: Picker, reference: Dict[str, Any]) -> None:
     cols = picker.columns(reference)
     print("\n{} columns: {}".format(len(cols), ", ".join(cols)))
+
+
+def finish(picker: Picker, reference: Dict[str, Any], default_name: str, name: Optional[str], yes: bool, read: Callable[[str], str]) -> Optional[str]:
+    show_columns(picker, reference)
     if not name:
         name = (read("Site type name [{}]: ".format(default_name)).strip() if not yes else "") or default_name
     name = safe_name(name).lower()
@@ -569,9 +622,13 @@ def cmd_variables(argv: List[str], read: Callable[[str], str] = input) -> int:
     p.add_argument("folder", type=Path)
     p.add_argument("--pick", choices=("top10", "top20", "all"), help="start from the Top 10 or Top 20, or tick every setting (all); with --yes no questions are asked")
     p.add_argument("--set", help="comma-separated column names or paths to make per site as well")
+    p.add_argument("--fix", help="comma-separated column names or paths to keep fixed (the opposite of --set; applied after it)")
     p.add_argument("--name", help="site type name (default: the appliance's)")
     p.add_argument("--yes", action="store_true", help="accept the choice without the tick list or questions")
+    p.add_argument("--dry-run", action="store_true", help="print the columns this choice gives and write nothing: no questions, no Orchestrator")
     a = p.parse_args(argv)
+    if a.dry_run:
+        record("dry-run")  # the run log skips this run: a preview writes nothing (cli-requests R5)
     info = load_build(a.folder)
     base = a.folder if (a.folder / "build.json").is_file() else a.folder.parent
     from variables import load_ranking
@@ -579,8 +636,8 @@ def cmd_variables(argv: List[str], read: Callable[[str], str] = input) -> int:
     picker = Picker(reference, read_sheet_rows(base / "variables.csv"), load_ranking())
     mode = a.pick
     if not mode:
-        if a.yes:
-            raise Fail("--yes needs --pick top10, top20 or all")
+        if a.yes or a.dry_run:
+            raise Fail("{} needs --pick top10, top20 or all".format("--yes" if a.yes else "--dry-run"))
         print("Hostname, serial number and secrets are always per site.\nHow do you want to pick the rest?\n"
               "  1) Top 10 - the settings most often different between sites (start here)\n  2) Top 20\n  3) All settings, by section")
         mode = {"1": "top10", "2": "top20", "3": "all", "": "top10"}.get(read("> ").strip())
@@ -594,6 +651,14 @@ def cmd_variables(argv: List[str], read: Callable[[str], str] = input) -> int:
         unknown = picker.set_by_name([s.strip() for s in a.set.split(",") if s.strip()])
         if unknown:
             raise Fail("--set: no setting named {}".format(", ".join(unknown)))
+    if a.fix:
+        refused = picker.fix_by_name([s.strip() for s in a.fix.split(",") if s.strip()], reference)
+        if refused:
+            raise Fail("--fix: " + "; ".join(refused))
+    if a.dry_run:  # the GUI's preview after each tick (cli-requests R5)
+        show_columns(picker, reference)
+        picker.record(reference, None, value_lines((base / "reference.yaml").read_text(encoding="utf-8")))
+        return 0
     if not a.yes and not interact(picker, mode, read):
         print("nothing written")
         return 1

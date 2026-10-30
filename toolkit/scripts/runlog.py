@@ -249,7 +249,7 @@ def logged(argv: Sequence[str]) -> Iterator[Dict[str, int]]:
     """Run one command with a recorder (the run's own, or a new one) and log it at the end, also when it raises; set ["code"]."""
     run = run_context()
     recorder = run.recorder if run and run.recorder else Recorder()
-    outcome = {"code": 1}  # an exception that escapes the command
+    outcome, mine = {"code": 1}, len(recorder.results)  # code: an exception that escapes the command; mine: where this run's results start
     run_id, started, clock = "run-" + uuid.uuid4().hex[:12], datetime.datetime.now().astimezone(), time.monotonic()
     with running(dataclasses.replace(run or RunContext(), recorder=recorder)), collecting_secrets() as cells:
         try:
@@ -262,7 +262,7 @@ def logged(argv: Sequence[str]) -> Iterator[Dict[str, int]]:
             raise
         finally:
             folder = report_dir()
-            if folder is not None:
+            if folder is not None and not any(r["kind"] == "dry-run" for r in recorder.results[mine:]):  # a dry run writes no line (cli-requests R5)
                 record = entry(list(argv), outcome["code"], run_id, started, time.monotonic() - clock, list(recorder.results), (run.source if run else "cli"), cells)
                 try:
                     append(folder / LOG_NAME, json.dumps(record, ensure_ascii=False, default=str) + "\n")
