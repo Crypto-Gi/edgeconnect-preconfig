@@ -1034,7 +1034,8 @@ def m_multicast(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
             enabled = flags.get(str(seg["vrf_id"]))
             if enabled is True and nul(seg.get("rp")) is None:  # Orchestrator /validate: "rpAddresses required when multicast enabled" (9.7.1)
                 ctx.note("multicast-config", "unresolved", "multicast", "segment {}: multicast is enabled without an RP address; Orchestrator requires rpAddresses when enable is true; "
-                         "not written, set the RP by hand if this site needs multicast".format(ctx.segment(seg["vrf_id"])))
+                         "not written, set the RP by hand if this site needs multicast{}".format(
+                         ctx.segment(seg["vrf_id"]), " (its PIM, IGMP and filter settings are not written either)" if any(seg.get(k) for k in ("pim", "igmp", "filter_name")) else ""))
                 continue
             for stale in sorted(k for k in (seg.get("pim") or {}) if k not in known):
                 if re.match(r"^pim\d+$", stale):  # 'interface pimN virtual pim' in the running-config; the 9.7 list read does not report them

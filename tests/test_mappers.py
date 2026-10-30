@@ -1570,6 +1570,7 @@ class MulticastOneObject(unittest.TestCase):
         self.assertEqual([(n["item"], n["target"]) for n in gaps], [("multicast-config", "multicast")], notes)
         self.assertIn("multicast is enabled without an RP address", gaps[0]["note"])
         self.assertIn("set the RP by hand", gaps[0]["note"])
+        self.assertIn("its PIM, IGMP and filter settings are not written either", gaps[0]["note"])
 
     def test_per_segment_shape_keeps_the_segments_with_an_rp(self):
         c, notes = ctx({"deployment": DEP3, "multicast-enable": [{"vrf_id": 0, "enable": True}, {"vrf_id": 1, "enable": True}, {"vrf_id": 2, "enable": False}],
