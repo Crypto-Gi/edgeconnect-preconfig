@@ -174,7 +174,7 @@ class TaskTests(Fixture):
         (--appliance) with the hostName host_names gives it ("" for a box without one)."""
         def slow(orchestrator, appliance, *args, **kwargs):
             gate.wait()
-            folder = write_capture(common.work_dir() / "cap-{}".format(threading.get_ident()))
+            folder = write_capture(Path(tempfile.mkdtemp(dir=str(self.tmp))) / "cap")  # a thread id can come again
             run = json.loads((folder / "run.json").read_text(encoding="utf-8"))
             run["appliance"]["hostName"] = {k.lower(): v for k, v in host_names.items()}[appliance.lower()]
             (folder / "run.json").write_text(json.dumps(run), encoding="utf-8")
@@ -217,8 +217,19 @@ class TaskTests(Fixture):
         self.second_queues(tasks, release, first, second)
         self.assertEqual(self.folder(second), ["9_NE"])  # the CLI names the folder after the nePk
         self.assertIn("reading 9.NE from lab", first.result.text)
-        with self.assertRaisesRegex(TaskError, "hostname or nepk is required"):
-            tasks.create({"action": "build", "orchestrator": "lab", "hostname": " ", "nepk": None})
+        for card in ({"hostname": " ", "nepk": None}, {"hostname": "h1"}, {"hostname": "h1", "nepk": " "}):
+            with self.assertRaisesRegex(TaskError, "nepk is required, and hostname unless the appliance has none"):
+                tasks.create(dict(card, action="build", orchestrator="lab"))
+
+    def test_variables_on_a_build_folder_queue_behind_a_build_of_that_box(self):
+        release = threading.Event()
+        release.set()
+        tasks = self.builds({"h1": "h1"}, release)
+        self.assertEqual(self.wait(self.build_task(tasks, "h1", "9.NE"), "done", "failed").state, "done")
+        self.assertEqual(tasks._keys(tasks.out_root / "h1"), ["appliance:h1", "appliance:lab:host:h1"])
+        release.clear()
+        build = self.build_task(tasks, "h1", "9.NE")
+        self.second_queues(tasks, release, build, tasks.create({"action": "variables", "build": "h1"}))
 
     def test_two_different_boxes_build_in_parallel(self):
         tasks = self.builds({"h1": "h1", "h2": "h2"}, threading.Barrier(2, timeout=10))  # each capture waits until both are in it
@@ -306,10 +317,21 @@ class TaskTests(Fixture):
             self.assertEqual({stat.S_IMODE((task.folder / n).stat().st_mode) for n in files}, {0o600})
         self.assertEqual(check.result.files, [str(check.folder / "rendered" / "w-1.yml")])
 
+    def test_a_site_folder_without_columns_json_is_refused(self):
+        bare = self.build / "site-bare"
+        bare.mkdir(exist_ok=True)
+        (bare / "bare.jinja2").write_text("applianceInfo: {}\n", encoding="utf-8")
+        tasks = self.manager()
+        for request in ({"action": "validate", "build": "h1", "site": "bare", "csv_text": "x\n"},
+                        {"action": "upload", "orchestrator": "lab", "build": "h1", "site": "bare", "csv_text": "x\n"}):
+            with self.assertRaisesRegex(TaskError, r"site-bare has no template \(columns.json\): give a build folder or a site-<name> folder"):
+                tasks.create(request)
+        self.assertEqual((tasks.list(), self.orch.calls), ([], []))
+
     def test_a_hostname_or_nepk_that_is_not_a_plain_name_is_refused(self):
         tasks = self.manager()
-        for card in ({"hostname": "../h1", "nepk": "9.NE"}, {"hostname": "h1", "nepk": "9/NE"}, {"hostname": ".h1", "nepk": ""},
-                     {"hostname": "", "nepk": ".."}, {"hostname": "a..b", "nepk": ""}, {"hostname": "a\\b", "nepk": ""}, {"hostname": "h 1", "nepk": ""}):
+        for card in ({"hostname": "../h1", "nepk": "9.NE"}, {"hostname": "h1", "nepk": "9/NE"}, {"hostname": ".h1", "nepk": "9.NE"},
+                     {"hostname": "", "nepk": ".."}, {"hostname": "a..b", "nepk": "9.NE"}, {"hostname": "a\\b", "nepk": "9.NE"}, {"hostname": "h 1", "nepk": "9.NE"}):
             with self.assertRaisesRegex(TaskError, "is not an appliance hostname or nePk as the appliance list shows it"):
                 tasks.create(dict(card, action="build", orchestrator="lab"))
         self.assertEqual((tasks.list(), self.orch.calls), ([], []))

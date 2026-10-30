@@ -233,7 +233,10 @@ class TaskManager:
 
     def _site(self, request: Mapping[str, Any]) -> Path:
         name = request.get("site")
-        return self._folder(self._build(request), "site-{}".format(name) if isinstance(name, str) else None, "site")
+        folder = self._folder(self._build(request), "site-{}".format(name) if isinstance(name, str) else None, "site")
+        if not (folder / "columns.json").is_file():  # cli.site_folder's refusal: without it the per-cell checks would not run
+            raise TaskError("{} has no template (columns.json): give a build folder or a site-<name> folder".format(folder))
+        return folder
 
     @staticmethod
     def _folder(parent: Path, name: Any, what: str) -> Path:
@@ -282,15 +285,16 @@ class TaskManager:
             return self._read(task, [], lambda: engine.list_appliances(orch, opt("search"), **context))
         if action == "build":
             # The card sends both fields from `list`; the CLI is given `hostname or nepk`, and names the folder `hostName or nePk`.
-            # One box sent once by hostname and once by nePk queues on either identifier; the folder lock keeps its site runs out.
+            # Both come from `list`: nepk always, hostname empty only for a box without one. One box sent once by hostname and once
+            # by nePk queues on either identifier; the folder runs lock the key their folder maps to (_keys).
             hostname, nepk = ((request.get(key) if isinstance(request.get(key), str) else "").strip() for key in ("hostname", "nepk"))
             appliance = hostname or nepk
-            if not appliance:
-                raise TaskError("hostname or nepk is required")
+            if not nepk:
+                raise TaskError("nepk is required, and hostname unless the appliance has none: send both as the appliance list gives them")
             for value in (hostname, nepk):  # capture.py and the build name folders after them
                 if value and (not _NAME.match(value) or ".." in value):
                     raise TaskError("{!r} is not an appliance hostname or nePk as the appliance list shows it".format(value))
-            keys = ["appliance:{}:{}:{}".format(orch, kind, value.lower()) for kind, value in (("host", hostname), ("ne", nepk)) if value]
+            keys = [_identity(orch, "host", hostname), _identity(orch, "ne", nepk)] if hostname else [_identity(orch, "ne", nepk)]
             validate_on = self._orchestrator(opt("validate_on"), required=False) or None
             return self._read(task, keys + ["appliance:" + cli.safe_name(appliance).lower()], lambda: engine.build(
                 orch, appliance, out=self.out_root, validate_on=validate_on, target_release=opt("target_release"), target_ecos=opt("target_ecos"), **context))
@@ -302,12 +306,12 @@ class TaskManager:
             settings, fixed = (self._names(request, key) for key in ("set", "fix"))
             save = request.get("save") is True
             name = opt("name") if save else None
-            return self._read(task, [self._key(build)], lambda: engine.variables(build, pick, settings, name=name, yes=save, fixed=fixed, dry_run=not save, **context))
+            return self._read(task, self._keys(build), lambda: engine.variables(build, pick, settings, name=name, yes=save, fixed=fixed, dry_run=not save, **context))
         if action == "validate":  # `validate SITE --csv` as cli.validate_rows runs it, its rows written into the task's folder
             site, csv = self._site(request), self._save(task.folder, "sites.csv", self._text(request, "csv_text"))
             built = self._built(site.parent)
             nick = orch or str(built.get("validator") or "")
-            return self._read(task, [self._key(site.parent)], lambda: engine.render_site(
+            return self._read(task, self._keys(site.parent), lambda: engine.render_site(
                 site, csv, task.folder / "rendered", nick or None, substitute=nick != built.get("orchestrator"), **context))
         if action == "render":
             template = self._save(task.folder, "template.jinja2", self._text(request, "template_text"))
@@ -327,7 +331,7 @@ class TaskManager:
             keys = []
         else:
             site = self._site(request)
-            source, keys = {"site_dir": site, "out": task.folder}, [self._key(site.parent)]
+            source, keys = {"site_dir": site, "out": task.folder}, self._keys(site.parent)
         csv = self._save(task.folder, "sites.csv", self._text(request, "csv_text"))
         return self._locked(task, keys + ["orchestrator:" + orch], lambda: self._upload(
             task, lambda approver: engine.upload(csv, orch, approver=approver, **source, **context)))
@@ -349,8 +353,17 @@ class TaskManager:
         return info if isinstance(info, dict) else {}
 
     @staticmethod
-    def _key(build_folder: Path) -> str:
-        return "appliance:" + build_folder.name.lower()
+    def _keys(build_folder: Path) -> List[str]:
+        """The locks of a run on a build folder or its site folders: the folder's, and the build's identity key the folder maps to
+        (the CLI names it after the hostname, or the nePk when there is none), so it waits for a build of that box."""
+        keys = ["appliance:" + build_folder.name.lower()]
+        try:
+            info = json.loads((build_folder / "build.json").read_text(encoding="utf-8"))
+            box, orch = info.get("appliance") or {}, str(info.get("orchestrator") or "")
+            host, nepk = str(box.get("hostName") or "").strip(), str(box.get("nePk") or "").strip()
+        except (OSError, UnicodeError, ValueError, AttributeError):  # no readable build.json: the folder lock still holds
+            return keys
+        return keys + ([_identity(orch, "host", host)] if host else [_identity(orch, "ne", nepk)] if nepk else [])
 
     # ------------------------------------------------------------ the task's thread
 
@@ -428,6 +441,10 @@ class TaskManager:
             return
         result = self._sealed(task, call(approver))
         task.set(result.status, _summary(result), result)
+
+
+def _identity(orchestrator: str, kind: str, value: str) -> str:
+    return "appliance:{}:{}:{}".format(orchestrator, kind, value.lower())
 
 
 def _summary(result: engine.Result) -> str:
