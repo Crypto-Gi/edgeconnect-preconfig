@@ -48,7 +48,8 @@ class UserinfoInTheUrl(unittest.TestCase):
                     client_for("x", self.env(directory, url))
                 self.assertNotIn("hunter2x", str(refused.exception))
                 self.assertTrue(refused.exception.__suppress_context__ or refused.exception.__context__ is None)
-                self.assertIn("x_api_key" if "[" not in url else "https://", str(refused.exception))
+                # a malformed [host] is urlsplit's ValueError on newer Pythons, the userinfo refusal on 3.9: both name no secret
+                self.assertRegex(str(refused.exception), "x_api_key" if "[" not in url else "x_api_key|https://")
 
     def test_an_http_client_error_is_a_transport_error_without_its_text(self):
         from http.client import BadStatusLine, InvalidURL
