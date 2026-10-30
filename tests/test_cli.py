@@ -474,6 +474,16 @@ class CompareShape(unittest.TestCase):
             del o["deploymentInfo"]["deploymentInterfaces"][2]["ipAddressMask"]  # blank (None) at the base: nothing would be copied
         self.assertEqual(self.rows_and_notes(renamed(change=blank_wan)), (["br-2"], []))
 
+    def test_a_value_that_differs_is_a_column_even_when_another_site_lacks_it(self):
+        def hop(o):
+            o["localRoutes"]["staticRoutes"][0]["nextHop"] = "203.0.113.2"
+
+        def drop(o):
+            del o["localRoutes"]["staticRoutes"][0]["nextHop"]
+        code, out, built = run_compare(REFERENCE, [renamed(change=hop), renamed("br-3", drop)])
+        self.assertEqual(built["sheet"]["localRoutes.staticRoutes[0].nextHop"]["decision"], "variable")  # br-2's own next hop, not br-1's
+        self.assertEqual([r["hostname"] for r in built["rows_for"]], ["br-2"])  # br-3 lacks it: no row
+
     def test_dhcp_relay_against_server_is_named(self):
         def relay(o):
             o["deploymentInfo"]["dhcpInfo"][0] = {"dhcpInterfaceName": "lan0", "dhcpType": "relay", "dhcpProxyServers": ["192.0.2.50"]}

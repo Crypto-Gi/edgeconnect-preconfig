@@ -210,10 +210,10 @@ def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Op
             row(path, value, "variable", ALWAYS, unique(column_name(reference, path)))
         elif seen_at:
             seen = [o[path] for o in seen_at if path in o]
-            if len(seen) < len(seen_at):
-                row(path, value, "fixed", "only {} of the {} other sites have this field: different site type? (check)".format(len(seen), len(seen_at)), flag=True)
-            elif any(v != value for v in seen):
+            if any(v != value for v in seen):  # before the check below: a site that has it must get its own value
                 row(path, value, "variable", "differs between the sites you gave", unique(column_name(reference, path)))
+            elif len(seen) < len(seen_at):
+                row(path, value, "fixed", "only {} of the {} other sites have this field: different site type? (check)".format(len(seen), len(seen_at)), flag=True)
             else:
                 row(path, value, "fixed", "same at every site you gave")
         elif BANDWIDTH_KEY.search(key) and not isinstance(value, bool):
