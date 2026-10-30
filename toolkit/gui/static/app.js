@@ -24,7 +24,7 @@ const PROG = "edgeconnect-preconfig";
 const SHAPE = { green: "●", amber: "▲", red: "■" };
 const OPEN_STATES = new Set(["queued", "running", "awaiting_approval"]);  // as automation: an upload that is sending cannot be cancelled
 
-const state = { fleet: [], notListed: [], note: "", warnings: [], current: null, tasks: [], loading: false, work: { files: {} } };
+const state = { fleet: [], failed: false, note: "", warnings: [], current: null, tasks: [], loading: false, work: { files: {} } };
 const $ = (id) => document.getElementById(id);
 
 function store(key, value) {
@@ -78,15 +78,15 @@ async function loadFleet() {
   list.setAttribute("aria-busy", "true");
   try {
     const fleet = await api("/api/orchestrators");
-    Object.assign(state, { fleet: fleet.orchestrators, notListed: fleet.not_listed || [], note: fleet.note || "", warnings: fleet.warnings || [] });
+    Object.assign(state, { failed: false, fleet: fleet.orchestrators, note: fleet.note || "", warnings: fleet.warnings || [] });
   } catch (error) {
-    Object.assign(state, { fleet: [], notListed: [], note: "", warnings: [] });
+    Object.assign(state, { failed: true, fleet: [], note: "", warnings: [] });
     list.replaceChildren(el("li", { class: "s-red", text: "Could not check the Orchestrators: " + error.message }));
   }
   state.loading = false;
   list.setAttribute("aria-busy", "false");
   renderNotes();
-  if (!state.fleet.length) { renderSwitcher(); renderHeader(); return render(); }
+  if (!state.fleet.length) { renderFleet(); renderSwitcher(); renderHeader(); return render(); }
   const remembered = store("ec-orchestrator");
   if (!state.fleet.some((orch) => orch.name === state.current)) {
     const pick = state.fleet.find((orch) => orch.name === remembered) || state.fleet.find((orch) => orch.status === "green") || state.fleet[0];
@@ -99,8 +99,8 @@ async function loadFleet() {
 }
 
 function renderFleet() {
-  const list = $("fleet");
-  list.replaceChildren(...state.fleet.map((orch) => {
+  if (state.failed) return;  // the error loadFleet showed stays until a check succeeds
+  const items = state.fleet.map((orch) => {
     const item = el("li", { class: "orch" },
       el("span", { class: "name", text: nameOf(orch) + (orch.name === state.current ? " (selected)" : "") }),
       el("span", { class: "status-word s-" + orch.status, text: SHAPE[orch.status] + " " + orch.status }),
@@ -108,7 +108,9 @@ function renderFleet() {
       el("span", { class: "meta", text: [orch.url, orch.release && "release " + orch.release, "validator " + (orch.validator ? "yes" : "no"), "uploads " + (orch.writes ? "on" : "off")].filter(Boolean).join(" · ") }));
     if (orch.color) item.style.setProperty("--c", orch.color);
     return item;
-  }));
+  });
+  $("fleet").replaceChildren(...(items.length ? items
+    : [el("li", { class: "muted", text: "No Orchestrator is listed in .env: add orch_1=<nickname> with <nickname>_base_url and <nickname>_api_key, then check again." })]));
 }
 
 // Why some .env nicknames are not listed, and the keys the automation tools would refuse: both are the server's own words.
@@ -117,9 +119,6 @@ function renderNotes() {
   $("fleet-note").textContent = state.note ? state.note + "." : "";
   $("fleet-warnings").hidden = !state.warnings.length;
   $("fleet-warnings-list").replaceChildren(...state.warnings.map((item) => el("li", { text: item })));
-  if (!state.fleet.length && !$("fleet").querySelector(".s-red")) {
-    $("fleet").replaceChildren(el("li", { class: "muted", text: "No Orchestrator is listed in .env: add orch_1=<nickname> with <nickname>_base_url and <nickname>_api_key, then check again." }));
-  }
 }
 
 function renderSwitcher() {
@@ -242,6 +241,9 @@ async function loadTasks() {
 }
 
 /* earlier builds in preconfig-output: the server lists them and names every download; the browser builds no path */
+// A download link only to a path on this server under /api/; anything else (another origin, a scheme, "//host") gets no link.
+function apiHref(url) { return typeof url === "string" && /^\/api\//.test(url) ? url : ""; }
+
 async function loadBuilds() {
   let data;
   try {
@@ -259,9 +261,9 @@ async function loadBuilds() {
     el("td", { class: "mono", text: String(build.built || "").replace("T", " ") }),
     el("td", null, build.site_types.length ? el("ul", { class: "notes" }, ...build.site_types.map((site) => el("li", null,
       el("span", { text: site.name + " " }),
-      site.template_url ? el("a", { href: site.template_url, download: "", text: "Download template" }) : null,
-      site.template_url && site.csv_url ? " · " : null,
-      site.csv_url ? el("a", { href: site.csv_url, download: "", text: "Download CSV" }) : null))) : el("span", { class: "muted", text: "No site type saved yet" }))));
+      apiHref(site.template_url) ? el("a", { href: apiHref(site.template_url), download: "", text: "Download template" }) : null,
+      apiHref(site.template_url) && apiHref(site.csv_url) ? " · " : null,
+      apiHref(site.csv_url) ? el("a", { href: apiHref(site.csv_url), download: "", text: "Download CSV" }) : null))) : el("span", { class: "muted", text: "No site type saved yet" }))));
   $("builds").replaceChildren(...(rows.length ? rows : [el("tr", null, el("td", { colspan: "4", class: "muted", text: "No builds yet. Build a template from an appliance to start." }))]));
 }
 

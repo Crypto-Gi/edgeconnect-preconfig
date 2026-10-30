@@ -1,4 +1,4 @@
-/* EdgeConnect Preconfig GUI: an exact copy of edgeconnect-orchestrator-automation 7af5e9d (static/app.css). Design tokens follow the toolkit page: dark first, a full light theme, blue for data and
+/* EdgeConnect Automation GUI. Design tokens follow the toolkit page: dark first, a full light theme, blue for data and
    primary actions, amber for gates, green ok, red bad. Light-theme colours are darkened where the toolkit page's fell
    below WCAG AA (4.5:1) for text; tests/test_gui_design.py checks every text pair in both themes. */
 @font-face { font-family: "Bricolage Grotesque"; src: url(bricolage-grotesque-latin-wght.woff2) format("woff2"); font-weight: 200 800; font-display: swap; }
