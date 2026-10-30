@@ -342,6 +342,15 @@ status only; `summary.md` as text) and `static/pick.js` / `pick.css` (the check-
 ticks (`--set`) and unticks (`--fix`), runs the dry run after each flip (debounced, one at a time, the newest state drawn), and on a
 refusal goes back to the last accepted state with the CLI's reason at the row. `PICK_STARTS` is the hook for "Different between
 your sites". Screens in their own files push to `SCREENS` in `app.js`. Tested in `tests/test_gui_pick.py`. Not yet: the lab build.
+Built as (8b, compare): `engine.compare(folder, sites, name, settings, fixed, captures, dry_run)` and exactly its shapes in
+`_built_here` (1 to 4 sites, `--dry-run` or `--yes`, one `--captures` folder per site); the READ task `compare` locks the build
+folder and every site it reads by hostname and nePk on the build's Orchestrator. "Compare with other sites" on the pick screen lists
+the build's Orchestrator, takes up to 4 ticked sites, and adds the start "Different between your sites"; the first preview reads the
+sites (GET only) and every later run, Save too, names that task (`captures_from`) so the server passes its recorded captures back
+with `--captures`; the browser never sends a folder. Save is `compare --name N --yes`, which validates on the build's validator and
+says when a row did not pass. Every row's `lines` lights the YAML on hover. Tested in `tests/test_gui_compare.py`. Not yet: the
+per-site value columns (the `picker` record carries no other site's values; the CLI prints them only in its table), progress
+from the reads' request logs (the status shows the "reading ..." lines), and the lab compare.
 
 ## Step 9: Make the preconfig files, upload, existing YAML
 Upload the template and the CSV, the three choices (create; create and validate; create, validate and upload), the matching of

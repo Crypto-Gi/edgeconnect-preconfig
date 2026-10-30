@@ -32,7 +32,7 @@ import time
 import zipfile
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import quote
 
 import cli
@@ -42,9 +42,8 @@ import gui_tables
 from approval import APPROVAL_SECONDS, ApprovalError, GuiApprovals
 from fleet import profiles
 
-READS = {"list", "preconfigs", "build", "variables", "validate", "render", "validate_yaml", "make"}  # make: unless it uploads
+READS = {"list", "preconfigs", "build", "variables", "compare", "validate", "render", "validate_yaml", "make"}  # make: unless it uploads
 UPLOADS = {"upload", "upload_yaml"}
-# compare joins READS with its engine helper (R6 pending).
 FINAL = {"done", "failed", "rejected", "expired", "cancelled"}
 _OPEN = {"queued", "running", "awaiting_approval"}
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")  # a build or site type folder name as the GUI lists it: no path in it
@@ -75,6 +74,7 @@ class Task:
         self.cancelled = False
         self.approval: Optional[Dict[str, Any]] = None  # what approving a CSV upload takes, while it is awaited: gates, orchestrator, counts
         self.note = ""  # make: whether the template matched a saved site folder, in Python's words
+        self.compared: Optional[Tuple[Path, List[str]]] = None  # compare: its build folder and sites, for a later run's captures_from
         self.changed = threading.Condition()
 
     def set(self, state: str, message: str = "", result: Optional[engine.Result] = None) -> None:
@@ -133,7 +133,7 @@ class TaskManager:
         action = request.get("action")
         if action not in READS | UPLOADS:
             raise TaskError("unknown action {!r}; use one of {}".format(action, ", ".join(sorted(READS | UPLOADS))))
-        named = self._orchestrator(request.get("orchestrator"), required=action not in ("variables", "validate", "render", "make") or (
+        named = self._orchestrator(request.get("orchestrator"), required=action not in ("variables", "compare", "validate", "render", "make") or (
             action == "make" and request.get("choice") == "upload"))
         if action in UPLOADS or (action == "make" and request.get("choice") == "upload"):
             refusal = engine.uploads_off(named, common.env_map(self.dotenv))
@@ -366,18 +366,29 @@ class TaskManager:
             # The card sends both fields from `list`; the CLI is given `hostname or nepk`, and names the folder `hostName or nePk`.
             # Both come from `list`: nepk always, hostname empty only for a box without one. One box sent once by hostname and once
             # by nePk queues on either identifier; the folder runs lock the key their folder maps to (_keys).
-            hostname, nepk = ((request.get(key) if isinstance(request.get(key), str) else "").strip() for key in ("hostname", "nepk"))
+            hostname, nepk = self._appliance(request)
             appliance = hostname or nepk
-            if not nepk:
-                raise TaskError("nepk is required, and hostname unless the appliance has none: send both as the appliance list gives them")
-            for value in (hostname, nepk):  # capture.py and the build name folders after them
-                if value and (not _NAME.match(value) or ".." in value):
-                    raise TaskError("{!r} is not an appliance hostname or nePk as the appliance list shows it".format(value))
             keys = [_identity(orch, "host", hostname), _identity(orch, "ne", nepk)] if hostname else [_identity(orch, "ne", nepk)]
             validate_on = self._orchestrator(opt("validate_on"), required=False) or None
             log = Path(self.work_dir) / "reference" / orch  # where capture() keeps its request log while it reads
             return self._read(task, keys + ["appliance:" + cli.safe_name(appliance).lower()], lambda: _watched(task, log, appliance, lambda: engine.build(
                 orch, appliance, out=self.out_root, validate_on=validate_on, target_release=opt("target_release"), target_ecos=opt("target_ecos"), **context)))
+        if action == "compare":  # GET only from the sites; the save validates on the build's validator (EC_VALIDATORS, the CLI checks)
+            build = self._build(request)
+            sites = request.get("sites")
+            if not isinstance(sites, list) or not 1 <= len(sites) <= 4 or not all(isinstance(site, dict) for site in sites):
+                raise TaskError("sites must list 1 to 4 appliances, each with its nepk and hostname as the appliance list gives them")
+            source = str(self._built(build).get("orchestrator") or "")  # the sites are read from the build's Orchestrator
+            keys, named = self._keys(build), []
+            for hostname, nepk in map(self._appliance, sites):  # each box it reads, by both names, as a build of it locks
+                named.append(hostname or nepk)
+                keys += ([_identity(source, "host", hostname)] if hostname else []) + [_identity(source, "ne", nepk)]
+            settings, fixed = (self._names(request, key) for key in ("set", "fix"))
+            save = request.get("save") is True
+            captures = self._captures(request.get("captures_from"), build, named)
+            task.compared = (build, named)
+            return self._read(task, keys, lambda: engine.compare(build, named, name=opt("name") if save else None, settings=settings, fixed=fixed,
+                                                                 captures=captures, dry_run=not save, **context))
         if action == "variables":
             build = self._build(request)
             pick = request.get("pick") or "top10"
@@ -484,6 +495,30 @@ class TaskManager:
         except OSError:  # moved aside or replaced by a rebuild
             return None
         return site if same and _NAME.match(site.name) and ".previous-" not in site.name and (site / "columns.json").is_file() else None
+
+    @staticmethod
+    def _appliance(request: Mapping[str, Any]) -> Tuple[str, str]:
+        """(hostname, nepk) as the appliance list gives them: nepk always, hostname empty only for a box without one."""
+        hostname, nepk = ((request.get(key) if isinstance(request.get(key), str) else "").strip() for key in ("hostname", "nepk"))
+        if not nepk:
+            raise TaskError("nepk is required, and hostname unless the appliance has none: send both as the appliance list gives them")
+        for value in (hostname, nepk):  # capture.py and the build name folders after them
+            if value and (not _NAME.match(value) or ".." in value):
+                raise TaskError("{!r} is not an appliance hostname or nePk as the appliance list shows it".format(value))
+        return hostname, nepk
+
+    def _captures(self, task_id: Any, build: Path, sites: List[str]) -> List[str]:
+        """The sample captures an earlier compare task of this build and these sites recorded, in site order; the browser names the
+        task, never a folder."""
+        if task_id in (None, ""):
+            return []
+        earlier = self.tasks.get(task_id) if isinstance(task_id, str) else None
+        found = [r["folder"] for r in earlier.result.outputs if r["kind"] == "capture"] if earlier and earlier.result else []
+        if earlier is None or earlier.compared != (build, sites) or len(found) != len(sites):
+            raise TaskError("captures_from must name an earlier compare of this build and these sites, in the same order")
+        if not all(Path(folder).is_dir() for folder in found):  # the CLI records a capture before it opens it: a failed run's may be gone
+            raise TaskError("the earlier read is gone; compare without captures_from to read the sites again")
+        return found
 
     @staticmethod
     def _names(request: Mapping[str, Any], key: str) -> List[str]:
@@ -638,7 +673,7 @@ def _watched(task: Task, folder: Path, appliance: str, call: Callable[[], engine
 
 
 def _identity(orchestrator: str, kind: str, value: str) -> str:
-    return "appliance:{}:{}:{}".format(orchestrator, kind, value.lower())
+    return "appliance:{}:{}:{}".format(orchestrator.lower(), kind, value.lower())  # a CLI build.json may say "Lab" for lab
 
 
 def _summary(result: engine.Result) -> str:
