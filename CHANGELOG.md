@@ -2,6 +2,7 @@
 
 ## Unreleased (gui branch)
 
+- **Multicast switched on without an RP is no longer written** (since 1.3.0): ECOS before 9.7 can report multicast on with no RP address (seen with only the virtual pim0-2), and the toolkit wrote `enable: 'true'` with `rpAddresses` null, which Orchestrator `/validate` refuses (`rpAddresses required when multicast enabled`). Such a segment, in either the one-object or the per-segment shape, is now left out and listed under Gaps in `summary.md` (set the RP by hand if the site needs multicast); it is never written as `enable: false` and no RP is made up. `check.py` flags a rendered row with multicast on and no RP before any `/validate` call.
 - **`edgeconnect-preconfig gui`** starts the local web GUI (`--port`, `--no-browser`, as `python3 -m toolkit.gui`, which still works) from the command `setup.sh` installs, once the clone is on the `gui` branch. In an installed agent skill, which has no GUI, it stops with one error line (exit 2). `--help` lists it.
 - **`setup.sh` re-run keeps each clone on its branch**: a clean clone is pulled (fast-forward only) on the branch it is on, so a clone on `gui` stays on `gui` instead of being switched back to `main`. A detached clone is left alone with a message (its commits are never dropped); a branch that is not on GitHub or has diverged stops the run without switching.
 - **GUI:** leaving a page (Back, a typed address) now closes a dialog left open on it, such as Save template and CSV, which stayed over the next page until Close was pressed.

@@ -1559,8 +1559,25 @@ class MulticastOneObject(unittest.TestCase):
         c, notes = ctx({"deployment": DEP, "multicast-enable": {"enable": False}, "multicast-config": {"rp": "", "pim": {}, "igmp": {}, "filter_name": ""}})
         self.assertIsNone(m_multicast(c))
         self.assertEqual([n["disposition"] for n in notes if n["item"] == "multicast-config"], ["default-omitted"])
-        c, notes = ctx({"deployment": DEP, "multicast-enable": {"enable": True}, "multicast-config": {"rp": "", "pim": {}, "igmp": {}, "filter_name": ""}})
-        self.assertEqual(m_multicast(c)[0]["enable"], "true")  # switched on with nothing else set is still a setting
+
+    def test_switched_on_without_an_rp_is_not_written(self):
+        """Orchestrator /validate refuses enable true without rpAddresses (seen on 9.7.1): the segment is a gap, never enable false or an invented RP."""
+        # scrubbed from ECOS 9.5/9.6 captures: multicast on, rp "", only the virtual pim0-2
+        c, notes = ctx({"deployment": DEP, "multicast-enable": {"enable": True},
+                        "multicast-config": {"rp": "", "pim": {"pim0": self.PIM, "pim1": self.PIM, "pim2": self.PIM}, "igmp": {}, "filter_name": ""}})
+        self.assertIsNone(m_multicast(c))
+        gaps = [n for n in notes if n["disposition"] == "unresolved"]
+        self.assertEqual([(n["item"], n["target"]) for n in gaps], [("multicast-config", "multicast")], notes)
+        self.assertIn("multicast is enabled without an RP address", gaps[0]["note"])
+        self.assertIn("set the RP by hand", gaps[0]["note"])
+
+    def test_per_segment_shape_keeps_the_segments_with_an_rp(self):
+        c, notes = ctx({"deployment": DEP3, "multicast-enable": [{"vrf_id": 0, "enable": True}, {"vrf_id": 1, "enable": True}, {"vrf_id": 2, "enable": False}],
+                        "multicast-config": [{"vrf_id": 0, "rp": "192.0.2.9", "pim": {}, "igmp": {}, "filter_name": None},
+                                             {"vrf_id": 1, "rp": "", "pim": {}, "igmp": {}, "filter_name": None},
+                                             {"vrf_id": 2, "rp": "", "pim": {}, "igmp": {}, "filter_name": None}]})
+        self.assertEqual([(o["segment"], o["enable"], o["rpAddresses"]) for o in m_multicast(c)], [("Default", "true", "192.0.2.9"), ("guest", "false", None)])
+        self.assertEqual(len([n for n in notes if n["disposition"] == "unresolved" and "without an RP address" in n["note"]]), 1, notes)
 
 
 class ManagedBgpNeighbors(unittest.TestCase):
