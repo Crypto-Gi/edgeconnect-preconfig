@@ -33,6 +33,65 @@ class TlsSettingsTests(unittest.TestCase):
                 client_for("x_vlab", write_env(directory, "x_vlab_tls_sha256=abc\n"))
 
 
+class UserinfoInTheUrl(unittest.TestCase):
+    """A base URL with user:password@ would reach http.client, whose InvalidURL traceback prints the password."""
+
+    def env(self, directory, url):
+        path = Path(directory) / ".env"
+        path.write_text("orch_1=x\nx_base_url={}\nx_api_key=K\n".format(url), encoding="utf-8")
+        return str(path)
+
+    def test_a_url_with_a_user_or_password_is_refused_without_echoing_it(self):
+        for url in ("https://user:hunter2x@host.invalid", "https://user:hunter2x@host.invalid:443/gms/rest", "https://hunter2x@host.invalid", "https://[::1]:hunter2x@host.invalid"):
+            with self.subTest(url=url), tempfile.TemporaryDirectory() as directory:
+                with self.assertRaises(ConfigurationError) as refused:
+                    client_for("x", self.env(directory, url))
+                self.assertNotIn("hunter2x", str(refused.exception))
+                self.assertTrue(refused.exception.__suppress_context__ or refused.exception.__context__ is None)
+                self.assertIn("x_api_key" if "[" not in url else "https://", str(refused.exception))
+
+    def test_an_http_client_error_is_a_transport_error_without_its_text(self):
+        from http.client import BadStatusLine, InvalidURL
+
+        class Opener:
+            def __init__(self, error):
+                self.error = error
+
+            def open(self, req, timeout=None):
+                raise self.error
+        with tempfile.TemporaryDirectory() as directory:
+            client = client_for("x", self.env(directory, "https://host.invalid"))
+        for error in (InvalidURL("nonnumeric port: 'hunter2x@host.invalid'"), BadStatusLine("hunter2x")):
+            with self.subTest(error=type(error).__name__):
+                client._opener = Opener(error)
+                with self.assertRaises(TransportError) as failed:
+                    client.get("/gms/versions")
+                self.assertNotIn("hunter2x", str(failed.exception))
+                self.assertIsNone(failed.exception.__cause__)
+                self.assertTrue(failed.exception.__suppress_context__)  # a printed traceback would show the hidden error's text
+                self.assertIn(type(error).__name__, str(failed.exception))
+
+    def test_a_cut_off_error_body_is_an_http_error_not_a_traceback(self):
+        import io
+        from http.client import IncompleteRead
+        from urllib.error import HTTPError
+        from common import EdgeConnectError
+
+        class Body(io.BytesIO):
+            def read(self, *a):
+                raise IncompleteRead(b"abc", 10)
+
+        class Opener:
+            def open(self, req, timeout=None):
+                raise HTTPError(req.full_url, 500, "Server Error", {}, Body())
+        with tempfile.TemporaryDirectory() as directory:
+            client = client_for("x", self.env(directory, "https://host.invalid"))
+        client._opener = Opener()
+        with self.assertRaises(EdgeConnectError) as failed:
+            client.get("/gms/versions")
+        self.assertIn("500", str(failed.exception))
+
+
 class PinnedConnectionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
