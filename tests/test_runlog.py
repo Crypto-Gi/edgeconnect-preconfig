@@ -103,10 +103,12 @@ class RunLog(unittest.TestCase):
 
     def test_a_bearer_token_in_text_is_redacted(self):
         masker = runlog.Masker({})
-        got = runlog.redact({"message": "GET failed: Authorization: Bearer eyJhbGciOi.payload.sig, retry", "detail": ["sent bearer abc123def456ghi"],
+        got = runlog.redact({"message": "GET failed: Authorization: Bearer eyJhbGciOi.payload.sig, retry", "detail": ["sent bearer abc123def456ghi",
+                                                                                                                "Bearer: zz9tokA", "bearer=zz9tokB"],
                              "name": "site Bearer-less"}, masker)
         self.assertNotIn("eyJhbGciOi", json.dumps(got))
         self.assertNotIn("abc123def456ghi", json.dumps(got))
+        self.assertNotIn("zz9tok", json.dumps(got))
         self.assertEqual(got["name"], "site Bearer-less")  # the word alone, with no token after it, stays
         self.assertIn("<REDACTED>", got["message"])
 

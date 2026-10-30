@@ -295,6 +295,12 @@ class Picker:
             r["support"] = rank["appliances"] if rank else 0
             parts = r["path"].split(".")
             r["section"] = ".".join(parts[:2]).split("[")[0] if parts[0] == "deploymentInfo" and len(parts) > 2 else parts[0].split("[")[0]
+        for name in (lambda r: labelled(reference, r["path"], prefix=True), lambda r: r["path"]):  # the GUI shows labels: two lan0 routes get their prefixes, then positions
+            same = {}
+            for r in rows:
+                same.setdefault(r["label"], []).append(r)
+            for r in [r for alike in same.values() if len(alike) > 1 for r in alike]:
+                r["label"] = name(r).replace("deploymentInfo.", "", 1)
         self.free = [r for r in rows if not r["locked"] and r["follows"] is None]
         self.free.sort(key=lambda r: (r["section"], r["path"]))
         for n, r in enumerate(self.free, 1):
@@ -402,6 +408,8 @@ class Picker:
             other = next(iter([r for r in other if r["follows"] is None] or other), None)  # as fix_by_name: a shared column names the row followed
             if other is not None and other["locked"]:  # before follows: a locked row may follow a locked row, which --set cannot take either
                 problems.append("{} is always per site already ({})".format(name, self.locked_why(other)))
+            elif other is not None and other["follows"] is not None and other["follows"]["locked"]:  # sheet() makes it VARIABLE already
+                problems.append("{} is always per site already (it follows {}, {})".format(name, other["follows"]["column"], self.locked_why(other["follows"])))
             elif other is not None and other["follows"] is not None:
                 problems.append("{} follows {}; set {} instead".format(name, other["follows"]["column"], other["follows"]["column"]))
             else:
@@ -769,7 +777,8 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     for site, c in zip(a.sites, caps):
         try:
             cap = Capture(c)
-            other = prune(build(cap, [], info.get("target_ecos")), allowed, [])
+            why = reused_capture_problem(cap.run, site, info["orchestrator"]) if a.captures else None  # before build: a partial capture is not "offline?"
+            other = None if why else prune(build(cap, [], info.get("target_ecos")), allowed, [])
         except NothingToConvert:
             raise Fail("{}: no appliance or deployment data could be read (offline with no Orchestrator cache?), so it cannot be compared".format(site))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:  # a damaged capture: one line naming the site as typed, not a traceback
@@ -778,10 +787,8 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
                 site, " " + str(c) if a.captures else "", type(error).__name__, detail, "without --captures " if a.captures else "again "))
         except Exception as error:  # anything else is a bug in the toolkit, not in the capture
             raise Fail("{}: toolkit error {}: {} (please report it)".format(site, type(error).__name__, str(error)[:200]))
-        if a.captures:
-            why = reused_capture_problem(cap.run, site, info["orchestrator"])
-            if why:
-                raise Fail("--captures: {} {}".format(c, why))
+        if why:
+            raise Fail("--captures: {} {}".format(c, why))
         ne = (cap.run.get("appliance") or {}).get("nePk")
         if base_ne and ne == base_ne:
             refuse_base(site)
@@ -873,8 +880,9 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     record("saved", folder=str(target), validated=code == 0)
     if code == 1:
         print("{} is saved: only the rows that failed validation need fixing, in {} (nothing has to be compared again)".format(target, target / "sites.csv"))
-    elif code:  # render STOPPED (validator refused, network): no row was validated
-        print("{} is saved, but its rows were not validated (see STOPPED above): run validate on it when the validator answers".format(target))
+    elif code:  # render STOPPED (validator refused, network), maybe after some rows
+        print("{} is saved, but validation stopped (see STOPPED above): rows validated before it are in {}; run validate on it when the validator answers".format(
+            target, target / "rendered"))
     return code
 
 
@@ -887,7 +895,9 @@ def validate_rows(folder: Path, csv_path: Path, info: Dict[str, Any], orchestrat
     print("\nvalidating every row of {} on {} ...".format(csv_path.name, nick), flush=True)
     args = ["--site-dir", str(folder), "--csv", str(csv_path), "--validate", nick] + (["--substitute"] if nick != info["orchestrator"] else [])
     code = render.main(args)
-    if code in (0, 1):  # 2: render STOPPED before any row was validated, and said why
+    if code == 2:  # render STOPPED (validator refused, network) and said why: there are no FAIL rows to fix
+        print("validation stopped (see STOPPED above); rows validated before it are in {}".format(folder / "rendered"))
+    else:
         print("rows that passed are in {}".format(folder / "rendered") if code == 0 else "fix the FAIL rows in {} and run validate again; the rows that passed are in {}".format(csv_path, folder / "rendered"))
     return code
 

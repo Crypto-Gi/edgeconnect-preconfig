@@ -483,10 +483,39 @@ def sample_run(site, orchestrator="lab", **change):
     return run
 
 
+class FollowsALockedRow(unittest.TestCase):
+    def test_set_on_a_row_that_follows_a_locked_row_says_it_is_per_site(self):
+        from generate import Builder
+        ref = copy.deepcopy(REFERENCE)
+        ref["bgpSystemConfig"]["routerId"] = "192.0.2.1"  # the lan0 host address, a common router ID: it follows lan0_ip, which is locked
+        probe = Builder()
+        probe.find_secrets(ref)
+        rows = [{k: cli.cell(v) for k, v in r.items()} for r in classify(ref, probe.secret_paths, None)]
+        picker = cli.Picker(ref, rows, {})
+        refused = picker.set_by_name(["bgpSystemConfig.routerId"])
+        self.assertEqual(len(refused), 1)
+        self.assertTrue(refused[0].startswith("bgpSystemConfig.routerId is always per site already (it follows lan0_ip, "), refused)
+        self.assertEqual(next(s for s in picker.sheet(ref) if s["path"] == "bgpSystemConfig.routerId")["decision"], "variable")
+
+
+class DistinctLabels(unittest.TestCase):
+    def test_two_routes_on_one_interface_are_named_by_their_prefix(self):
+        """The GUI's check-box screen shows labels: two lan0 routes must not both read localRoutes.routes[lan0].nextHop."""
+        reference = {"localRoutes": {"routes": [{"interfaceName": "lan0", "routeIpSubnet": "10.1.0.0/16", "nextHop": "192.0.2.126"},
+                                                {"interfaceName": "lan0", "routeIpSubnet": "10.2.0.0/16", "nextHop": "192.0.2.126"},
+                                                {"interfaceName": "lan0", "routeIpSubnet": "10.2.0.0/16", "nextHop": "192.0.2.125"},
+                                                {"interfaceName": "wan0", "routeIpSubnet": "0.0.0.0/0", "nextHop": "198.51.100.1"}]}}
+        rows = [{"path": "localRoutes.routes[{}].nextHop".format(n), "column": "c{}".format(n), "decision": "variable", "reason": "", "value": ""}
+                for n in range(4)]
+        labels = [r["label"] for r in cli.Picker(reference, rows, {}).rows]
+        self.assertEqual(labels, ["localRoutes.routes[lan0 10.1.0.0/16].nextHop", "localRoutes.routes[1].nextHop",
+                                  "localRoutes.routes[2].nextHop", "localRoutes.routes[wan0].nextHop"])  # same prefix twice: the position
+
+
 class CompareForTheGui(unittest.TestCase):
     """compare --dry-run, --set/--fix, --captures and the saved-with-failures outcome (cli-requests R6)."""
 
-    def compare(self, others, argv, validated=0, runs=None, read=None):
+    def compare(self, others, argv, validated=0, runs=None, read=None, built_by=None):
         """cmd_compare on in-memory references, recorded: (exit code, output, build_site call or None, results, sites read)."""
         import yaml
         from common import Recorder, RunContext, running
@@ -507,7 +536,7 @@ class CompareForTheGui(unittest.TestCase):
                     mock.patch("validate.client_for", side_effect=AssertionError("no Orchestrator request")), \
                     mock.patch("upload.client_for", side_effect=AssertionError("no Orchestrator request")), \
                     mock.patch("translate.Capture", side_effect=lambda c: mock.Mock(run=run_of(c))), \
-                    mock.patch("translate.build", side_effect=[copy.deepcopy(o) for o in others]), \
+                    mock.patch("translate.build", side_effect=built_by or [copy.deepcopy(o) for o in others]), \
                     mock.patch("translate.prune", side_effect=lambda value, allowed, ledger: value), \
                     mock.patch.object(cli, "build_site", side_effect=build_site), mock.patch.object(cli, "ensure_sites_csv"), \
                     mock.patch.object(cli, "validate_rows", return_value=validated), running(RunContext(recorder=recorder)), \
@@ -567,6 +596,13 @@ class CompareForTheGui(unittest.TestCase):
                 self.compare([zoned("Guest", "br-2")], ["--dry-run", "--captures"] + folders, runs=runs)
             self.assertTrue(str(refused.exception).startswith(message), refused.exception)
 
+    def test_a_partial_capture_is_refused_as_such_before_it_is_converted(self):
+        from translate import NothingToConvert
+        with self.assertRaises(cli.Fail) as refused:  # a partial capture has no deployment data: say it is partial, not "offline?"
+            self.compare([zoned("Guest", "br-2")], ["--dry-run", "--captures", "/c/1"], runs=lambda c: sample_run("br-2", only=["appliance"]),
+                         built_by=NothingToConvert("nothing"))
+        self.assertTrue(str(refused.exception).startswith("--captures: /c/1 is not a full sample capture"), refused.exception)
+
     def test_set_and_fix_refusals_are_one_line(self):
         with self.assertRaises(cli.Fail) as refused:
             self.compare([zoned("Guest", "br-2")], ["--dry-run", "--set", "nope"])
@@ -583,7 +619,7 @@ class CompareForTheGui(unittest.TestCase):
         self.assertEqual([r for r in results if r["kind"] == "saved"][0]["validated"], False)
         code, out, _, results, _ = self.compare([zoned("Guest", "br-2")], ["--yes", "--name", "br"], validated=2)  # render STOPPED
         self.assertEqual(code, 2)
-        self.assertIn("site-br is saved, but its rows were not validated (see STOPPED above)", out)
+        self.assertIn("site-br is saved, but validation stopped (see STOPPED above): rows validated before it are in", out)
         self.assertNotIn("failed validation", out)
         code, out, _, results, _ = self.compare([zoned("Guest", "br-2")], ["--yes", "--name", "br"])
         self.assertEqual(code, 0)
@@ -595,12 +631,12 @@ class CompareForTheGui(unittest.TestCase):
 class ValidateRowsAdvice(unittest.TestCase):
     def test_a_stopped_validation_gives_no_fail_rows_advice(self):
         import render
-        for code, advice in ((0, "rows that passed are in"), (1, "fix the FAIL rows in"), (2, None)):
+        for code, advice in ((0, "rows that passed are in"), (1, "fix the FAIL rows in"), (2, "validation stopped (see STOPPED above)")):
             with self.subTest(code=code), mock.patch.object(cli, "check_validator"), mock.patch.object(render, "main", return_value=code), \
                     contextlib.redirect_stdout(io.StringIO()) as out:
                 self.assertEqual(cli.validate_rows(Path("site"), Path("site/sites.csv"), {"validator": "lab", "orchestrator": "lab"}, None), code)
             lines = out.getvalue().splitlines()
-            for text in ("rows that passed are in", "fix the FAIL rows in"):
+            for text in ("rows that passed are in", "fix the FAIL rows in", "validation stopped (see STOPPED above)"):
                 self.assertEqual(any(line.startswith(text) for line in lines), text == advice, out.getvalue())
 
 

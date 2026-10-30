@@ -102,11 +102,15 @@ def setting_key(reference: Dict[str, Any], path: str) -> str:
     return "".join(parts)
 
 
-def labelled(reference: Dict[str, Any], path: str) -> str:
-    """The path with each list index replaced by the item's own name (lan0.71, a tunnel name), so sites are compared item by item, not by position."""
+def labelled(reference: Dict[str, Any], path: str, prefix: bool = False) -> str:
+    """The path with each list index replaced by the item's own name (lan0.71, a tunnel name), so sites are compared item by item, not by position.
+
+    prefix adds a route's own prefix (lan0 10.1.0.0/16), for two routes on one interface."""
     def name(match):
         item = _walk(reference, path[:match.end()])
         label = next((str(item[k]) for k in LABEL_KEYS if isinstance(item, dict) and isinstance(item.get(k), str) and item[k]), None)
+        if prefix and isinstance(item, dict) and isinstance(item.get("routeIpSubnet"), str) and item["routeIpSubnet"]:
+            label = " ".join(filter(None, (label, item["routeIpSubnet"])))
         return "[{}]".format(label or match.group(1))
     return re.sub(r"\[(\d+)\]", name, path)
 

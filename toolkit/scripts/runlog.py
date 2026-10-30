@@ -39,7 +39,7 @@ NEXT_STEP = {
     "ERROR": "Read the error above and rerun the same command.",
 }
 _SECRET_TEXT = re.compile(r"(?i)(authorization|x-auth-token|api[-_]?key|password|secret|cookie)\s*[:=]\s*([^\s,;]+)")
-_BEARER = re.compile(r"(?i)\b(bearer)\s+[^\s,;]+")  # `Authorization: Bearer <token>`: _SECRET_TEXT alone would take "Bearer" for the value; every string, like _SECRET_TEXT: over-masking "Bearer Creek" beats a token in a key not marked free
+_BEARER = re.compile(r"(?i)\b(bearer)(?:\s*[:=]\s*|\s+)[^\s,;]+")  # `Authorization: Bearer <token>`: _SECRET_TEXT alone would take "Bearer" for the value; every string, like _SECRET_TEXT: over-masking "Bearer Creek" beats a token in a key not marked free
 GRAM = 8  # a run of this many characters of a secret anywhere in the text is masked, as the whole secret is
 
 

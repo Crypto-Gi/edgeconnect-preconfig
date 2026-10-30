@@ -6,8 +6,8 @@ reading branch-b from lab (GET only) ...
 25 settings are always per site (hostname, secrets, Deployment page, appliance info), and 1 more are per site at branch-a and no other site:
      #  Setting                                              branch-a                              Choice   
   -- Different between your sites (pre-ticked) -------------------
-   19  localRoutes.routes[lan0].nextHop                     192.0.2.126                           VARIABLE
-        localRoutes.routes[lan0].nextHop                     follows #19
+   19  localRoutes.routes[lan0 192.0.2.192/26].nextHop      192.0.2.126                           VARIABLE
+        localRoutes.routes[lan0 198.51.100.128/25].nextHop   follows #19
 0 settings are the same at every site and stay fixed.
 Note: branch-b lacks 14 setting(s) branch-a has: localRoutes.routes[0].advertise, localRoutes.routes[0].advertiseToBgp, localRoutes.routes[0].advertiseToOspf .... sites.csv gets no row for branch-b: the template holds branch-a's settings only. Run compare with branch-b as the base (build it first), or build a separate template for that design.
 
