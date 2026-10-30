@@ -297,7 +297,7 @@ Built as: `toolkit/gui/gui_server.py` (automation's server, security unchanged; 
 prints the absolute `.env`, output, work and run-log folders and fixes `EDGECONNECT_REPORT_DIR` once at launch), `toolkit/gui/gui_tasks.py`
 (actions list, build, variables preview/save, validate, render, validate_yaml, upload, upload_yaml; an appliance lock for a build folder
 and its site folders, an Orchestrator lock per upload; imports saved 0600 in `preconfig-output/runs/<run_id>/`), `engine.run(on_line=...)`
-for the streamed lines, `GET /api/builds` for the earlier builds, and a placeholder `static/index.html` until step 6. Tested in
+for the streamed lines, and `GET /api/builds` for the earlier builds; its placeholder page gave way to the step 6 shell. Tested in
 `tests/test_gui_tasks.py` and `tests/test_gui_server.py`. Not yet: compare and preconfigs tasks (R6, step 10), the page on macOS and WSL.
 
 ## Step 6: Design and shell
@@ -317,6 +317,15 @@ The CLI writes the run log (format above); `source` is `cli` or `gui`. "See what
 workflow, status, changes written, row outcomes, duration, source, run ID) with sort, filter, search, problems-only and CSV
 export; a run's page with its per-row table. `gui_tables.py` copied.
 Done when: 10,000 logged runs stay responsive and a run's row CSV matches the run log.
+Built as: `toolkit/gui/gui_tables.py`, automation's of 7af5e9d without its inventory, change and issue tables: `select` / `page` (search,
+exact-match filters, problems only, sort with blanks last, page sizes 25 to 200, facets), `RunLog` over `reports/preconfig.jsonl` only
+(re-read when its size or time changes; a line that is not a record with a `summary` is counted as unreadable), `run_detail`, and
+automation's formula-safe `csv_text`. Routes, GET only behind the session cookie: `/api/runs[.csv]` and `/api/runs/<run_id>[/rows.csv]`,
+the run ID matched against `[A-Za-z0-9_-]{1,80}` before the log is searched for it (it never names a file). The screen is
+`static/tables.js` (automation's `PagedTable`, unchanged) and `static/runs.js` (the runs table, the run page with its facts, notes,
+approval record and rows); `app.js` gained only `SCREENS`, where a screen's own script adds its hash and view, so the home card
+opens it. Tested in `tests/test_gui_tables.py` (CLI and GUI runs read back as logged, each row CSV equal to the log's rows, the approval
+record, 10,000 runs, the routes' refusals) and `tests/test_gui_shell.py`.
 
 ## Step 8: Build, choose what changes per site, compare
 The build card (appliance picker from `list`, validator choice from the validators only), the check-box screen with the YAML

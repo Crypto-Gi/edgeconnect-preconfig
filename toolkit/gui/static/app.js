@@ -26,6 +26,8 @@ const OPEN_STATES = new Set(["queued", "running", "awaiting_approval"]);  // as 
 
 const state = { fleet: [], failed: false, note: "", warnings: [], current: null, tasks: [], loading: false, work: { files: {} } };
 const $ = (id) => document.getElementById(id);
+// Screens built in their own files (runs.js, ...) add { hash: RegExp, view: section id, render(match) } here before the first render.
+const SCREENS = [];
 
 function store(key, value) {
   try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); } catch (_) { return null; }
@@ -205,7 +207,7 @@ function renderIntents() {
       // Title first, so a screen reader names the link by its task; CSS shows the kind above it.
       el("h2", { text: task.title }),
       el("p", { text: task.text }),
-      el("span", { class: "kind" + (task.writes ? " writes" : ""), text: kindText(task, orch) + " · not yet available" })))));
+      el("span", { class: "kind" + (task.writes ? " writes" : ""), text: kindText(task, orch) + (SCREENS.some((screen) => screen.hash.test(task.href)) ? "" : " · not yet available") })))));
 }
 
 // A screen a later step builds: says so, and gives the command line that does the same today.
@@ -214,16 +216,19 @@ function renderLater(task) {
   $("later-orch").textContent = orch ? nameOf(orch) : "No Orchestrator configured";
   $("later-title").textContent = task.title;
   $("later-text").textContent = task.text;
-  $("later-cli-text").textContent = task.cli.length ? "This screen is not in this version of the GUI yet. The command line does the same:"
-    : "This screen is not in this version of the GUI yet, and runs are not logged yet.";
+  $("later-cli-text").textContent = "This screen is not in this version of the GUI yet. The command line does the same:";
   $("later-cli").replaceChildren(...task.cli.map((line) => el("li", null, el("code", { text: PROG + " " + line.split("{orch}").join(state.current || "<nickname>") }))));
 }
 
 function show(view) {
-  for (const id of ["view-home", "view-later"]) $(id).hidden = id !== view;
+  for (const id of ["view-home", "view-later"].concat(SCREENS.map((screen) => screen.view))) $(id).hidden = id !== view;
 }
 
 function render() {
+  for (const screen of SCREENS) {
+    const match = location.hash.match(screen.hash);
+    if (match) { show(screen.view); return screen.render(match); }
+  }
   const task = TASKS.find((item) => item.href === location.hash);
   if (task) { show("view-later"); return renderLater(task); }
   show("view-home");
@@ -342,7 +347,7 @@ document.addEventListener("keydown", (event) => {
 });
 window.addEventListener("hashchange", () => { render(); $("main").focus(); });
 
-render();
+document.addEventListener("DOMContentLoaded", render);  // after the screens' own scripts have added themselves to SCREENS
 loadFleet();
 loadTasks();
 loadBuilds();
