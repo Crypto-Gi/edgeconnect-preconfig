@@ -13,6 +13,7 @@ import hmac
 import json
 import os
 import platform
+import re
 import secrets
 import shutil
 import subprocess
@@ -163,6 +164,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._events(task_id)
         if action == "result":
             return self._json(200, {"result": tasks.get(task_id).full_result()})
+        if action == "rows":  # the row table, a page at a time
+            return self._json(200, tasks.rows(task_id, query))
+        if action == "files.zip":  # only the files this task's run wrote, from its recorder
+            return self._download("{}.zip".format(Path(tasks.get(task_id).folder or task_id).name), tasks.written_zip(task_id), "application/zip")
+        if action == "file":
+            found = tasks.written_file(task_id, query.get("name", ""))
+            # a CSV may name a file with a quote or a non-Latin letter; the header gets a plain name, the bytes are the file's own
+            return self._download(re.sub(r"[^\w.-]", "_", found.name, flags=re.ASCII), found.read_bytes(), "text/plain; charset=utf-8")
         raise TaskError("not found", 404)
 
     def _runs(self, path: str, query: Dict[str, str]) -> None:

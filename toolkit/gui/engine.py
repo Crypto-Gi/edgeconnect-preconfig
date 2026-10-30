@@ -123,9 +123,14 @@ def _refusal(argv: Sequence[str], approver: Optional[Callable[..., Any]]) -> Opt
         return "an upload with --approve needs the GUI's approval (the nickname typed in the approve dialog)"
     if not line.orchestrator:
         return "a GUI upload names its Orchestrator with --orchestrator"
-    key = "{}_gui_preconfig_uploads".format(line.orchestrator.strip().lower().replace("-", "_"))
-    if common.env_map().get(key, "").strip().lower() != "on":  # also gates the upload's own /validate there (D20)
-        return "GUI uploads are off for {0}: set {1}=on in .env to allow them".format(line.orchestrator, key)
+    return uploads_off(line.orchestrator, common.env_map())  # also gates the upload's own /validate there (D20)
+
+
+def uploads_off(orchestrator: str, env: Mapping[str, str]) -> Optional[str]:
+    """Why GUI uploads to this Orchestrator are refused (its <nickname>_gui_preconfig_uploads is not on, D6), or None."""
+    key = "{}_gui_preconfig_uploads".format(orchestrator.strip().lower().replace("-", "_"))
+    if env.get(key, "").strip().lower() != "on":
+        return "GUI uploads are off for {0}: set {1}=on in .env to allow them".format(orchestrator, key)
     return None
 
 

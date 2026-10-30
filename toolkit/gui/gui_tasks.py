@@ -1,9 +1,15 @@
 """GUI tasks (docs/gui/BUILD_PLAN.md step 5): each action is one engine call in its own thread, as a task the browser follows.
 
-  list, preconfigs, build, variables, validate, render, validate_yaml:  queued -> running -> done | failed | rejected
-  upload (a sites CSV):  queued -> running (the check) -> awaiting_approval -> uploading -> done | failed | rejected
+  list, preconfigs, build, variables, validate, render, validate_yaml, make (create; create and validate):
+                         queued -> running -> done | failed | rejected
+  upload, make (create, validate and upload):
+                         queued -> running (the check) -> awaiting_approval -> uploading -> done | failed | rejected
                                   \\-> done | failed | rejected     \\-> rejected | expired | cancelled
-  upload_yaml:           queued -> uploading -> done | failed | rejected   (no approval: decision 0017)
+  upload_yaml:           queued -> uploading -> done | failed | rejected   (one button, no typed nickname: D9, decision 0017)
+
+"make" is the "Make the preconfig files" screen: a template and a CSV, matched to a saved site folder whose template is
+byte-identical (its columns.json gives the per-cell checks), else rendered as the person's own file. Every upload is refused
+before anything runs unless <nickname>_gui_preconfig_uploads=on.
 
 Reads run in parallel. A run on a build folder or one of its site folders holds that appliance's lock (staging folders are
 wiped at start and keep_previous renames the folder), and an upload holds its Orchestrator's lock from its check to its end,
@@ -14,6 +20,7 @@ Every run gets the absolute .env, output and work folders as its own RunContext 
 os.environ is never changed here. Files a person imports come in the request as text and are saved, mode 0600, under names
 chosen here, in the task's own new folder preconfig-output/runs/<run_id>/.
 """
+import io
 import itertools
 import json
 import os
@@ -22,6 +29,7 @@ import secrets
 import shutil
 import threading
 import time
+import zipfile
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
@@ -30,15 +38,20 @@ from urllib.parse import quote
 import cli
 import common
 import engine
+import gui_tables
 from approval import APPROVAL_SECONDS, ApprovalError, GuiApprovals
 from fleet import profiles
 
-READS = {"list", "preconfigs", "build", "variables", "validate", "render", "validate_yaml"}
+READS = {"list", "preconfigs", "build", "variables", "validate", "render", "validate_yaml", "make"}  # make: unless it uploads
 UPLOADS = {"upload", "upload_yaml"}
 # compare joins READS with its engine helper (R6 pending).
 FINAL = {"done", "failed", "rejected", "expired", "cancelled"}
 _OPEN = {"queued", "running", "awaiting_approval"}
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")  # a build or site type folder name as the GUI lists it: no path in it
+CHOICES = ("create", "validate", "upload")  # make: create; create and validate; create, validate and upload
+# The row table's words for the CLI's row statuses (render.py, upload.py and the --yaml files)
+_WORDS = {"ok": "written", "failed": "invalid", "invalid": "invalid", "conflict": "conflict", "ready": "written, ready to upload",
+          "uploaded": "uploaded", "upload-failed": "upload failed", "passed": "passed", "validate failed": "invalid"}
 
 
 class TaskError(Exception):
@@ -60,6 +73,8 @@ class Task:
         self.answers: Optional[List[str]] = None
         self.deadline: Optional[float] = None
         self.cancelled = False
+        self.approval: Optional[Dict[str, Any]] = None  # what approving a CSV upload takes, while it is awaited: gates, orchestrator, counts
+        self.note = ""  # make: whether the template matched a saved site folder, in Python's words
         self.changed = threading.Condition()
 
     def set(self, state: str, message: str = "", result: Optional[engine.Result] = None) -> None:
@@ -84,14 +99,15 @@ class Task:
 
     def view(self) -> Dict[str, Any]:
         """The task as the browser sees it; the whole Result (rows, issues, text) comes from result()."""
-        found = self.result
+        found, approval = self.result, self.approval  # each read once: the task's thread may clear them meanwhile
         result = None if found is None else {
             "exit_code": found.exit_code, "status": found.status, "counts": found.counts, "approval": found.approval and dict(found.approval, counts={
                 "ready": found.counts.get("PLANNED", 0), "invalid": found.counts.get("INVALID", 0), "conflict": found.counts.get("SKIPPED", 0),
                 "rows": len(found.rows)}),  # so the page can say "uploads N of M"
             "issues": len(found.issues), "rows": len(found.rows), "files": len(found.files)}
         return {"id": self.id, "action": self.action, "orchestrator": self.orchestrator, "state": self.state, "message": self.message,
-                "created": self.created, "deadline": self.deadline, "folder": str(self.folder) if self.folder else None, "result": result}
+                "created": self.created, "deadline": self.deadline, "folder": str(self.folder) if self.folder else None, "result": result,
+                "approval": approval and {key: approval[key] for key in ("gates", "orchestrator", "counts")}, "note": self.note}
 
     def full_result(self) -> Optional[Dict[str, Any]]:
         # shortcut: the whole Result in one answer; gui_tables pages issues and rows in step 7.
@@ -117,10 +133,15 @@ class TaskManager:
         action = request.get("action")
         if action not in READS | UPLOADS:
             raise TaskError("unknown action {!r}; use one of {}".format(action, ", ".join(sorted(READS | UPLOADS))))
-        named = self._orchestrator(request.get("orchestrator"), required=action not in ("variables", "validate", "render"))
+        named = self._orchestrator(request.get("orchestrator"), required=action not in ("variables", "validate", "render", "make") or (
+            action == "make" and request.get("choice") == "upload"))
+        if action in UPLOADS or (action == "make" and request.get("choice") == "upload"):
+            refusal = engine.uploads_off(named, common.env_map(self.dotenv))
+            if refusal:  # before anything runs: no folder, no task, nothing sent to that Orchestrator (D6, D20)
+                raise TaskError("refused, nothing sent: " + refusal, 403)
         with self._lock:
             task_id = "task-{}".format(next(self._ids))
-        imports = action in ("validate", "render", "validate_yaml", "upload", "upload_yaml")
+        imports = action in ("validate", "render", "validate_yaml", "upload", "upload_yaml", "make")
         task = Task(task_id, action, named, self._run_folder() if imports else None)
         try:
             work = self._prepare(task, request)
@@ -163,6 +184,47 @@ class TaskManager:
             task.cancelled = True
             task.changed.notify_all()
         return task
+
+    def rows(self, task_id: str, query: Mapping[str, str]) -> Dict[str, Any]:
+        """One page of the task's row table: one line per CSV row or YAML file, with each problem's column, value and fix
+        (the CLI's message, which says how to fix it). Values come from the Result, so secret cells are already <SECRET:column>."""
+        result = self.get(task_id).result
+        issues: Dict[Any, List[Dict[str, Any]]] = {}
+        for issue in result.issues if result else []:
+            issues.setdefault(issue["row"], []).append(issue)
+        table = []
+        for row in result.rows if result else []:
+            found = issues.get(row["row"], []) if row["row"] is not None else []
+            line = {"row": row["row"], "item": row["item"], "result": _WORDS.get(row["status"]) or _WORDS.get(row["status"].split(":")[0], row["status"]),
+                    "outcome": row["outcome"], "column": "; ".join(i["column"] for i in found if i["column"]),
+                    "value": "; ".join(str(i["value"]) for i in found if i["value"] != ""), "fix": "; ".join(i["message"] for i in found) or row["reason"],
+                    "file": Path(row["file"]).name if row.get("file") in result.files else ""}  # only what this run wrote is offered
+            problem = row["outcome"] in ("INVALID", "SKIPPED", "FAILED")
+            table.append(dict(line, tone="bad" if problem else "ok", _problem=problem, _text=" ".join(str(v) for v in line.values() if v not in (None, "")).lower()))
+        return gui_tables.page(table, query, ("result",), "row")
+
+    def written(self, task_id: str) -> List[Path]:
+        """The files this task's run wrote, from its recorder (never an older file in the folder), each inside the task's folder."""
+        task = self.get(task_id)
+        folder = task.folder.resolve() if task.folder else None
+        files = [Path(f).resolve() for f in (task.result.files if task.result and (task.state in FINAL or task.state == "awaiting_approval") else [])]
+        return [f for f in files if folder and folder in f.parents and f.is_file()]
+
+    def written_file(self, task_id: str, name: str) -> Path:
+        found = [f for f in self.written(task_id) if f.name == name]
+        if not found:
+            raise TaskError("not found", 404)
+        return found[0]
+
+    def written_zip(self, task_id: str) -> bytes:
+        files = self.written(task_id)
+        if not files:
+            raise TaskError("this task wrote no files", 404)
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, "w", zipfile.ZIP_DEFLATED) as archive:
+            for path in files:
+                archive.write(str(path), path.name)
+        return data.getvalue()
 
     def builds(self) -> Dict[str, Any]:
         """The earlier builds in preconfig-output/ (not .building-*, .incomplete-* or *.previous-*), newest first, with their site types."""
@@ -343,6 +405,8 @@ class TaskManager:
         if action == "upload_yaml":
             files = self._files(task, request)
             return self._locked(task, ["orchestrator:" + orch], lambda: self._upload_yaml(task, lambda: engine.upload_yaml(files, orch, opt("name"), opt("serial"), **context)))
+        if action == "make":
+            return self._make(task, request, context)
         # upload: a sites CSV with a saved site folder, or with a template (written into this task's folder)
         if "template_text" in request:
             source: Dict[str, Any] = {"template": self._save(task.folder, "template.jinja2", self._text(request, "template_text")), "out": task.folder}
@@ -353,6 +417,73 @@ class TaskManager:
         csv = self._save(task.folder, "sites.csv", self._text(request, "csv_text"))
         return self._locked(task, keys + ["orchestrator:" + orch], lambda: self._upload(
             task, lambda approver: engine.upload(csv, orch, approver=approver, **source, **context)))
+
+    def _make(self, task: Task, request: Mapping[str, Any], context: Dict[str, Any]) -> Callable[[], None]:
+        """Make the preconfig files: create; create and validate; create, validate and upload (BUILD_PLAN "The screens")."""
+        choice, orch = request.get("choice"), task.orchestrator
+        if choice not in CHOICES:
+            raise TaskError("choice must be create, validate or upload")
+        template = self._save(task.folder, "template.jinja2", self._text(request, "template_text"))
+        csv = self._save(task.folder, "sites.csv", self._text(request, "csv_text"))
+        site = self._match(template)
+        task.note = ("The template is the one saved in {}: every cell was checked against its columns.json.".format(site.relative_to(self.out_root)) if site else
+                     "The template matches no site folder saved in {}, so the per-cell checks (each cell's format and range, every value "
+                     "reaching the YAML) did not run: the files were checked only by rendering them and reading them as YAML.".format(self.out_root))
+        keys = self._keys(site.parent) if site else []
+        out = task.folder / "rendered"
+
+        def still() -> Optional[Path]:
+            """The matched folder, read again under its appliance lock: a rebuild that held the lock while this task waited may have
+            replaced its template. Then the person's own template is used, as when nothing matches, and the note says so."""
+            if site is not None and self._match_in(site, template) is None:
+                task.note = ("The template saved in {} changed while this run waited (a rebuild of that appliance), so the files were made "
+                             "from your own template and the per-cell checks did not run.".format(site.relative_to(self.out_root)))
+                return None
+            return site
+        if choice == "upload":  # upload --site-dir S --out RUN, or upload --template T --out RUN; the CLI writes RUN/rendered
+            def send(approver: Optional[Callable[[str], Any]]) -> engine.Result:
+                now = still()
+                source: Dict[str, Any] = {"site_dir": now} if now else {"template": template}
+                return engine.upload(csv, orch, approver=approver, out=task.folder, **source, **context)
+            return self._locked(task, keys + ["orchestrator:" + orch], lambda: self._upload(task, send))
+        if choice == "create":
+            def create() -> engine.Result:
+                now = still()
+                return engine.render_site(now, csv, out, **context) if now else engine.render(template, csv, out, **context)
+            return self._read(task, keys, create)
+        validators = common.validators_in(common.env_map(self.dotenv))
+        built = self._built(site.parent) if site else {}
+        nick = (self._orchestrator(request.get("validate_on"), required=False) or (orch if orch in validators else "")
+                or str(built.get("validator") or "").lower())  # as `validate SITE --csv C`: the build's validator unless one is named
+        if nick not in validators:
+            raise TaskError("/validate runs only on a validator (EC_VALIDATORS: {}): choose one to validate on".format(", ".join(sorted(validators)) or "none"))
+
+        def check() -> engine.Result:
+            now = still()
+            return (engine.render_site(now, csv, out, nick, substitute=nick != built.get("orchestrator"), **context) if now
+                    else engine.render(template, csv, out, validate_on=nick, substitute=True, **context))
+        return self._read(task, keys, check)
+
+    def _match(self, template: Path) -> Optional[Path]:
+        """The saved site folder whose template is byte-identical to this one (not in a *.previous-* folder), or None."""
+        data = template.read_bytes()
+        for build in sorted(self.out_root.iterdir()) if self.out_root.is_dir() else []:
+            if not (build.is_dir() and _NAME.match(build.name) and ".previous-" not in build.name and (build / "build.json").is_file()):
+                continue
+            for site in sorted(build.glob("site-*")):
+                if self._match_in(site, template, data):
+                    return site
+        return None
+
+    @staticmethod
+    def _match_in(site: Path, template: Path, data: Optional[bytes] = None) -> Optional[Path]:
+        """site, if it is a saved site folder (columns.json, not *.previous-*) whose <name>.jinja2 has exactly the template's bytes."""
+        saved = site / "{}.jinja2".format(site.name[len("site-"):])
+        try:
+            same = saved.read_bytes() == (template.read_bytes() if data is None else data)
+        except OSError:  # moved aside or replaced by a rebuild
+            return None
+        return site if same and _NAME.match(site.name) and ".previous-" not in site.name and (site / "columns.json").is_file() else None
 
     @staticmethod
     def _names(request: Mapping[str, Any], key: str) -> List[str]:
@@ -439,26 +570,32 @@ class TaskManager:
             return task.set("cancelled", "cancelled; nothing was uploaded", check)
         if check.approval is None:  # refused, or no row ready to upload: the check is the outcome
             return task.set(check.status, _summary(check), check)
+        counts = {"ready": check.counts.get("PLANNED", 0), "rows": len(check.rows)}
+        approver = self._approval(task, dict(check.approval, counts=counts), "type the Orchestrator nickname {} to upload the ready rows".format(task.orchestrator), check)
+        if approver is None or not self._start_upload(task):
+            return
+        result = self._sealed(task, call(approver))
+        task.set(result.status, _summary(result), result)
+
+    def _approval(self, task: Task, approval: Dict[str, Any], message: str, check: Optional[engine.Result] = None) -> Optional[Callable[[str], Any]]:
+        """Wait for the typed confirmations, then return the approver for exactly this approval, or end the task and return None."""
+        task.approval = approval
         task.deadline = time.time() + self.approval_seconds  # for the browser's countdown; the wait uses the monotonic clock
-        task.set("awaiting_approval", "type the Orchestrator nickname {} to upload the ready rows".format(task.orchestrator), check)
+        task.set("awaiting_approval", message, check)
         deadline = time.monotonic() + self.approval_seconds
         with task.changed:
             while task.answers is None and not task.cancelled and time.monotonic() < deadline:
                 task.changed.wait(min(1.0, max(deadline - time.monotonic(), 0.0)))
             answers, cancelled = task.answers, task.cancelled
-        task.deadline = None
+        task.deadline, task.approval = None, None
         if cancelled:
             return task.set("cancelled", "cancelled; nothing was uploaded")
         if answers is None:
             return task.set("expired", "no approval within {:g} minutes; nothing was uploaded".format(self.approval_seconds / 60))
         try:
-            approver = engine.approve(self.approvals, check.approval, answers)
+            return engine.approve(self.approvals, approval, answers)
         except ApprovalError as error:
             return task.set("rejected", "{}; nothing was uploaded".format(error))
-        if not self._start_upload(task):
-            return
-        result = self._sealed(task, call(approver))
-        task.set(result.status, _summary(result), result)
 
 
 def _watched(task: Task, folder: Path, appliance: str, call: Callable[[], engine.Result]) -> engine.Result:

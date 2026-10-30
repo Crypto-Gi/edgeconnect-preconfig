@@ -240,12 +240,18 @@ class TaskTests(Fixture):
     # ------------------------------------------------------------ the approval gates, through the task layer
 
     def test_with_the_switch_off_nothing_is_sent(self):
-        tasks = self.manager(self.dotenv("off.env", ENV))
-        task = self.wait(self.upload(tasks, "site-off"), "rejected", "failed", "awaiting_approval")
-        self.assertEqual((task.state, self.orch.calls), ("rejected", []))
-        self.assertIn("GUI uploads are off for lab", task.result.text)
-        files = tasks.create({"action": "upload_yaml", "orchestrator": "lab", "files": ["applianceInfo:\n  hostname: h\n"]})
-        self.assertEqual((self.wait(files, "rejected", "failed", "done").state, self.orch.calls), ("rejected", []))
+        runs = self.tmp / "preconfig-output" / "runs"
+        before = sorted(runs.iterdir()) if runs.is_dir() else []
+        tasks = self.manager(self.dotenv("off.env", ENV + "other_gui_preconfig_uploads=on\n"))  # on for another Orchestrator only
+        template = (self.site / "t.jinja2").read_text(encoding="utf-8")
+        for request in ({"action": "upload", "orchestrator": "lab", "build": "h1", "site": "t", "csv_text": self.csv_text([("site-off", {})])},
+                        {"action": "upload_yaml", "orchestrator": "lab", "files": ["applianceInfo:\n  hostname: h\n"]},
+                        {"action": "make", "choice": "upload", "orchestrator": "lab", "template_text": template, "csv_text": self.csv_text([("site-off", {})])}):
+            with self.assertRaises(TaskError) as refused:  # refused before anything runs: no task, no folder, nothing sent
+                tasks.create(request)
+            self.assertEqual((refused.exception.status, str(refused.exception)),
+                             (403, "refused, nothing sent: GUI uploads are off for lab: set lab_gui_preconfig_uploads=on in .env to allow them"))
+        self.assertEqual((tasks.list(), self.orch.calls, sorted(runs.iterdir()) if runs.is_dir() else []), ([], [], before))
 
     def test_a_wrong_or_other_nickname_is_rejected(self):
         tasks = self.manager()

@@ -350,6 +350,21 @@ approval and `<nickname>_gui_preconfig_uploads`, and validate / upload of existi
 Done when: the same template and CSV give byte-identical YAML files through the GUI and the CLI for each of the three choices;
 a template that matches no saved folder still renders and says the cell checks did not run; every gate is tested (switch off, wrong
 nickname, expired, reused, other Orchestrator); a lab upload matches the CLI's.
+Built as: the task action `make` in `toolkit/gui/gui_tasks.py` (choice `create`, `validate` or `upload`; the template and CSV saved 0600 in
+the task's own new `preconfig-output/runs/<run_id>/`). `_match` finds a saved site folder whose `<name>.jinja2` is byte-identical (no
+`*.previous-*` build or site folder, `columns.json` and `build.json` present): then `render --site-dir S --out RUN/rendered` (with `--validate V`,
+`--substitute` when V is not the build's Orchestrator, as `validate SITE`), or `upload --site-dir S --out RUN`; otherwise `render --template T`
+(`--validate V --substitute`) or `upload --template T --out RUN`, and the task's `note` says the per-cell checks did not run. V is the one named,
+else the switcher's Orchestrator when it is a validator, else the build's validator; anything not in `EC_VALIDATORS` is refused. Every upload
+(`upload`, `upload_yaml`, `make` with `upload`) is refused with 403 before a task or folder exists unless `<nickname>_gui_preconfig_uploads=on`
+(`engine.uploads_off`). The task view carries `approval` (`gates`, `orchestrator`, `counts`: `ready` of `rows`) while a CSV upload awaits it.
+Routes, GET behind the cookie: `/api/tasks/<id>/rows` (one line per row: written, invalid with column, value and fix, conflict, uploaded;
+`gui_tables.page`), `/files.zip` and `/file?name=` (only `Result.files` of that run, inside its folder). `upload --yaml` is one button with no
+typed nickname (D9, decision 0017): only the files chosen, to the switcher's Orchestrator, with that switch on. Screens: `static/make.js` (with
+the shared task panel, file picker and approve dialog) and `static/yaml.js`, which build their own sections. Tested in
+`tests/test_gui_make.py` (GUI and CLI files byte-identical for each choice, matched and unmatched; the gates; a secret CSV cell in no
+response, event, row table or zip listing).
+Not yet: the lab upload check, which needs the owner's machine.
 
 ## Step 10: Inventory
 Appliances and the preconfigs on the Orchestrator, with the read-only YAML viewer; the CLI gains `preconfigs`.

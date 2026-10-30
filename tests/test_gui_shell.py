@@ -11,8 +11,9 @@ STATIC = Path(__file__).resolve().parents[1] / "toolkit" / "gui" / "static"
 # followed by the run ID.
 ENDPOINTS = {"/api/orchestrators", "/api/tasks", "/api/tasks/<id>/cancel", "/api/builds", "/api/runs", "/api/runs.csv", "/api/runs/", "/api/runs/<id>/rows.csv",
              "/api/tasks/<id>/events", "/api/tasks/<id>/result",  # pick.js and build.js follow their tasks (step 8), and so does the Inventory (step 10)
-             "/api/builds/<id>/reference", "/api/builds/<id>/summary", "/api/builds/<id>/<id>/template", "/api/builds/<id>/<id>/csv"}
-SCRIPTS = ("app.js", "tables.js", "runs.js", "pick.js", "build.js", "inventory.js")  # in the order index.html loads them
+             "/api/builds/<id>/reference", "/api/builds/<id>/summary", "/api/builds/<id>/<id>/template", "/api/builds/<id>/<id>/csv",
+             "/api/tasks/<id>/approve", "/api/tasks/<id>/rows", "/api/tasks/<id>/files.zip", "/api/tasks/<id>/file?name="}  # make.js and yaml.js (step 9)
+SCRIPTS = ("app.js", "tables.js", "runs.js", "pick.js", "build.js", "inventory.js", "make.js", "yaml.js")  # in the order index.html loads them
 
 
 class ShellTests(unittest.TestCase):
