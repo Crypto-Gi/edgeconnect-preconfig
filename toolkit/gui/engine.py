@@ -20,12 +20,12 @@ import threading
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Sequence, Set, Tuple
 
 import cli
 import common
 import upload as upload_stage
-from approval import Gate, GuiApprovals, upload_gates
+from approval import ApprovalError, Gate, GuiApprovals, upload_gates
 
 # The recorder's row and file statuses (render.py, upload.py) in the run log's words (BUILD_PLAN "Engineering rules").
 OUTCOMES = {"ok": "VALID", "failed": "INVALID",  # render rows
@@ -38,7 +38,8 @@ NOT_APPROVED = "NOT APPROVED, nothing uploaded: "  # upload.main's line when the
 class Result:
     exit_code: int
     status: str                      # done, failed, or rejected (the upload was refused: by the engine's gates or its approver)
-    issues: List[Dict[str, Any]]     # row, column, value, message, fix (empty: the CLI gives none)
+    issues: List[Dict[str, Any]]     # row, column, value, message, fix
+    # fix: the CLI gives no separate fix text (it is in the message), so it is empty; kept to match automation's issues
     rows: List[Dict[str, Any]]       # per row or --yaml file: row, item, status (the CLI's), outcome (VALID...), reason, file
     counts: Dict[str, int]           # rows per outcome
     files: List[str]                 # the YAML files this run wrote
@@ -102,7 +103,8 @@ def _line(argv: Sequence[str]) -> argparse.Namespace:
         parser.add_argument(option)
     parser.add_argument("--approve", action="store_true")
     parser.add_argument("--yaml", nargs="*")
-    return parser.parse_known_args(list(argv[1:]))[0]
+    line, line.rest = parser.parse_known_args(list(argv[1:]))
+    return line
 
 
 def _refusal(argv: Sequence[str], approver: Optional[Callable[..., Any]]) -> Optional[str]:
@@ -123,6 +125,10 @@ def _refusal(argv: Sequence[str], approver: Optional[Callable[..., Any]]) -> Opt
     return None
 
 
+def _refuse(fingerprint: str) -> None:
+    raise ApprovalError("no approval was given for this upload")
+
+
 def _main(argv: List[str]) -> int:
     try:
         return cli.main(argv)
@@ -136,7 +142,8 @@ def _main(argv: List[str]) -> int:
 def run(argv: Sequence[str], approver: Optional[Callable[[str], Any]] = None, **context: Any) -> Result:
     """Run one CLI command line in this thread and return its Result. context: RunContext fields (dotenv, env, work_dir, out_dir...)."""
     argv = [str(a) for a in argv]
-    run_context = common.RunContext(recorder=common.Recorder(), approver=approver, source="gui", **context)
+    # as automation's _refuse: without a GUI approval run_batch is refused, never left to upload unapproved, even past the gates
+    run_context = common.RunContext(recorder=common.Recorder(), approver=approver or _refuse, source="gui", **context)
     out = io.StringIO()
     with common.running(run_context), common.captured_output(out), _no_stdin():
         refusal = _refusal(argv, approver)
@@ -144,6 +151,10 @@ def run(argv: Sequence[str], approver: Optional[Callable[[str], Any]] = None, **
             print("refused, nothing sent: {}".format(refusal), file=sys.stderr)
         code = 2 if refusal else _main(argv)
     text, outputs = out.getvalue(), run_context.recorder.results
+    for r in outputs:  # the YAML parser's message quotes the text it stopped at, which may be a secret no scan can find
+        if r["kind"] == "file" and r["status"] == "refused: not a preconfig YAML" and re.match(r"\w+: ", r["detail"]):
+            withheld = r["detail"].split(":")[0] + ": the parser's message is not shown, as it may quote a secret"
+            text, r["detail"] = text.replace(r["detail"], withheld), withheld
     scrub = _scrubber(argv)
     rows = [_row(r) for r in outputs if r["kind"] in ("row", "file")]
     status = "done" if code == 0 else "rejected" if refusal or (code == 2 and any(l.startswith(NOT_APPROVED) for l in text.splitlines())) else "failed"
@@ -185,29 +196,47 @@ def _approval(argv: Sequence[str], outputs: Sequence[Mapping[str, Any]]) -> Opti
 
 def _scrubber(argv: Sequence[str]) -> Callable[[Any], Any]:
     """Replace every literal secret value of the run's inputs, in strings at any depth: a CSV secret column's cells (from
-    columns.json, or secret-like headers without one) by <SECRET:column>, a --yaml file's secret values by their <SECRET:path>."""
+    columns.json, or secret-like headers without one) by <SECRET:column>, a secret value of a YAML file the argv names by its
+    <SECRET:path>. Each in every form the CLI can print it in, and its start where the CLI cut a message short."""
     try:
         line = _line(argv) if argv else None
     except _LineError:
         line = None
     found: Dict[str, str] = {}
     for value, placeholder in (_csv_secrets(argv, line) + _yaml_secrets(line)) if line else []:
-        for form in (value, value.strip(), repr(value)[1:-1], json.dumps(value)[1:-1]):  # as text may quote it: trimmed, escaped
-            if form.strip():
-                found.setdefault(form, placeholder)
+        for form in _forms(value):
+            found.setdefault(form, placeholder)
     if not found:
         return lambda value: value
-    pattern = re.compile("|".join(re.escape(form) for form in sorted(found, key=len, reverse=True)))  # one pass: a placeholder is never rescanned
+    # The CLI cuts messages ([:1000] /validate errors, [:300], [:200]); a cut piece ends a line, a "; " list item or a PyYAML snippet.
+    # shortcut: a cut that keeps 3 characters or fewer of a secret shows them, as does a snippet that starts inside one; scrub
+    # suffixes too if a message is ever cut from its start.
+    cut = {form[:k]: placeholder for form, placeholder in found.items() for k in range(4, len(form))}
+    def alternatives(forms: Mapping[str, str]) -> str:
+        return "|".join(re.escape(form) for form in sorted(forms, key=len, reverse=True))
+    pattern = re.compile("(?P<full>{})".format(alternatives(found)) + (r"|(?P<cut>{})(?=; | \.\.\.|\r?$)".format(alternatives(cut)) if cut else ""), re.M)
 
     def scrub(value: Any) -> Any:
-        if isinstance(value, str):
-            return pattern.sub(lambda m: found[m.group(0)], value)
+        if isinstance(value, str):  # one pass: a placeholder is never rescanned
+            return pattern.sub(lambda m: found[m["full"]] if m["full"] is not None else cut[m["cut"]], value)
         if isinstance(value, dict):
             return {k: scrub(v) for k, v in value.items()}
         if isinstance(value, list):
             return [scrub(v) for v in value]
         return value
     return scrub
+
+
+def _forms(value: str) -> Set[str]:
+    """A value as the CLI path can print it: as is or trimmed; JSON-escaped (ASCII or not) or as Jinja's tojson writes it in a
+    template (htmlsafe_json_dumps also escapes < > & '); each of those as repr() quotes it."""
+    forms: Set[str] = set()
+    for plain in {value, value.strip()}:
+        dumped = json.dumps(plain)[1:-1]
+        forms |= {plain, dumped, json.dumps(plain, ensure_ascii=False)[1:-1],
+                  dumped.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026").replace("'", "\\u0027")}
+    forms |= {repr(form)[1:-1] for form in forms}
+    return {form for form in forms if form.strip()}
 
 
 def _csv_secrets(argv: Sequence[str], line: argparse.Namespace) -> List[Tuple[str, str]]:
@@ -223,19 +252,46 @@ def _csv_secrets(argv: Sequence[str], line: argparse.Namespace) -> List[Tuple[st
         return []
     columns = meta.get("columns") if isinstance(meta, dict) else None
     headers = list(rows[0]) if rows else []
-    secret = {n for n, m in columns.items() if m.get("secret")} if columns else {h for h in headers if h and common.redact_secrets({h: "x"})[1]}
+    secret = {n for n, m in columns.items() if m.get("secret")} if columns else {h for h in headers if h and _secret_key(h)}
     return [(v, "<SECRET:{}>".format(n)) for row in rows for n, v in row.items() if n in secret and isinstance(v, str) and v]
 
 
+def _secret_key(name: str) -> bool:
+    return bool(common.redact_secrets({name: "x"})[1])
+
+
+_KEY_LINE = re.compile(r"^[ \t]*(?:-[ \t]+)?[\"']?([\w-]+)[\"']?[ \t]*:[ \t]+(.*?)[ \t]*$", re.M)
+_NOT_A_VALUE = {"", "|", ">", "|-", ">-", "|+", ">+", "~", "null", "true", "false"}
+
+
 def _yaml_secrets(line: argparse.Namespace) -> List[Tuple[str, str]]:
+    """Secret values of every YAML file the argv names (--yaml and the stage's own file arguments): those of a parsed file,
+    numbers included, and of every secret-looking `key: value` line, so a file that does not parse is covered too."""
     found: List[Tuple[str, str]] = []
-    for path in upload_stage.yaml_files([Path(p) for p in line.yaml or [] if os.path.exists(p)]):
+    for path in upload_stage.yaml_files([Path(p) for p in (line.yaml or []) + line.rest if not p.startswith("-") and os.path.exists(p)]):
         try:
-            doc = common.parse_yaml(path.read_text(encoding="utf-8"))
-        except Exception:  # not YAML: the CLI refuses the file
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
             continue
-        found += list(_pairs(doc, common.redact_secrets(doc)[0]))
+        try:  # first, so a parsed secret is named by its path
+            doc = _strings(common.parse_yaml(text))
+            found += list(_pairs(doc, common.redact_secrets(doc)[0]))
+        except Exception:  # not YAML: the CLI refuses the file, and the lines below still find its secrets
+            pass
+        for key, raw in _KEY_LINE.findall(text):
+            value = raw.split(" #")[0].strip()
+            if _secret_key(key) and value.lower() not in _NOT_A_VALUE and "{{" not in value and not value.startswith("<SECRET:"):
+                found += [(v, "<SECRET:{}>".format(key)) for v in {value, value.strip("\"'"), value.lstrip("*&").strip("\"'")} if v]
     return found
+
+
+def _strings(value: Any) -> Any:
+    """The parsed file with numbers as text, as redact_secrets replaces only strings (authKey: 98765432 is an int)."""
+    if isinstance(value, dict):
+        return {k: _strings(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_strings(v) for v in value]
+    return str(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else value
 
 
 def _pairs(value: Any, redacted: Any) -> Iterator[Tuple[str, str]]:

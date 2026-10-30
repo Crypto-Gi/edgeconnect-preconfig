@@ -2,6 +2,7 @@
 Orchestrator, returned as a Result; the upload gates refuse before anything is sent."""
 import base64
 import csv
+import dataclasses
 import json
 import os
 import shutil
@@ -57,6 +58,11 @@ class Unreadable:
 
     def __getattr__(self, name):
         raise AssertionError("the run read the process stdin ({})".format(name))
+
+
+def shown(result):
+    """Everything a Result can show."""
+    return json.dumps(dataclasses.asdict(result), ensure_ascii=False)
 
 
 class EngineTests(unittest.TestCase):
@@ -251,6 +257,28 @@ class EngineTests(unittest.TestCase):
         checked = engine.validate_yaml([self.site / "rendered"], "lab", **self.context(self.dotenv("off.env", ENV)))  # a check needs no switch
         self.assertEqual((checked.status, self.orch.posts()), ("done", []))
 
+    def test_gate_variants_read_the_command_line_as_the_cli_does(self):
+        sheet = self.sheet("variants.csv", [self.row("site-v")])
+        off = self.context(self.dotenv("off.env", ENV))
+        cases = [(["upload", "--site-dir", str(self.site), "--csv", str(sheet), "--orchestrator", "lab", "--approve"], self.context(self.on), "needs the GUI's approval"),
+                 (["upload", str(self.site), "--csv", str(sheet), "--orch", "lab"], off, "GUI uploads are off for lab"),
+                 (["upload", str(self.site), "--csv", str(sheet), "--orchestrator", "LAB"], off, "GUI uploads are off for LAB: set lab_gui_preconfig_uploads=on"),
+                 (["upload", str(self.site), "--csv", str(sheet), "--orchestrator", "lab", "--orchestrator", "other"], self.context(self.on), "GUI uploads are off for other")]
+        for argv, context, why in cases:
+            with self.subTest(argv[-2:]):
+                result = engine.run(argv, **context)
+                self.assertEqual((result.status, self.orch.calls), ("rejected", []))
+                self.assertIn(why, result.text)
+        checked = engine.run(["upload", str(self.site), "--csv", str(sheet), "--orchestrator", "LAB"], **self.context(self.on))  # the CLI's profile lab
+        self.assertEqual((checked.status, checked.approval["orchestrator"], self.orch.posts()), ("done", "LAB", []))
+
+    def test_an_upload_past_the_gates_without_an_approver_is_still_not_approved(self):
+        sheet = self.sheet("past.csv", [self.row("site-p")])
+        with mock.patch.object(engine, "_refusal", return_value=None):
+            result = engine.run(["upload", str(self.site), "--csv", str(sheet), "--orchestrator", "lab", "--approve"], **self.context(self.on))
+        self.assertEqual((result.exit_code, result.status, self.orch.posts()), (2, "rejected", []))
+        self.assertIn("NOT APPROVED, nothing uploaded: no approval was given for this upload", result.text)
+
     def test_c_the_upload_helper_adds_approve_only_with_an_approver(self):
         sheet = self.sheet("gate-c.csv", [self.row("site-k")])
         with mock.patch.object(engine, "run", wraps=engine.run) as ran:
@@ -269,13 +297,14 @@ class EngineTests(unittest.TestCase):
         meta = json.loads((site / "columns.json").read_text(encoding="utf-8"))
         meta["columns"]["contact_name"]["secret"] = True
         (site / "columns.json").write_text(json.dumps(meta), encoding="utf-8")
-        sheet = self.sheet("secret.csv", [self.row("site-s", contact_name='Hunter"2 Secret', site="REJECT")])
-        result = engine.validate(site, sheet, "lab", **self.context(self.on))
-        self.assertEqual(result.counts, {"INVALID": 1})
-        self.assertIn("<SECRET:contact_name>", result.text)
-        self.assertIn("<SECRET:contact_name>", json.dumps(result.issues))
-        for part in (result.text, json.dumps(result.issues), json.dumps(result.rows), json.dumps(result.outputs)):
-            self.assertNotIn("Hunter", part)
+        for secret in ('Hunter"2 Secret', "Hunter'2 <&> Secret", "Hunter\\2 été"):  # the template writes string cells with tojson
+            with self.subTest(secret):
+                sheet = self.sheet("secret.csv", [self.row("site-s", contact_name=secret, site="REJECT")])
+                result = engine.validate(site, sheet, "lab", **self.context(self.on))
+                self.assertEqual(result.counts, {"INVALID": 1})
+                self.assertIn("<SECRET:contact_name>", result.text)
+                self.assertIn("<SECRET:contact_name>", json.dumps(result.issues))
+                self.assertNotIn("Hunter", shown(result))
 
     def test_secret_like_headers_count_without_a_columns_file(self):
         template = self.tmp / "own.jinja2"
@@ -292,6 +321,44 @@ class EngineTests(unittest.TestCase):
         result = engine.validate_yaml([path], "lab", **self.context(self.on))
         self.assertEqual(result.counts, {"INVALID": 1})
         self.assertNotIn("Sup3r-K3y", result.text + json.dumps(result.rows) + json.dumps(result.outputs))
+        self.assertIn("<SECRET:$.vrrp.authKey>", result.text)
+
+    def check_yaml(self, text, secret, *argv):
+        """validate --yaml FILE (or argv + FILE): the secret appears nowhere in the Result."""
+        path = self.tmp / "secret-file.yml"
+        path.write_text(text, encoding="utf-8")
+        result = engine.run(list(argv) + [str(path)] if argv else ["validate", "--yaml", str(path), "--orchestrator", "lab"], **self.context(self.on))
+        self.assertNotIn(secret, shown(result))
+        return result
+
+    def test_a_numeric_yaml_secret_never_reaches_the_text(self):
+        for text in ("applianceInfo:\n  site: REJECT\nvrrp:\n  authKey: 98765432\n", "applianceInfo: {site: REJECT}\nvrrp: {authKey: 98765432}\n"):
+            with self.subTest(text):
+                self.assertEqual(self.check_yaml(text, "98765432").counts, {"INVALID": 1})
+
+    def test_a_secret_breaking_yaml_parsing_never_appears(self):
+        for text, secret in (("vrrp:\n  authKey: *Sup3rK3y\n", "Sup3rK3y"), ('vrrp:\n  authKey: "Pa"ss-W0rd"\n', "ss-W0rd"),
+                             ("vrrp: {authKey: *Fl0wK3y}\n", "Fl0wK3y")):  # no key: value line to scan: the parser's message is withheld
+            with self.subTest(secret):
+                result = self.check_yaml(text, secret)
+                self.assertEqual([r["status"] for r in result.rows], ["refused: not a preconfig YAML"])
+        template = self.tmp / "quoted.jinja2"
+        template.write_text("applianceInfo:\n  hostname: {{ data['hostname'] }}\n  contact: \"{{ data['admin_password'] }}\"\n", encoding="utf-8")
+        sheet = self.sheet("quoted.csv", [{"hostname": "q-1", "admin_password": 'Pa"ss-W0rd', "preconfig_name": "q-1"}], ["hostname", "admin_password", "preconfig_name"])
+        result = engine.render(template, sheet, self.tmp / "run-quoted", **self.context(self.on))
+        self.assertEqual(result.counts, {"INVALID": 1})
+        self.assertNotIn("ss-W0rd", shown(result))
+
+    def test_files_named_without_yaml_are_scanned_too(self):
+        result = self.check_yaml("applianceInfo:\n  site: REJECT\nvrrp:\n  authKey: Sup3r-K3y\n", "Sup3r-K3y", "validate", "--orchestrator", "lab")
+        self.assertIn("REJECTED secret-file.yml", result.text)
+
+    def test_a_secret_cut_by_the_cli_leaves_no_prefix(self):
+        secret = "Sup3r-K3y-0123456789"
+        body = "applianceInfo:\n  site: REJECT\n# {}\nvrrp:\n  authKey: {}\n"
+        error = str(common.ValidationError("HTTP 400: invalid value in " + body.format("", secret), status=400, method="POST", path=validate.PATH))
+        pad = "x" * (1000 - 8 - error.index(secret))  # validate_text keeps the first 1000 characters: 8 of the secret
+        result = self.check_yaml(body.format(pad, secret), secret[:8])
         self.assertIn("<SECRET:$.vrrp.authKey>", result.text)
 
     # ------------------------------------------------------------ runs side by side, prompts
