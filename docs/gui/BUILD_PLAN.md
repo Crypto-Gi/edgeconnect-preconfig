@@ -1,6 +1,6 @@
 # Preconfig GUI build plan
 
-The preconfig GUI (`edgeconnect-preconfig gui`) is built in the steps below, one pull request per step into the `gui`
+The preconfig GUI (started with `python3 -m toolkit.gui`; the planned `edgeconnect-preconfig gui` command was not built) is built in the steps below, one pull request per step into the `gui`
 branch. Each step starts only after the previous one is merged there. `main` stays untouched until the owner decides to
 merge `gui` into it. This file lands as `docs/gui/BUILD_PLAN.md` in the step 0 pull request, the same name and shape as
 the automation repo's, and each step gets a "Built as" note when it is merged.
@@ -186,11 +186,11 @@ itself (`toolkit/gui/`, its tests, CI and docs). A GUI step that needs a CLI add
 | Addition | Step | Why |
 |---|---|---|
 | A run context instead of module values, and a recorder of each command's structured results | 1 | so two runs coexist in one process and the GUI reads results instead of text |
-| The run log, `reports/<workflow>.jsonl` (`EDGECONNECT_REPORT_DIR` as in automation, default `reports/`) | 7 | "See what changed" |
+| The run log, `reports/preconfig.jsonl` (`EDGECONNECT_REPORT_DIR` as in automation, default `reports/`) | 7 | "See what changed" |
 | `variables ... --fix PATH,...` | 8 | untick a Top 10 / Top 20 setting (the opposite of `--set`); a locked one is refused with its reason |
 | `variables ... --dry-run` | 8 | the check-box preview: writes nothing, no `/validate` |
-| `preconfigs --orchestrator N [--show NAME]` | 10 | list the preconfigs on an Orchestrator, or print one as YAML with secrets redacted; GET only |
-| `gui [--port P] [--no-browser]` | 5 | start the GUI; in the skill copy (no `toolkit/gui/`) it prints that the GUI comes with the full install |
+| `preconfigs --orchestrator N [--show NAME\|ID]` | 10 | list the preconfigs on an Orchestrator, or print one as YAML with secrets redacted; GET only |
+| `gui [--port P] [--no-browser]` | 5 | start the GUI; in the skill copy (no `toolkit/gui/`) it prints that the GUI comes with the full install. Not built: the GUI starts with `python3 -m toolkit.gui [--port P] [--no-browser]` (step 5) |
 | An approval hook in `upload.run_batch`, just before anything is sent | 2 | so the GUI's approval is checked against the rows this run is about to send (in the terminal, `--approve` is the approval, as now) |
 | `compare ... --dry-run`, `--set`, `--fix`, and reuse of the sample captures already read (`--captures`) | 8 | so compare runs as command lines and does not read every site again after each click |
 | Structured problems in the recorder (row, column, value, message) where each is made; the printed text unchanged | 1 | the GUI's problem tables |
@@ -298,7 +298,7 @@ prints the absolute `.env`, output, work and run-log folders and fixes `EDGECONN
 (actions list, build, variables preview/save, validate, render, validate_yaml, upload, upload_yaml; an appliance lock for a build folder
 and its site folders, an Orchestrator lock per upload; imports saved 0600 in `preconfig-output/runs/<run_id>/`), `engine.run(on_line=...)`
 for the streamed lines, and `GET /api/builds` for the earlier builds; its placeholder page gave way to the step 6 shell. Tested in
-`tests/test_gui_tasks.py` and `tests/test_gui_server.py`. Not yet: compare and preconfigs tasks (R6, step 10), the page on macOS and WSL.
+`tests/test_gui_tasks.py` and `tests/test_gui_server.py`. Not yet: compare and preconfigs tasks (R6, step 10; since built in steps 8b and 10), the page on macOS and WSL.
 
 ## Step 6: Design and shell
 The exact copy of the automation `static/` design (fonts, `app.css`, favicon style), the top bar with the Orchestrator switcher,
@@ -413,4 +413,4 @@ use `--text` and `--glow` (pick.css). `app.css` is unchanged. The user guide is 
 used to show uploads on for `true`, `yes` and `1`, which the upload gate refused; the panel and the gate now read it only through
 `engine.uploads_setting`: on (only `on`, any case), off (`off` or blank) or bad (anything else, `true` and `yes` too), which the panel
 shows red with "must be on or off" and the gate refuses like off.
-Not yet: the WSL check by hand, the version bump and the pre-release.
+Not yet: the WSL check by hand. The version bump came after this step: 1.4.0-rc.1 (PR #35); whether the GitHub pre-release is published is not recorded here.

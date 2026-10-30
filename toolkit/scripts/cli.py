@@ -6,10 +6,13 @@
                                                        with its secrets redacted
   build      --orchestrator NICK --appliance NAME       read one appliance, write a validated YAML, template and CSV
              [--out DIR] [--validate-on NICK]
-  variables  FOLDER [--pick top10|top20] [--set C,..]  choose the per-site settings: Top 10, Top 20 or all, by section
-             [--name NAME] [--yes]
+             [--target-release REL] [--target-ecos ECOS]
+  variables  FOLDER [--pick top10|top20|all]            choose the per-site settings: Top 10, Top 20 or all, by section
+             [--set C,..] [--fix C,..] [--name NAME]
+             [--yes] [--dry-run]
   compare    FOLDER SITE [SITE ...] [--name NAME]       other sites of the same design pick the per-site settings;
-             [--yes]                                    the CSV gets a row for each site
+             [--set C,..] [--fix C,..] [--yes]          the CSV gets a row for each site
+             [--captures DIR ...] [--dry-run]
   validate   FOLDER --csv FILE [--orchestrator NICK]    render and /validate every CSV row
   upload     FOLDER --csv FILE [--orchestrator NICK]    show what would be uploaded; uploads only with --approve
              [--approve]
@@ -474,7 +477,7 @@ class Picker:
         """Every row as the picker held it, the chosen columns and the folder written, for the run's recorder.
 
         A dry run writes no folder (None) and gives lines: each row then also has the lines of its value in reference.yaml.
-        compare gives sites, (hostname, sheet items) as typed: each row then has site_values, None where a site lacks it, <SECRET:path> on a secret row (cli-requests R10)."""
+        compare gives sites, (hostname read from the capture, sheet items) in the order given: each row then has site_values, None where a site lacks it, <SECRET:path> on a secret row (cli-requests R10)."""
         rows = []
         for r, sheet_row in zip(self.rows, self.sheet(reference)):
             secret = r["reason"].startswith("secret")

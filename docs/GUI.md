@@ -2,7 +2,7 @@
 
 Back to the [README](../README.md). The command line it runs: [COMMAND_LINE.md](COMMAND_LINE.md). Install and `.env`: [INSTALL.md](INSTALL.md).
 
-The GUI does what the command line does, in a browser on this computer. Every button builds a normal `edgeconnect-preconfig` command line and runs it through the command line's own code, so the checks, the files written and the run log are the same as in the terminal. The browser only shows what that run decided. It is on the `gui` branch until it is released.
+The GUI does what the command line does, in a browser on this computer. Every button builds a normal `edgeconnect-preconfig` command line and runs it through the command line's own code, so the checks, the files written and the run log are the same as in the terminal. The browser only shows what that run decided. It is new in 1.4.0-rc.1, a pre-release from the `gui` branch: `setup.sh` installs `main`, which does not have it yet, so clone the `gui` branch ([INSTALL.md](INSTALL.md#the-local-web-gui)).
 
 ## Start it
 
@@ -11,10 +11,11 @@ From the repository folder, in its Python environment (the one with `requirement
 ```bash
 python3 -m toolkit.gui                          # opens your browser
 python3 -m toolkit.gui --port 8765 --no-browser # a fixed port; only prints the link
+python3 /path/to/edgeconnect-preconfig/toolkit/gui   # the same, from any folder
 ```
 
-- `--port P` listens on that port (default: any free port); `--no-browser` prints the link without opening a browser.
-- At start it prints the folders it uses, as absolute paths: the `.env`, `preconfig-output/`, the work folder (captures) and the run log folder. The `.env` is found as the command line finds it; set `EC_DOTENV=/path/to/.env` to name another.
+- `--port P` listens on that port (default: any free port); `--no-browser` prints the link without opening a browser. There is no option for the address: it is always 127.0.0.1. `edgeconnect-preconfig` has no `gui` command.
+- At start it prints the folders it uses, as absolute paths: the `.env`, `preconfig-output/` in the folder you start it from, the work folder (captures) and the run log folder (`off` when `EDGECONNECT_REPORT_DIR` is empty). The `.env` is found as the command line finds it; set `EC_DOTENV=/path/to/.env` to name another. `PRECONFIG_WORK` and `EDGECONNECT_REPORT_DIR` work as for the command line; set them before starting it.
 - Then it prints a sign-in link, `http://127.0.0.1:<port>/?token=...`. It works once: it signs this browser in and then stops working, so another account on the computer cannot reuse it. Do not share it. Opening the GUI in a second browser takes a restart.
 - Press Ctrl+C in the terminal to stop it. An upload that is sending finishes first.
 - On Windows through WSL it opens the Windows browser (`wslview`, else `explorer.exe`). Over SSH, forward the port (`ssh -L 8765:127.0.0.1:8765 ...`), start it with `--port 8765 --no-browser` and open the printed link on your own computer. Use the same port number on both ends: through `ssh -L 9000:127.0.0.1:8765` the browser names `localhost:9000`, and the GUI refuses it ("this server only answers to 127.0.0.1, localhost or [::1] on its own port").
@@ -52,7 +53,7 @@ Open it from the build result or from an earlier build. The check boxes are the 
 
 ### Compare with other sites
 
-On the same screen, **Compare with other sites** lists the appliances on the build's Orchestrator. Tick 1 to 4 sites of the same design and press **Compare with the ticked sites**. The first preview reads each site with GET only, which takes some minutes; later ticks reuse what was read. The start **Different between your sites** ticks every setting that differs. Save runs `compare ... --name N --yes`: `sites.csv` gets a row per compared site, and every row is validated.
+On the same screen, **Compare with other sites** lists the appliances on the build's Orchestrator. Tick 1 to 4 sites of the same design and press **Compare with the ticked sites**. The first preview reads each site with GET only, which takes some minutes; later ticks reuse what was read. The start **Different between your sites** ticks every setting that differs, a differing zone, label, segment or firewall mode included ([decision 0018](decisions/0018-compare-offers-differing-layout-as-columns.md)). The table shows each compared site's own value beside the base's (`≠` where it differs, `–` where the site lacks the setting, secrets as `<SECRET:path>`). A site that gets no row is marked `no row`, and its Note is listed. Each tick runs `compare ... --dry-run`, and later runs pass `--captures` with the sites already read. Save runs `compare ... --name N --yes`: `sites.csv` gets a row per compared site that gets one, and every row is validated.
 
 ### Make the preconfig files
 
