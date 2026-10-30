@@ -2,7 +2,8 @@
 
 Every case runs cli.main offline: the synthetic capture of test_translate_robust stands in for the appliance read, and a fake Orchestrator
 answers GET /gms/versions, /appliance and the preconfig list, POST /validate and the preconfig upload. The temp folder, timestamps and
-the toolkit version are masked, in the printed text and in the files each case writes (listed with a hash of their masked text). compare is pinned with its own fixes (1.3.4), not here.
+the toolkit version are masked, in the printed text and in the files each case writes (listed with a hash of their masked text). compare runs
+on the synthetic base and partner captures in tests/fixtures/compare/ (CompareGolden), one case per kind of difference between sites.
 
 To accept a deliberate change of output: EDGECONNECT_UPDATE_GOLDEN=1 python3 -m unittest tests.test_golden, then review the diff of tests/golden/.
 """
@@ -357,6 +358,86 @@ class Golden(unittest.TestCase):
 
     def test_unknown_command(self):
         self.check("unknown-command", ["nope"], code=2)
+
+
+COMPARE_CAPTURES = Path(__file__).resolve().parent / "fixtures" / "compare" / "captures"
+
+
+class CompareGolden(unittest.TestCase):
+    """compare on fixed synthetic sites: a base (branch-a) and one partner capture per kind of difference, all typed as branch-b."""
+    files, run_cli, mask, check = Golden.files, Golden.run_cli, Golden.mask, Golden.check
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.orch, cls.hashed, cls.toolkit = Orchestrator(), {}, common.toolkit_version()
+        cls.cap = cls.tmp / "captures"
+        shutil.copytree(str(COMPARE_CAPTURES), str(cls.cap))
+        cls.out = cls.tmp / "out"
+        cls.partners = []  # the partner captures the next compare reads, in order
+        cls.patches = [mock.patch("common.VALIDATORS", {"lab"}), mock.patch.object(cli, "client_for", return_value=cls.orch),
+                       mock.patch.object(validate, "client_for", return_value=cls.orch), mock.patch.object(upload, "client_for", return_value=cls.orch),
+                       mock.patch("capture.capture", side_effect=lambda *a, **k: cls.partners.pop(0))]
+        for p in cls.patches:
+            p.start()
+        cls.partners.append(cls.cap / "base")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            assert cli.main(["build", "--orchestrator", "lab", "--appliance", "branch-a", "--out", str(cls.out)]) == 0
+
+    @classmethod
+    def tearDownClass(cls):
+        for p in reversed(cls.patches):
+            p.stop()
+        shutil.rmtree(str(cls.tmp), ignore_errors=True)
+
+    def setUp(self):
+        self.orch.existing[:] = []
+
+    def compare(self, case, partners, answers=None, code=0, typed=None):
+        self.__class__.partners[:] = [self.cap / p for p in partners]
+        argv = ["compare", str(self.out / "branch-a")] + (typed or ["branch-b"] * len(partners)) + ["--name", case] + ([] if answers else ["--yes"])
+        self.check("compare-" + case, argv, answers, code)
+        rows = self.out / "branch-a" / ("site-" + case) / "sites.csv"
+        golden = GOLDEN / "compare-{}.sites.csv".format(case)  # the rows a GUI shows: each site's own values
+        if rows.is_file():
+            if UPDATE:
+                golden.write_text(rows.read_text(encoding="utf-8"), encoding="utf-8")
+            self.assertEqual(rows.read_text(encoding="utf-8"), golden.read_text(encoding="utf-8"), "sites.csv of compare-{} changed".format(case))
+        else:
+            self.assertFalse(golden.exists(), "compare-{} wrote no sites.csv".format(case))
+
+    def test_identical_sites(self):
+        self.compare("identical", ["identical"])
+
+    def test_scalar_differences(self):
+        self.compare("scalars", ["scalars"])
+
+    def test_an_unticked_difference_warns(self):
+        self.compare("scalar-unticked", ["scalars"], answers=["edit", "27", "", "y"])  # 27: the route metric that differs
+
+    def test_a_differing_zone_is_a_column(self):
+        self.compare("zone-column", ["zone"])
+
+    def test_a_differing_zone_unticked_stays_fixed(self):
+        self.compare("zone-fixed", ["zone"], answers=["edit", "6", "", "y"])  # 6: deploymentInterfaces[lan0].zone
+
+    def test_a_route_only_the_partner_has(self):
+        self.compare("partner-only-route", ["partner-only"])
+
+    def test_a_route_only_the_base_has(self):
+        self.compare("base-only-route", ["base-only"])
+
+    def test_links_that_hold_at_the_base_only(self):
+        self.compare("links", ["links"])  # a gateway and a shared next hop linked at the base only
+
+    def test_dhcp_relay_against_server(self):
+        self.compare("dhcp-relay", ["relay"])
+
+    def test_a_partner_capture_that_cannot_be_read(self):
+        self.compare("broken-partner", ["broken"], code=2)
+
+    def test_the_base_as_its_own_partner(self):
+        self.compare("base-as-partner", [], code=2, typed=["branch-a"])
 
 
 class PatchesUndone(unittest.TestCase):

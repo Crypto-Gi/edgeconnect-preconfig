@@ -1,0 +1,8 @@
+{
+ "data": {
+  "hostName": "branch-b",
+  "groupId": "1.Network",
+  "site": "Example-B",
+  "networkRole": "0"
+ }
+}

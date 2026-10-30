@@ -306,6 +306,21 @@ class CompareLayout(unittest.TestCase):
         renamed["deploymentInfo"]["deploymentInterfaces"][2]["interfaceName"] = "uplink"  # any other name, not only lanN/wanN
         self.assertEqual(cli.layout_differences(REFERENCE, renamed), ["deploymentInterfaces[2]: wan0 vs uplink"])
 
+    def test_another_deployment_mode_interface_type_or_ha_interface_gets_no_row(self):
+        ref = copy.deepcopy(REFERENCE)
+        ref["deploymentInfo"].update(deploymentMode="router", haConfig={"haInterface": "lan1"})
+        ref["deploymentInfo"]["deploymentInterfaces"][0]["interfaceType"] = "lan"
+        other = copy.deepcopy(ref)
+        other["deploymentInfo"].update(deploymentMode="server", haConfig={"haInterface": "lan2"})
+        other["deploymentInfo"]["deploymentInterfaces"][0]["interfaceType"] = "wan"
+        self.assertCountEqual(cli.layout_differences(ref, other), ["deploymentMode: router vs server", "deploymentInterfaces[0].interfaceType: lan vs wan",
+                                                                   "haConfig.haInterface: lan1 vs lan2"])
+        other["applianceInfo"]["hostname"] = "br-2"
+        code, out, built = run_compare(ref, [other])
+        self.assertEqual(built["rows_for"], [])
+        self.assertIn("Note: br-2 has another design (", out)
+        self.assertIn("deploymentMode: router vs server", out)
+
     def test_when_every_other_site_is_left_out_the_csv_still_exists(self):
         import yaml
         other = copy.deepcopy(REFERENCE)
@@ -335,7 +350,297 @@ class CompareLayout(unittest.TestCase):
                     mock.patch("translate.build", side_effect=NothingToConvert("capture 'x' lacks appliance or deployment.sysConfig data")), \
                     contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(cli.main(["compare", str(folder), "br-2"]), 2)
-        self.assertEqual(err.getvalue(), "error: capture 'x' lacks appliance or deployment.sysConfig data\n")
+        self.assertEqual(err.getvalue(), "error: br-2: no appliance or deployment data could be read (offline with no Orchestrator cache?), so it cannot be compared\n")
+
+    def broken(self, damage):
+        """cmd_compare with a real translate.Capture on a damaged partner capture: (exit code, stderr)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "build.json").write_text(json.dumps({"site_type": "br", "orchestrator": "lab", "validator": "lab", "capture": "c", "target_release": "9.7.1.42046",
+                                                            "appliance": {"hostName": "br-1", "nePk": "1.NE"}}))
+            cap = folder / "cap-2026-10-30T000000Z"
+            (cap / "capture").mkdir(parents=True)
+            (cap / "run.json").write_text(json.dumps({"appliance": {"nePk": "2.NE"}}))
+            (cap / "capture-index.json").write_text(json.dumps([{"id": "appliance", "label": "live", "status": "ok", "file": "capture/appliance.live.json"}]))
+            (cap / "capture" / "appliance.live.json").write_text(json.dumps({"data": {"hostName": "br-2"}}))
+            damage(cap)
+            with mock.patch("capture.capture", return_value=cap), contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()):
+                code = cli.main(["compare", str(folder), "br-2"])
+        return code, err.getvalue()
+
+    def test_a_damaged_capture_is_one_line_naming_the_site(self):
+        for damage, detail in ((lambda cap: (cap / "capture-index.json").unlink(), "FileNotFoundError: capture-index.json"),
+                               (lambda cap: (cap / "capture" / "appliance.live.json").write_text("{not json"), "JSONDecodeError: ")):
+            code, err = self.broken(damage)
+            self.assertEqual(code, 2)
+            self.assertTrue(err.startswith("error: br-2: its capture could not be read ({}".format(detail)), err)
+            self.assertEqual(len(err.splitlines()), 1)
+            self.assertNotIn("cap-2026", err)  # the site as typed, not the capture folder
+
+    def test_a_partner_typed_twice_is_refused(self):
+        code, out, built = run_compare(REFERENCE, [], argv=("br-2", "BR-2", "--yes"))
+        self.assertEqual((code, built), (2, None))
+        self.assertIn("error: BR-2 is given twice", out)
+
+    def test_one_partner_typed_by_hostname_and_by_nepk_is_refused(self):
+        code, out, built = run_compare(REFERENCE, [renamed("br-2"), renamed("2.NE")], nepk=lambda site: "2.NE")
+        self.assertEqual((code, built), (2, None))
+        self.assertIn("error: 2.NE is given twice", out)
+
+    def test_a_toolkit_bug_is_not_reported_as_a_bad_capture(self):
+        for error in (TypeError("unhashable type: 'list'"), ValueError("unhashable type: 'list'")):
+            with mock.patch("translate.build", side_effect=error):
+                code, err = self.broken(lambda cap: None)
+            self.assertEqual((code, err), (2, "error: br-2: toolkit error {}: unhashable type: 'list' (please report it)\n".format(type(error).__name__)))
+
+    def test_the_base_appliance_is_refused_as_its_own_partner(self):
+        for typed in ("br-1", "BR-1", "1.NE"):
+            code, out, built = run_compare(REFERENCE, [], argv=(typed, "--yes"))
+            self.assertEqual((code, built), (2, None))
+            self.assertIn("error: {} is the appliance this build was read from".format(typed), out)
+        code, out, built = run_compare(REFERENCE, [renamed()], nepk=lambda site: "1.NE")  # another name, the same appliance
+        self.assertEqual((code, built), (2, None))
+        self.assertIn("error: br-2 is the appliance this build was read from", out)
+
+
+def zoned(zone="LAN", host="br-1"):
+    ref = copy.deepcopy(REFERENCE)
+    ref["applianceInfo"]["hostname"] = host
+    ref["deploymentInfo"]["deploymentInterfaces"][0].update(zone=zone, interfaceLabel="Data")
+    return ref
+
+
+def run_compare(reference, others, argv=("--yes",), answers=(), nepk=lambda site: site + ".NE"):
+    """cmd_compare on in-memory references (no capture, no translate, no Orchestrator): (exit code, output, build_site call or None)."""
+    import yaml
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = Path(tmp)
+        (folder / "build.json").write_text(json.dumps({"site_type": "br", "orchestrator": "lab", "validator": "lab", "capture": "c",
+                                                        "target_release": "9.7.1.42046", "appliance": {"hostName": "br-1", "nePk": "1.NE"}}))
+        (folder / "reference.yaml").write_text(yaml.safe_dump(reference))
+        built = {}
+
+        def build_site(folder, info, name, sheet, rows_for=None):
+            built.update(sheet=by_path(sheet), rows_for=rows_for)
+            return folder
+        names = [o["applianceInfo"]["hostname"] for o in others]
+        with mock.patch("capture.capture", side_effect=lambda nick, site, *a: site), \
+                mock.patch("translate.Capture", side_effect=lambda c: mock.Mock(run={"appliance": {"nePk": nepk(c)}})), \
+                mock.patch("translate.build", side_effect=[copy.deepcopy(o) for o in others]), \
+                mock.patch("translate.prune", side_effect=lambda value, allowed, ledger: value), \
+                mock.patch.object(cli, "build_site", side_effect=build_site), mock.patch.object(cli, "ensure_sites_csv"), \
+                mock.patch.object(cli, "validate_rows", return_value=0), \
+                contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(out):
+            code = cli.main(["compare", tmp] + names + list(argv)) if not answers else cli.cmd_compare([tmp] + names + list(argv), scripted(*answers))
+        return code, out.getvalue(), built or None
+
+
+class CompareLayoutChoice(unittest.TestCase):
+    """Zone, label, segment and firewall mode that differ between the compared sites are offered as columns (docs/decisions/0018)."""
+    def test_a_differing_zone_is_a_ticked_choice_and_an_equal_one_stays_fixed(self):
+        rows = by_path(sheet_rows(zoned(), others=[zoned("Guest", "br-2")]))
+        zone = rows["deploymentInfo.deploymentInterfaces[0].zone"]
+        self.assertEqual((zone["decision"], zone["column"]), ("variable", "lan0_zone"))
+        self.assertEqual(rows["deploymentInfo.deploymentInterfaces[0].interfaceLabel"]["decision"], "fixed")  # equal at both sites
+        p = cli.Picker(zoned(), list(rows.values()), {})
+        self.assertTrue(p.on["deploymentInfo.deploymentInterfaces[0].zone"])  # a choice, ticked, not locked
+        same = by_path(sheet_rows(zoned(), others=[zoned("LAN", "br-2")]))
+        self.assertEqual(same["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "fixed")
+        self.assertEqual(by_path(sheet_rows(zoned()))["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "fixed")  # one site: decision 0006
+
+    def test_yes_makes_it_a_column(self):
+        code, out, built = run_compare(zoned(), [zoned("Guest", "br-2")])
+        self.assertEqual(code, 0)
+        self.assertEqual(built["sheet"]["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "variable")
+        self.assertNotIn("Warning", out)
+
+    def test_unticking_keeps_it_fixed_with_a_warning(self):
+        import yaml
+        from generate import Builder
+        base = yaml.safe_load(yaml.safe_dump(zoned()))  # what cmd_compare reads back from reference.yaml, so the numbers match its list
+        probe = Builder()
+        probe.find_secrets(base)
+        rows = [{k: cli.cell(v) for k, v in r.items()} for r in classify(base, probe.secret_paths, None, [zoned("Guest", "br-2")])]
+        number = next(r["n"] for r in cli.Picker(base, rows, {}).free if r["path"].endswith("[0].zone"))
+        code, out, built = run_compare(zoned(), [zoned("Guest", "br-2")], argv=("--name", "br"), answers=("edit", str(number), "", "y"))
+        self.assertEqual(code, 0)
+        self.assertEqual(built["sheet"]["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "fixed")
+        self.assertIn("Warning: deploymentInterfaces[lan0].zone stays fixed: br-2 gets br-1's value LAN", out)
+
+
+def renamed(host="br-2", change=None):
+    other = copy.deepcopy(REFERENCE)
+    other["applianceInfo"]["hostname"] = host
+    if change:
+        change(other)
+    return other
+
+
+class CompareUntick(unittest.TestCase):
+    def test_every_unticked_setting_that_differs_warns_naming_only_those_sites(self):
+        import yaml
+        from generate import Builder
+        asn = renamed("br-3", lambda o: o["bgpSystemConfig"].update(asn=65002))
+        base = yaml.safe_load(yaml.safe_dump(REFERENCE))  # what cmd_compare reads back, so the numbers match its list
+        probe = Builder()
+        probe.find_secrets(base)
+        rows = [{k: cli.cell(v) for k, v in r.items()} for r in classify(base, probe.secret_paths, None, [renamed(), asn])]
+        number = next(r["n"] for r in cli.Picker(base, rows, {}).free if r["path"] == "bgpSystemConfig.asn")
+        code, out, built = run_compare(REFERENCE, [renamed(), asn], argv=("--name", "br"), answers=("edit", str(number), "", "y"))
+        self.assertEqual(built["sheet"]["bgpSystemConfig.asn"]["decision"], "fixed")
+        self.assertIn("Warning: bgpSystemConfig.asn stays fixed: br-3 gets br-1's value 65001", out)  # br-2 has 65001 too: not named
+        self.assertEqual(sum(line.startswith("Warning:") for line in out.splitlines()), 1)
+
+
+class CompareShape(unittest.TestCase):
+    """A site with settings the base lacks, or without the base's settings, gets no sites.csv row and a Note naming it."""
+    def rows_and_notes(self, *others):
+        code, out, built = run_compare(REFERENCE, list(others))
+        self.assertEqual(code, 0)
+        return [r["hostname"] for r in built["rows_for"]], [line for line in out.splitlines() if line.startswith("Note:")]
+
+    def test_an_equal_shape_gets_a_row(self):
+        self.assertEqual(self.rows_and_notes(renamed()), (["br-2"], []))
+
+    def test_a_partner_only_route_means_no_row(self):
+        extra = renamed(change=lambda o: o["localRoutes"]["staticRoutes"].append({"routeIpSubnet": "198.51.100.0/25", "nextHop": "192.0.2.253"}))
+        rows, notes = self.rows_and_notes(extra, renamed("br-3"))
+        self.assertEqual(rows, ["br-3"])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("br-2 has 2 setting(s) br-1 lacks: localRoutes.staticRoutes[2].nextHop, localRoutes.staticRoutes[2].routeIpSubnet", notes[0])
+        self.assertIn("sites.csv gets no row for br-2", notes[0])
+
+    def test_a_missing_base_setting_means_no_row_unless_it_is_blank(self):
+        def drop(o):
+            del o["bgpSystemConfig"]["neighbors"]
+        rows, notes = self.rows_and_notes(renamed(change=drop))
+        self.assertEqual(rows, [])
+        self.assertIn("br-2 lacks 1 setting(s) br-1 has: bgpSystemConfig.neighbors[0].peerIpAddress", notes[0])
+
+        def blank_wan(o):
+            del o["deploymentInfo"]["deploymentInterfaces"][2]["ipAddressMask"]  # blank (None) at the base: nothing would be copied
+        self.assertEqual(self.rows_and_notes(renamed(change=blank_wan)), (["br-2"], []))
+
+        def blank_extra(o):
+            o["bgpSystemConfig"]["holdTime"] = None  # blank and only at br-2: nothing would be lost
+        self.assertEqual(self.rows_and_notes(renamed(change=blank_extra)), (["br-2"], []))
+
+    def test_a_value_that_differs_is_a_column_even_when_another_site_lacks_it(self):
+        def hop(o):
+            o["localRoutes"]["staticRoutes"][0]["nextHop"] = "203.0.113.2"
+
+        def drop(o):
+            del o["localRoutes"]["staticRoutes"][0]["nextHop"]
+        code, out, built = run_compare(REFERENCE, [renamed(change=hop), renamed("br-3", drop)])
+        self.assertEqual(built["sheet"]["localRoutes.staticRoutes[0].nextHop"]["decision"], "variable")  # br-2's own next hop, not br-1's
+        self.assertEqual([r["hostname"] for r in built["rows_for"]], ["br-2"])  # br-3 lacks it: no row
+
+    def test_a_site_without_a_row_decides_no_column(self):
+        def other_design(o):
+            o["deploymentInfo"]["deploymentInterfaces"][0].update(zone="Guest", interfaceLabel="Data")
+            o["localRoutes"]["staticRoutes"].append({"routeIpSubnet": "198.51.100.0/25", "nextHop": "192.0.2.253"})
+        code, out, built = run_compare(zoned(), [renamed(change=other_design), zoned(host="br-3")])
+        self.assertEqual([r["hostname"] for r in built["rows_for"]], ["br-3"])
+        self.assertEqual(built["sheet"]["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "fixed")  # differs only at br-2, which gets no row
+
+    def test_a_comment_only_the_partner_has_keeps_its_row_with_a_note(self):
+        def commented(o):
+            o["deploymentInfo"]["deploymentInterfaces"][0]["interfaceComment"] = "printers"
+        rows, notes = self.rows_and_notes(renamed(change=commented))
+        self.assertEqual(rows, ["br-2"])
+        self.assertEqual(notes, ["Note: br-2's comment deploymentInfo.deploymentInterfaces[0].interfaceComment is left out of its row: br-1 has none there."])
+
+        def commented_with_a_route(o):
+            commented(o)
+            o["localRoutes"]["staticRoutes"].append({"routeIpSubnet": "198.51.100.0/25", "nextHop": "192.0.2.253"})
+        rows, notes = self.rows_and_notes(renamed(change=commented_with_a_route))
+        self.assertEqual((rows, len(notes)), ([], 1))  # a site with no row gets the one Note that says why
+
+    def test_a_release_default_set_at_only_some_sites_is_a_ticked_column(self):
+        ref = copy.deepcopy(REFERENCE)
+        ref["idsIpsConfig"] = {"mode": "ids", "profile": "Default"}
+        ref["segmentLocalRoutes"] = [{"segment": "Default", "redistToSDwanFabricRouteMap": "default_map"}]
+        unset = copy.deepcopy(ref)
+        unset["applianceInfo"]["hostname"] = "br-2"
+        del unset["idsIpsConfig"]
+        del unset["segmentLocalRoutes"][0]["redistToSDwanFabricRouteMap"]  # not in br-2's capture
+        other = copy.deepcopy(ref)
+        other["applianceInfo"]["hostname"] = "br-3"
+        other["idsIpsConfig"]["profile"] = "Strict"
+        code, out, built = run_compare(ref, [unset, other])
+        self.assertEqual([r["hostname"] for r in built["rows_for"]], ["br-2", "br-3"])
+        for path in ("idsIpsConfig.mode", "idsIpsConfig.profile", "segmentLocalRoutes[0].redistToSDwanFabricRouteMap"):
+            self.assertEqual(built["sheet"][path]["decision"], "variable", path)
+        self.assertIn("Note: br-2 has no idsIpsConfig.mode, idsIpsConfig.profile, segmentLocalRoutes[0].redistToSDwanFabricRouteMap in its capture: "
+                      "those cells of its row are blank; fill them in", out)
+
+    def test_dhcp_relay_against_server_is_named(self):
+        def relay(o):
+            o["deploymentInfo"]["dhcpInfo"][0] = {"dhcpInterfaceName": "lan0", "dhcpType": "relay", "dhcpProxyServers": ["192.0.2.50"]}
+        rows, notes = self.rows_and_notes(renamed(change=relay))
+        self.assertEqual(rows, [])
+        self.assertIn("br-2 uses DHCP relay on lan0, br-1 uses server", notes[0])
+
+
+class CompareEqualAddresses(unittest.TestCase):
+    def test_an_in_subnet_address_equal_at_every_site_stays_fixed(self):
+        hop, peer = "localRoutes.staticRoutes[1].nextHop", "bgpSystemConfig.neighbors[0].peerIpAddress"  # both 192.0.2.254, inside lan0's subnet
+        same = by_path(sheet_rows(others=[renamed(), renamed("br-3")]))
+        self.assertEqual([(same[p]["decision"], same[p]["reason"]) for p in (hop, peer)], [("fixed", "same at every site you gave")] * 2)
+        self.assertEqual(same["deploymentInfo.deploymentInterfaces[0].ipAddressMask"]["decision"], "variable")  # its own address stays a column
+
+        def dhcp_start(o):
+            o["deploymentInfo"]["dhcpInfo"][0]["startIpAddress"] = "192.0.2.10"
+        deployment = by_path(sheet_rows(renamed("br-1", dhcp_start), others=[renamed(change=dhcp_start)]))
+        self.assertEqual(deployment["deploymentInfo.dhcpInfo[0].startIpAddress"]["decision"], "variable")  # Deployment page: always per site (0006)
+
+        def moved(o):
+            o["localRoutes"]["staticRoutes"][1]["nextHop"] = "192.0.2.253"
+        differs = by_path(sheet_rows(others=[renamed(), renamed("br-3", moved)]))
+        self.assertEqual(differs[hop]["decision"], "variable")
+        self.assertEqual(by_path(sheet_rows())[hop]["decision"], "variable")  # one site: the address rule as before
+
+
+class CompareLinks(unittest.TestCase):
+    """A row linked to another column at this site follows it only when the link holds at every site given."""
+    def test_a_gateway_that_stays_while_the_interface_moves_gets_its_own_column(self):
+        def vrrp_style(o):
+            o["deploymentInfo"]["deploymentInterfaces"][0]["ipAddressMask"] = "192.0.2.2/24"  # the gateway stays 192.0.2.1
+        gw = by_path(sheet_rows(others=[renamed(change=vrrp_style)]))["deploymentInfo.dhcpInfo[0].gatewayIpAddress"]
+        self.assertEqual((gw["decision"], gw["linked_to"]), ("variable", ""))
+        self.assertNotEqual(gw["column"], "lan0_ip")
+        held = by_path(sheet_rows(others=[renamed()]))["deploymentInfo.dhcpInfo[0].gatewayIpAddress"]
+        self.assertEqual(held["linked_to"], "lan0_ip")  # the link holds at br-2: one column
+
+    def test_a_copy_of_an_interface_address_that_differs_at_another_site_gets_its_own_column(self):
+        ref = copy.deepcopy(REFERENCE)
+        ref["sse"] = {"sourceAddress": "198.51.100.1/24"}  # equals lan0.71's address with its mask
+        other = copy.deepcopy(ref)
+        other["deploymentInfo"]["deploymentInterfaces"][1]["ipAddressMask"] = "198.51.100.2/24"
+        row = by_path(sheet_rows(ref, others=[other]))["sse.sourceAddress"]
+        self.assertEqual((row["decision"], row["linked_to"]), ("fixed", ""))  # not linked; the same value at both sites
+        self.assertEqual(by_path(sheet_rows(ref, others=[copy.deepcopy(ref)]))["sse.sourceAddress"]["linked_to"], "lan0_71_ip")
+
+    def test_a_third_equal_address_links_to_the_first_column_it_matches_everywhere(self):
+        ref = copy.deepcopy(REFERENCE)
+        ref["localRoutes"]["staticRoutes"].append({"routeIpSubnet": "203.0.113.128/26", "nextHop": "192.0.2.254"})  # three rows with 192.0.2.254
+        other = copy.deepcopy(ref)
+        other["localRoutes"]["staticRoutes"][1]["nextHop"] = "192.0.2.250"
+        other["localRoutes"]["staticRoutes"][2]["nextHop"] = "192.0.2.249"  # the second breaks away: its own column ...
+        other["bgpSystemConfig"]["neighbors"][0]["peerIpAddress"] = "192.0.2.250"  # ... the third (the BGP peer) still equals the first
+        rows = by_path(sheet_rows(ref, others=[other]))
+        first, second, third = (rows[p] for p in ("localRoutes.staticRoutes[1].nextHop", "localRoutes.staticRoutes[2].nextHop", "bgpSystemConfig.neighbors[0].peerIpAddress"))
+        self.assertEqual((second["linked_to"], third["linked_to"]), ("", first["column"]))
+
+    def test_two_equal_next_hops_that_differ_at_another_site_are_two_columns(self):
+        def split(o):
+            o["localRoutes"]["staticRoutes"][1]["nextHop"] = "192.0.2.253"
+            o["bgpSystemConfig"]["neighbors"][0]["peerIpAddress"] = "192.0.2.252"
+        rows = by_path(sheet_rows(others=[renamed(change=split)]))
+        hop, peer = rows["localRoutes.staticRoutes[1].nextHop"], rows["bgpSystemConfig.neighbors[0].peerIpAddress"]
+        self.assertEqual((peer["decision"], hop["decision"]), ("variable", "variable"))
+        self.assertNotEqual(peer["column"], hop["column"])
+        self.assertEqual("", hop["linked_to"] + peer["linked_to"])
 
 
 class ListLogin(unittest.TestCase):

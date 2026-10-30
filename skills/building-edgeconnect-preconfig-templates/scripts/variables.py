@@ -5,9 +5,10 @@ classify() proposes a decision and a reason for every scalar leaf; write_sheet()
 Replaces the per-section modes in decisions.py, which still work with `translate.py --decisions`.
 
 Rules, first match wins: secret, hostname, the site's own interface address, an address equal to or inside the site's own
-interface addresses (linked to that interface); then in applianceInfo and deploymentInfo (the Deployment page and the
+interface addresses (linked to that interface; outside applianceInfo and deploymentInfo, one inside its subnets that is equal at every compared site stays fixed); then in applianceInfo and deploymentInfo (the Deployment page and the
 appliance's initial settings) interface names, labels, types, zones, segments, firewall and deployment mode are fixed and every
-other value is a variable (owner, docs/decisions/0006); then, when other sites of the same type are given (`others`), what they
+other value is a variable (owner, docs/decisions/0006), except that a label, zone, segment or firewall mode that differs at the
+other sites given is a variable the user may untick (owner, docs/decisions/0018); then, when other sites of the same type are given (`others`), what they
 show: a field that differs is a variable, one that is equal everywhere is fixed, one the others lack is fixed and flagged (a
 different site type). The template-group and overlay lists are fixed unless the sites differ. Without `others`:
 bandwidth/ASN/router ID/peer, blank, any other address (fixed, flagged), everything else (fixed).
@@ -27,6 +28,8 @@ COLUMN_OK = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ALWAYS_SECTIONS = ("applianceInfo", "deploymentInfo")  # the Deployment page and the appliance's initial settings
 ALWAYS = "deployment page or appliance info: always per site"
 LAYOUT = "interface names, labels, zones, segments, firewall and deployment mode stay fixed unless you flip them"
+LAYOUT_COMPARED = {"interfaceLabel", "zone", "segment", "firewallMode"}  # differing at the compared sites: a ticked choice (docs/decisions/0018)
+LAYOUT_DIFFERS = "zone, label, segment or firewall mode that differs between the sites you gave: per site unless you untick it"
 LAYOUT_KEYS = {"interfaceName", "dhcpInterfaceName", "raInterfaceName", "haInterface", "interfaceLabel", "interfaceType", "zone", "segment", "firewallMode", "deploymentMode"}
 BANDWIDTH_KEY = re.compile(r"(?i)bandwidth$")
 SITE_NUMBER_KEY = re.compile(r"^(asn|peerAsn|routerId|rtr_id|vxlanId|vni|ipsecUdpPort|peerIpAddress|peerIp|remoteIp|haPeer\w+|macAddress)$")
@@ -130,6 +133,14 @@ def sheet_items(reference: Dict[str, Any]) -> List[Tuple[str, Any]]:
     return items
 
 
+RELEASE_DEFAULTS = re.compile(r"(^|\.)redistToSDwanFabricRouteMap$|^idsIpsConfig\.(mode|profile)$")  # owner 2026-10-30: per site, never a reason for no row (docs/decisions/0019)
+
+
+def only_at(mine: Dict[str, Any], theirs: Dict[str, Any]) -> Tuple[List[str], List[str]]:
+    """Non-blank sheet paths (sheet_items of each site) only the other site has, and those only this site has."""
+    return sorted(p for p in set(theirs) - set(mine) if theirs[p] not in (None, "")), sorted(p for p in set(mine) - set(theirs) if mine[p] not in (None, ""))
+
+
 def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Optional[Set[str]] = None,
              others: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
     """One row per scalar leaf: decision, column, linked_to, value, path, reason (`flag` marks rows needing a human look).
@@ -146,6 +157,7 @@ def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Op
     used: Set[str] = set(COMMA_LISTS.values()) | {"hostname"}
     columns: Dict[str, str] = {}  # own interface address value -> column name
     local_cols: Dict[str, str] = {}  # other in-subnet address value -> column name, so the same address is typed once
+    primary_of: Dict[str, str] = {}  # address value -> path of the row whose column it shares
     own_name: Dict[str, str] = {}
     rows: List[Dict[str, Any]] = []
 
@@ -156,6 +168,13 @@ def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Op
         used.add(name)
         return name
 
+    def holds(path: str, primary: str, host: bool = False) -> bool:
+        """A link (the same address, or the host part of it) that holds at every other site given, so one column serves all rows."""
+        def want(o: Dict[str, Any]) -> Any:
+            a = _addr(o.get(primary))
+            return str(a.ip) if host and a is not None else o.get(primary)
+        return all(path in o and o[path] == want(o) for o in seen_at)
+
     def row(path: str, value: Any, decision: str, reason: str, column: str = "", linked: str = "", flag: bool = False) -> None:
         rows.append({"decision": decision, "column": column, "linked_to": linked, "value": "" if value is None or path in secret_paths else value,
                      "path": path, "reason": reason, "flag": flag})
@@ -164,6 +183,7 @@ def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Op
         if path in own:
             own_name[path] = unique(column_name(reference, path))
             columns.setdefault(value, own_name[path])
+            primary_of.setdefault(value, path)
     for path, value in items:
         key = re.sub(r"\[\d+\]", "", path).split(".")[-1]
         section = path.split(".")[0].split("[")[0]
@@ -181,27 +201,35 @@ def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Op
             row(path, value, "variable", "section copied from the default template (include_from_default): every field is a column", unique(column_name(reference, path)))
         elif path in own:
             row(path, value, "variable", "this site's own interface address", own_name[path])
-        elif addr is not None and str(value).lower() not in ANY and value in columns:
+        elif addr is not None and str(value).lower() not in ANY and value in columns and holds(path, primary_of[value]):
             row(path, value, "variable", "same address as an interface of this site", columns[value], columns[value])
-        elif addr is not None and "/" not in value and any(str(a.ip) == value for _, a in own.values()):
-            target = next(columns[v] for v, a in own.values() if str(a.ip) == value)
+        elif addr is not None and "/" not in value and any(str(a.ip) == value and holds(path, primary_of[v], True) for v, a in own.values()):
+            target = next(columns[v] for v, a in own.values() if str(a.ip) == value and holds(path, primary_of[v], True))
             row(path, value, "variable", "the host part of this site's interface address", target, target)
         elif addr is not None and str(value).lower() not in ANY and any(addr.ip in n for n in nets if n.version == addr.version):
-            if value in local_cols:
+            if seen_at and section not in ALWAYS_SECTIONS and all(path in o and o[path] == value for o in seen_at):  # compare: same at every site (0006 still wins)
+                row(path, value, "fixed", "same at every site you gave")
+            elif value in local_cols and holds(path, primary_of[value]):
                 row(path, value, "variable", "same address as {}".format(local_cols[value]), local_cols[value], local_cols[value])
-            else:
-                local_cols[value] = unique(column_name(reference, path))
-                row(path, value, "variable", "inside one of this site's own subnets", local_cols[value])
+            else:  # a link that breaks at another site gets its own column
+                column = unique(column_name(reference, path))
+                local_cols.setdefault(value, column)
+                primary_of.setdefault(value, path)
+                row(path, value, "variable", "inside one of this site's own subnets", column)
+        elif section in ALWAYS_SECTIONS and key in LAYOUT_COMPARED and any(o.get(path, value) != value for o in seen_at):  # owner, docs/decisions/0018
+            row(path, value, "variable", LAYOUT_DIFFERS, unique(column_name(reference, path)))
         elif section in ALWAYS_SECTIONS and key in LAYOUT_KEYS:  # owner's rule, docs/decisions/0006
             row(path, value, "fixed", LAYOUT)
         elif section in ALWAYS_SECTIONS and value not in (None, ""):  # blank in the source: nothing to vary (decision 0006)
             row(path, value, "variable", ALWAYS, unique(column_name(reference, path)))
         elif seen_at:
             seen = [o[path] for o in seen_at if path in o]
-            if len(seen) < len(seen_at):
-                row(path, value, "fixed", "only {} of the {} other sites have this field: different site type? (check)".format(len(seen), len(seen_at)), flag=True)
-            elif any(v != value for v in seen):
+            if any(v != value for v in seen):  # before the check below: a site that has it must get its own value
                 row(path, value, "variable", "differs between the sites you gave", unique(column_name(reference, path)))
+            elif len(seen) < len(seen_at) and RELEASE_DEFAULTS.search(path):  # owner, docs/decisions/0019
+                row(path, value, "variable", "set at only some of the sites you gave: per site, a blank cell where a site has none", unique(column_name(reference, path)))
+            elif len(seen) < len(seen_at):
+                row(path, value, "fixed", "only {} of the {} other sites have this field: different site type? (check)".format(len(seen), len(seen_at)), flag=True)
             else:
                 row(path, value, "fixed", "same at every site you gave")
         elif BANDWIDTH_KEY.search(key) and not isinstance(value, bool):

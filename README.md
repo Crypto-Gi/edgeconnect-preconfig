@@ -123,7 +123,7 @@ Every command also appends one line to `reports/preconfig.jsonl` in the current 
 | `list --orchestrator NICK` | Tests the `.env` profile and lists the appliances |
 | `build --orchestrator NICK --appliance NAME\|nePk [--target-ecos ECOS]` | Reads the appliance (GET only), converts it, and keeps the folder only if `/validate` accepts it. `--target-ecos` (for example `9.6.2.1`), the ECOS of the appliances the preconfig is for, is optional: it is recorded in `build.json` and the summary, and no rule depends on it at present |
 | `variables FOLDER` | Choose the per-site settings: Top 10, Top 20 or all, by section |
-| `compare FOLDER SITE [SITE ...]` | Let other sites of the same design choose them; a CSV row per site |
+| `compare FOLDER SITE [SITE ...]` | Let other sites of the same design choose them; a CSV row per site, except a site whose settings differ in shape (a Note names it) |
 | `validate FOLDER --csv FILE` | Validates every row; writes `rendered/<preconfig_name>.yml` for those that pass |
 | `upload FOLDER --csv FILE [--approve]` | Validates again, skips conflicts, and uploads only with `--approve` |
 | `validate --yaml FILE\|DIR ... --orchestrator NICK` | Checks existing preconfig YAML files (shape, `<SECRET:` placeholders, `/validate`, name and serial conflicts); never writes |

@@ -1,0 +1,7 @@
+$ edgeconnect-preconfig compare <tmp>/out/branch-a branch-b --name broken-partner --yes
+exit 2
+--- stdout
+reading branch-b from lab (GET only) ...
+--- stderr
+error: branch-b: its capture could not be read (FileNotFoundError: capture-index.json); run compare again to read it afresh
+--- files

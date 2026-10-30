@@ -1,0 +1,39 @@
+$ edgeconnect-preconfig compare <tmp>/out/branch-a branch-b --name partner-only-route --yes
+exit 0
+--- stdout
+reading branch-b from lab (GET only) ...
+
+25 settings are always per site (hostname, secrets, Deployment page, appliance info), and 1 more are per site at branch-a and no other site:
+     #  Setting                                              branch-a                              Choice   
+  -- Different between your sites (pre-ticked) -------------------
+   19  localRoutes.routes[lan0].nextHop                     192.0.2.126                           VARIABLE
+        localRoutes.routes[lan0].nextHop                     follows #19
+0 settings are the same at every site and stay fixed.
+Note: branch-b has 7 setting(s) branch-a lacks: localRoutes.routes[2].advertise, localRoutes.routes[2].advertiseToBgp, localRoutes.routes[2].advertiseToOspf .... sites.csv gets no row for branch-b: the template holds branch-a's settings only. Run compare with branch-b as the base (build it first), or build a separate template for that design.
+
+25 columns: hostname, group, site, network_role, address, contact_name, server_per_segment, total_outbound_bandwidth, total_inbound_bandwidth, lan0_ip, wan0_addressing_mode, wan0_ip, wan0_next_hop, wan0_bw_in, wan0_bw_out, wan0_behind_nat, lan0_dhcp_type, lan0_dhcp_address_mask, lan0_start, lan0_end, lan0_dns_servers_0, lan0_netbios_node_type, lan0_maximum_lease, lan0_default_lease, local_routes_lan0_next_hop
+
+Saved <tmp>/out/branch-a/site-partner-only-route  (example row validated on lab)
+  partner-only-route.jinja2 the template
+  sites.csv            fill one row per site (the first row is branch-a's own values)
+
+Next:
+  edgeconnect-preconfig validate <tmp>/out/branch-a/site-partner-only-route --csv <tmp>/out/branch-a/site-partner-only-route/sites.csv
+
+validating every row of sites.csv on lab ...
+ok   branch-a_preconfig -> <tmp>/out/branch-a/site-partner-only-route/rendered/branch-a_preconfig.yml
+rows that passed are in <tmp>/out/branch-a/site-partner-only-route/rendered
+--- stderr
+--- files
+c4da5b7814a905ad  <tmp>/out/branch-a/site-partner-only-route/checks.json
+ed2a33c483b02839  <tmp>/out/branch-a/site-partner-only-route/columns.json
+7d36ffc36f8e8515  <tmp>/out/branch-a/site-partner-only-route/columns.md
+d75b1097e20fc26f  <tmp>/out/branch-a/site-partner-only-route/example.csv
+d6af6260ab8bf77e  <tmp>/out/branch-a/site-partner-only-route/ledger.json
+6a8cbc31a75a17f3  <tmp>/out/branch-a/site-partner-only-route/partner-only-route.csv
+8b08f688a12f1443  <tmp>/out/branch-a/site-partner-only-route/partner-only-route.jinja2
+36a172cb18c56314  <tmp>/out/branch-a/site-partner-only-route/reference.yaml
+1d95583f6638fb83  <tmp>/out/branch-a/site-partner-only-route/rendered/branch-a_preconfig.yml
+d75b1097e20fc26f  <tmp>/out/branch-a/site-partner-only-route/sites.csv
+2be4ea34c1c4c558  <tmp>/out/branch-a/site-partner-only-route/summary.md
+5f4fedc99db7c7a6  <tmp>/out/branch-a/site-partner-only-route/variables.csv

@@ -1,0 +1,41 @@
+$ edgeconnect-preconfig compare <tmp>/out/branch-a branch-b --name scalars --yes
+exit 0
+--- stdout
+reading branch-b from lab (GET only) ...
+
+25 settings are always per site (hostname, secrets, Deployment page, appliance info), and 1 more are per site at branch-a and branch-b:
+     #  Setting                                              branch-a                              Choice   | branch-b
+  -- Different between your sites (pre-ticked) -------------------
+   27  localRoutes.routes[lan0].metric                      50                                    VARIABLE   | 60
+17 settings are the same at every site and stay fixed.
+
+25 columns: hostname, group, site, network_role, address, contact_name, server_per_segment, total_outbound_bandwidth, total_inbound_bandwidth, lan0_ip, wan0_addressing_mode, wan0_ip, wan0_next_hop, wan0_bw_in, wan0_bw_out, wan0_behind_nat, lan0_dhcp_type, lan0_dhcp_address_mask, lan0_start, lan0_end, lan0_dns_servers_0, lan0_netbios_node_type, lan0_maximum_lease, lan0_default_lease, local_routes_lan0_metric
+
+Saved <tmp>/out/branch-a/site-scalars  (example row validated on lab)
+  scalars.jinja2       the template
+  sites.csv            fill one row per site (the first row is branch-a's own values)
+  sites.csv also has a row for branch-b
+
+Next:
+  edgeconnect-preconfig validate <tmp>/out/branch-a/site-scalars --csv <tmp>/out/branch-a/site-scalars/sites.csv
+
+validating every row of sites.csv on lab ...
+ok   branch-a_preconfig -> <tmp>/out/branch-a/site-scalars/rendered/branch-a_preconfig.yml
+WARN branch-b_preconfig: interface address 192.0.2.1 is also used by row 1 (fine for private LANs, a mistake for WAN addresses)
+ok   branch-b_preconfig -> <tmp>/out/branch-a/site-scalars/rendered/branch-b_preconfig.yml
+rows that passed are in <tmp>/out/branch-a/site-scalars/rendered
+--- stderr
+--- files
+e6c49401034822fa  <tmp>/out/branch-a/site-scalars/checks.json
+3de3744e61c5b606  <tmp>/out/branch-a/site-scalars/columns.json
+c2b24fdb191bccfc  <tmp>/out/branch-a/site-scalars/columns.md
+2f73781f7903e1f0  <tmp>/out/branch-a/site-scalars/example.csv
+d6af6260ab8bf77e  <tmp>/out/branch-a/site-scalars/ledger.json
+36a172cb18c56314  <tmp>/out/branch-a/site-scalars/reference.yaml
+1d95583f6638fb83  <tmp>/out/branch-a/site-scalars/rendered/branch-a_preconfig.yml
+8bd170a36fff2a55  <tmp>/out/branch-a/site-scalars/rendered/branch-b_preconfig.yml
+a26f0bf5a2ecf00a  <tmp>/out/branch-a/site-scalars/scalars.csv
+b06a50c7d1eea678  <tmp>/out/branch-a/site-scalars/scalars.jinja2
+91c983f073ffb67b  <tmp>/out/branch-a/site-scalars/sites.csv
+2be4ea34c1c4c558  <tmp>/out/branch-a/site-scalars/summary.md
+bea02efc9ba3485a  <tmp>/out/branch-a/site-scalars/variables.csv

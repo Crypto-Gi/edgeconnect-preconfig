@@ -1,0 +1,40 @@
+{
+ "data": {
+  "subnets": {
+   "entries": [
+    {
+     "state": {
+      "configured": true,
+      "local": true,
+      "automatic": false,
+      "prefix": "198.51.100.128/25",
+      "nextHop": "192.0.2.126",
+      "ifName": "lan0",
+      "metric": 60,
+      "advert": true,
+      "advert_bgp": false,
+      "advert_ospf": false,
+      "zone_id": "65534",
+      "label": "0"
+     }
+    },
+    {
+     "state": {
+      "configured": true,
+      "local": true,
+      "automatic": false,
+      "prefix": "192.0.2.192/26",
+      "nextHop": "192.0.2.126",
+      "ifName": "lan0",
+      "metric": 50,
+      "advert": true,
+      "advert_bgp": false,
+      "advert_ospf": false,
+      "zone_id": "65534",
+      "label": "0"
+     }
+    }
+   ]
+  }
+ }
+}

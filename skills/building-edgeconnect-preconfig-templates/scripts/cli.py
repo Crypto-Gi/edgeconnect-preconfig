@@ -37,13 +37,15 @@ from typing import Any, Callable, Dict, List, Optional
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT  # noqa: E402
+from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT, LAYOUT_COMPARED, LAYOUT_DIFFERS, LAYOUT_KEYS, RELEASE_DEFAULTS  # noqa: E402  guard-ok: imported after the sys.path insert
 from common import DEFAULT_TEMPLATES_DIR, EdgeConnectError, PermissionDeniedError, captured_output, client_for, load_yaml, output_root, parse_yaml, record, redact_secrets, toolkit_version, utc_stamp, validators, work_dir, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 
 PROG = "edgeconnect-preconfig"
 STATES = {1: "yes", 2: "NO", 3: "unsupported version", 4: "yes (out of sync)", 5: "yes (syncing)"}  # /appliance `state`
 NOT_STAGES = {"cells", "cli", "common", "decisions", "mappers", "runlog", "synth", "variables"}  # libraries, not commands
 INTERFACE_NAME_KEYS = ("interfaceName", "dhcpInterfaceName", "raInterfaceName")
+COMMENT = re.compile(r"(?i)comment$")  # free text: one only a partner has is left out of its row, never a reason for no row
+DESIGN_KEYS = LAYOUT_KEYS - LAYOUT_COMPARED - set(INTERFACE_NAME_KEYS)  # differing at a compared site: another design, no row (docs/decisions/0018)
 ADDRESS_REASONS = ("this site's own interface address", "inside one of this site's own subnets")
 
 
@@ -286,7 +288,7 @@ class Picker:
         for r in rows:
             r["label"] = labelled(reference, r["path"]).replace("deploymentInfo.", "", 1)  # the section column says it
             r["locked"] = (r["path"] == "applianceInfo.hostname" or r["reason"].startswith("secret")
-                           or (r["decision"] == "variable" and r["path"].split(".")[0] in ALWAYS_SECTIONS))  # docs/decisions/0006
+                           or (r["decision"] == "variable" and r["path"].split(".")[0] in ALWAYS_SECTIONS and r["reason"] != LAYOUT_DIFFERS))  # docs/decisions/0006, 0018
             r["follows"] = primary.get(r.get("linked_to") or "") if r.get("linked_to") else None
             rank = ranking.get(setting_key(reference, r["path"]))
             r["pct"] = rank["differs_pct"] if rank else None
@@ -550,7 +552,8 @@ def build_site(folder: Path, info: Dict[str, Any], name: str, sheet: List[Dict[s
 
 
 def layout_differences(reference: Dict[str, Any], other: Dict[str, Any]) -> List[str]:
-    """List items another site holds at the same position under another interface name (wan1 where this site has wan0).
+    """List items another site holds at the same position under another interface name (wan1 where this site has wan0), and
+    a deployment mode, interface type or HA interface that differs: another design, so such a site gets no row.
 
     Rows are matched by position, so such a site's values would land on the wrong interface. Names are compared directly;
     a tunnel or rule name may differ per site and does not count."""
@@ -569,7 +572,29 @@ def layout_differences(reference: Dict[str, Any], other: Dict[str, Any]) -> List
                 walk(x, y, "{}[{}]".format(path, i))
 
     walk(reference, other, "")
+    from variables import sheet_items
+    theirs = dict(sheet_items(other))
+    for path, value in sheet_items(reference):
+        key = re.sub(r"\[\d+\]", "", path).split(".")[-1]
+        if path.split(".")[0] in ALWAYS_SECTIONS and key in DESIGN_KEYS and theirs.get(path, value) != value:
+            out.append("{}: {} vs {}".format(path.replace("deploymentInfo.", "", 1), value, theirs[path]))
     return out
+
+
+def shape_note(mine: Dict[str, Any], theirs: Dict[str, Any], site: str, base: str) -> str:
+    """Why `site` cannot be a row of the base's template (sheet items of each), or '' when it fits.
+
+    The template holds the base's settings only: a row would drop the site's own extra settings and give it the base's."""
+    from variables import only_at
+    extra, missing = only_at(mine, theirs)
+    extra = [p for p in extra if not COMMENT.search(p)]
+    missing = [p for p in missing if not RELEASE_DEFAULTS.search(p)]  # a column with a blank cell for that site (docs/decisions/0019)
+    parts = ["{} uses DHCP {} on {}, {} uses {}".format(site, theirs[p], mine.get(p[:-len("dhcpType")] + "dhcpInterfaceName"), base, v)
+             for p, v in mine.items() if p.endswith(".dhcpType") and theirs.get(p, v) != v]
+    for paths, what in ((extra, "{} has {} setting(s) {} lacks"), (missing, "{} lacks {} setting(s) {} has")):
+        if paths:
+            parts.append(what.format(site, len(paths), base) + ": " + ", ".join(paths[:3]) + (" ..." if len(paths) > 3 else ""))
+    return "; ".join(parts)
 
 
 def write_rows(site_dir: Path, name: str, others: List[Dict[str, Any]]) -> None:
@@ -687,10 +712,20 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     if len(a.sites) > 4:
         raise Fail("compare takes 1 to 4 other sites")
     info = load_build(a.folder)
+    me = info.get("appliance") or {}
+    base_ne = me.get("nePk")
+
+    def refuse_base(site: str) -> None:
+        raise Fail("{} is the appliance this build was read from: give other sites of the same design".format(site))
+    for i, site in enumerate(a.sites):
+        if site.lower() in {str(me.get(k) or "").lower() for k in ("hostName", "nePk")}:
+            refuse_base(site)
+        if site.lower() in (s.lower() for s in a.sites[:i]):  # two rows with one preconfig_name otherwise
+            raise Fail("{} is given twice: give each other site once".format(site))
     base = a.folder if (a.folder / "build.json").is_file() else a.folder.parent
     from capture import Stop, capture
     from translate import Capture, NothingToConvert, allowed_paths, build, prune
-    from variables import classify, sheet_items, write_sheet
+    from variables import classify, only_at, sheet_items, write_sheet
     caps = []
     for site in a.sites:
         print("reading {} from {} (GET only) ...".format(site, info["orchestrator"]), flush=True)
@@ -699,34 +734,70 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         except Stop as stop:
             raise Fail(str(stop))
     allowed = allowed_paths(info["target_release"])
-    try:
-        others = [prune(build(Capture(c), [], info.get("target_ecos")), allowed, []) for c in caps]
-    except NothingToConvert as error:
-        raise Fail(str(error))
+    others = []
+    read_ne = set()
+    for site, c in zip(a.sites, caps):
+        try:
+            cap = Capture(c)
+            other = prune(build(cap, [], info.get("target_ecos")), allowed, [])
+        except NothingToConvert:
+            raise Fail("{}: no appliance or deployment data could be read (offline with no Orchestrator cache?), so it cannot be compared".format(site))
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:  # a damaged capture: one line naming the site as typed, not a traceback
+            detail = Path(error.filename).name if isinstance(error, OSError) and error.filename else str(error)[:200]
+            raise Fail("{}: its capture could not be read ({}: {}); run compare again to read it afresh".format(site, type(error).__name__, detail))
+        except Exception as error:  # anything else is a bug in the toolkit, not in the capture
+            raise Fail("{}: toolkit error {}: {} (please report it)".format(site, type(error).__name__, str(error)[:200]))
+        ne = (cap.run.get("appliance") or {}).get("nePk")
+        if base_ne and ne == base_ne:
+            refuse_base(site)
+        if ne and ne in read_ne:  # one box typed by hostname and by nePk
+            raise Fail("{} is given twice: give each other site once".format(site))
+        read_ne.add(ne)
+        others.append(other)
     reference = load_yaml(base / "reference.yaml")
+    names = [o["applianceInfo"]["hostname"] for o in others]
+    base_host = me.get("hostName")
+    seen = [dict(sheet_items(o)) for o in others]
+    mine = dict(sheet_items(reference))
+    notes: Dict[str, str] = {}  # site -> why it gets no row; decided first, so such a site decides no column either
+    for n, o, s in zip(names, others, seen):
+        diffs = layout_differences(reference, o)
+        why = "" if diffs else shape_note(mine, s, n, base_host)
+        if diffs:
+            notes[n] = ("Note: {} has another design ({}{}): its values would not fit this template, so sites.csv gets no row for it; "
+                        "build a separate template for that design.".format(n, ", ".join(diffs[:4]), " ..." if len(diffs) > 4 else ""))
+        elif why:
+            notes[n] = ("Note: {}. sites.csv gets no row for {}: the template holds {}'s settings only. Run compare with {} as the base "
+                        "(build it first), or build a separate template for that design.".format(why, n, base_host, n))
+    kept = [(n, o, s) for n, o, s in zip(names, others, seen) if n not in notes]
     from generate import Builder
     probe = Builder()
     probe.find_secrets(reference)
-    rows = [{k: cell(v) for k, v in r.items()} for r in classify(reference, probe.secret_paths, None, others)]
-    names = [o["applianceInfo"]["hostname"] for o in others]
-    seen = [dict(sheet_items(o)) for o in others]
-    picker = Picker(reference, rows, {}, seen)
+    rows = [{k: cell(v) for k, v in r.items()} for r in classify(reference, probe.secret_paths, None, [o for _, o, _ in kept])]
+    picker = Picker(reference, rows, {}, [s for _, _, s in kept])
     differ = [r for r in picker.free if picker.on[r["path"]]]
     same = sum(1 for r in rows if r["reason"] == "same at every site you gave")
     only = sum(1 for r in rows if r["flag"] == "true" and r["reason"].startswith("only "))
     locked = sum(1 for r in picker.rows if r["locked"])
+    shown = [n for n, _, _ in kept]
     print("\n{} settings are always per site (hostname, secrets, Deployment page, appliance info), and {} more are per site at {} and {}:".format(
-        locked, len(differ), info["appliance"].get("hostName"), ", ".join(names)))
-    print("  {:>4}  {:<52} {:<30} {:>5}  {}   {}".format("#", "Setting", info["appliance"].get("hostName"), "", "Choice", "   ".join("| " + n for n in names)))
+        locked, len(differ), base_host, ", ".join(shown) or "no other site"))
+    print("  {:>4}  {:<52} {:<30} {:>5}  {}   {}".format("#", "Setting", base_host, "", "Choice", "   ".join("| " + n for n in shown)))
     print("\n".join(picker.show(differ, "Different between your sites (pre-ticked)")))
     print("{} settings are the same at every site and stay fixed.".format(same))
     if only:
         print("{} settings exist only at some of the sites and are left fixed.".format(only))
-    misfits = {n: layout_differences(reference, o) for n, o in zip(names, others)}
-    for n, diffs in misfits.items():
-        if diffs:
-            print("Note: {} lists its items differently ({}{}). Its values would land on the wrong interfaces, so sites.csv gets no row for it; "
-                  "build a separate template for that design.".format(n, ", ".join(diffs[:4]), " ..." if len(diffs) > 4 else ""))
+    for n, _, s in zip(names, others, seen):
+        comments = [p for p in only_at(mine, s)[0] if COMMENT.search(p)]
+        unset = [p for p in only_at(mine, s)[1] if RELEASE_DEFAULTS.search(p)]
+        if n in notes:
+            print(notes[n])
+            continue
+        if unset:
+            print("Note: {} has no {} in its capture: those cells of its row are blank; fill them in (or untick to give it {}'s value).".format(n, ", ".join(unset), base_host))
+        if comments:
+            print("Note: {}'s comment{} {} {} left out of its row: {} has none there.".format(
+                n, "s" if len(comments) > 1 else "", ", ".join(comments[:3]) + (" ..." if len(comments) > 3 else ""), "are" if len(comments) > 1 else "is", base_host))
     if not a.yes:
         answer = read("Build the template with these settings per site? [Y/n/edit] ").strip().lower()
         if answer in ("n", "no"):
@@ -735,10 +806,16 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         if answer in ("e", "edit") and not interact(picker, "all", read):
             print("nothing written")
             return 1
+    label = {r["path"]: r["label"] for r in picker.rows}
+    for r in picker.sheet(reference):  # a fixed setting gives every row the base's value: say so where a site has another
+        differs = [n for n, _, s in kept if r["decision"] == "fixed" and r["path"] in mine and cell(s.get(r["path"])) != cell(mine[r["path"]])]
+        if differs:
+            print("Warning: {} stays fixed: {} {} {}'s value {}".format(label[r["path"]], ", ".join(differs), "gets" if len(differs) == 1 else "get",
+                                                                         base_host, cell(mine[r["path"]]) or '""'))
     name = finish(picker, reference, info["site_type"], a.name, a.yes, read)
     if not name:
         return 1
-    rows_for = [{"hostname": n, "items": s} for n, s in zip(names, seen) if not misfits[n]]
+    rows_for = [{"hostname": n, "items": s} for n, _, s in kept]
     target = build_site(a.folder, info, name, picker.sheet(reference), rows_for)
     ensure_sites_csv(target)  # every other site may have been left out: sites.csv still holds this site's row
     picker.record(reference, target)
