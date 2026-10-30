@@ -260,7 +260,8 @@ class EngineTests(unittest.TestCase):
     def test_gate_variants_read_the_command_line_as_the_cli_does(self):
         sheet = self.sheet("variants.csv", [self.row("site-v")])
         off = self.context(self.dotenv("off.env", ENV))
-        cases = [(["upload", "--site-dir", str(self.site), "--csv", str(sheet), "--orchestrator", "lab", "--approve"], self.context(self.on), "needs the GUI's approval"),
+        cases = [(["upload", "--site-dir", str(self.site), "--csv", str(sheet), "--orchestrator", "lab", "--approve"], self.context(self.on), "runs only the command lines it builds"),
+                 (["upload", "--template", str(self.site / "t.jinja2"), "--csv", str(sheet), "--orchestrator", "lab", "--approve"], self.context(self.on), "needs the GUI's approval"),
                  (["upload", str(self.site), "--csv", str(sheet), "--orch", "lab"], off, "GUI uploads are off for lab"),
                  (["upload", str(self.site), "--csv", str(sheet), "--orchestrator", "LAB"], off, "GUI uploads are off for LAB: set lab_gui_preconfig_uploads=on"),
                  (["upload", str(self.site), "--csv", str(sheet), "--orchestrator", "lab", "--orchestrator", "other"], self.context(self.on), "GUI uploads are off for other")]
@@ -367,7 +368,18 @@ class EngineTests(unittest.TestCase):
         result = engine.run(["validate", "--orchestrator", "lab", str(path)], **self.context(self.on))
         self.assertEqual((result.exit_code, result.status, self.orch.calls), (2, "rejected", []))
         self.assertIn("use validate --yaml or upload --yaml", result.text)
-        self.assertEqual(engine.run(["validate", "--help"], **self.context(self.on)).exit_code, 0)
+
+    def test_only_the_command_lines_the_helpers_build_run(self):
+        sheet = self.sheet("shapes.csv", [self.row("site-z")])
+        for argv in (["check", str(self.site), "--rows", str(sheet), "--validate", "lab"], ["translate", "--capture", str(self.tmp)],
+                     ["capture", "--orchestrator", "lab", "--appliance", "h1"], ["biuld", "--orchestrator", "lab"], ["--help"], [],
+                     ["validate", "--orchestrator", "lab", "--csv", str(sheet)], ["upload", "--site-dir", str(self.site), "--csv", str(sheet), "--orchestrator", "lab"],
+                     ["render", "--site-dir", str(self.site), "--csv", str(sheet)], ["render", "--template", str(self.site / "t.jinja2")]):
+            with self.subTest(argv[:2]):
+                result = engine.run(argv, **self.context(self.on))
+                self.assertEqual((result.exit_code, result.status, self.orch.calls), (2, "rejected", []))
+                self.assertIn("refused, nothing sent: the GUI runs only the command lines it builds", result.text)
+                self.assertFalse((self.site / "rendered" / "site-z.yml").exists())
 
     def test_files_named_without_yaml_are_scanned_too(self):
         other = self.tmp / "other.yml"

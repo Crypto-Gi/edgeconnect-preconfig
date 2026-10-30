@@ -256,8 +256,9 @@ the approver for the upload run. Before the CLI runs, the engine refuses an uplo
 whose own `--orchestrator` lacks `<nickname>_gui_preconfig_uploads=on` in the run's .env. Each run reads an empty stdin through a
 per-thread stand-in, and secret values from the CSV (`columns.json` or secret-like headers) or any YAML file the command names are
 scrubbed from every string, in each form the CLI prints them (escaped, `tojson`, cut short); the parser's message for a YAML file that
-does not parse and every PyYAML source snippet are withheld, the `validate` stage form that sends files unparsed is refused (use
-`--yaml`), and a run without a GUI approval gets an approver that always refuses. Helpers cover
+does not parse and every PyYAML source snippet are withheld, and a run without a GUI approval gets an approver that always refuses.
+`run` refuses every command line whose shape no helper builds (other stages, a typo, the `validate` stage form that sends its files
+unparsed). Helpers cover
 list, build, variables, validate, upload, validate / upload --yaml and render; compare and preconfigs wait for R6 and R7.
 Tested in `tests/test_gui_engine.py` through `cli.main` with a fake Orchestrator.
 

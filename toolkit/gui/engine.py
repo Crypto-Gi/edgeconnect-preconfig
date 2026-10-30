@@ -99,7 +99,7 @@ class _Line(argparse.ArgumentParser):
 def _line(argv: Sequence[str]) -> argparse.Namespace:
     """The options the gates and the secret scrub read, parsed as argparse reads them (abbreviations included, so --appr counts)."""
     parser = _Line(add_help=False)
-    for option in ("--orchestrator", "--csv", "--columns", "--site-dir"):
+    for option in ("--orchestrator", "--csv", "--columns", "--site-dir", "--template"):
         parser.add_argument(option)
     parser.add_argument("--approve", action="store_true")
     parser.add_argument("--yaml", nargs="*")
@@ -109,19 +109,16 @@ def _line(argv: Sequence[str]) -> argparse.Namespace:
 
 def _refusal(argv: Sequence[str], approver: Optional[Callable[..., Any]]) -> Optional[str]:
     """Why the engine does not run this command (nothing is sent), or None. Only `upload` reaches upload.main and its POSTs."""
-    if argv and argv[0] == "validate" and len(argv) > 1 and argv[1].startswith("--") and argv[1] not in ("--help", "-h"):  # cli.main's stage form
-        try:
-            stage = _line(argv)
-        except _LineError as error:
-            return "the GUI could not read this validate command line ({})".format(error)
-        if stage.yaml is None:  # its files go to /validate as raw text, even one that does not parse and so cannot be scanned
-            return "the GUI does not send YAML files unparsed: use validate --yaml or upload --yaml, which parse each file first"
-    if not argv or argv[0] != "upload":
-        return None
     try:
-        line = _line(argv)
+        line = _line(argv) if argv else None
     except _LineError as error:
-        return "the GUI could not read this upload command line ({})".format(error)
+        return "the GUI could not read this command line ({})".format(error)
+    if line is None or not _built_here(argv, line):  # every other verb or stage reads inputs the secret scrub does not know
+        return ("the GUI runs only the command lines it builds (list, build, variables, validate FOLDER --csv, upload FOLDER --csv, "
+                "upload --template --csv, render --template --csv, validate --yaml, upload --yaml); for existing YAML files use "
+                "validate --yaml or upload --yaml, which parse each file first")
+    if argv[0] != "upload":
+        return None
     if line.approve and approver is None:
         return "an upload with --approve needs the GUI's approval (the nickname typed in the approve dialog)"
     if not line.orchestrator:
@@ -130,6 +127,20 @@ def _refusal(argv: Sequence[str], approver: Optional[Callable[..., Any]]) -> Opt
     if common.env_map().get(key, "").strip().lower() != "on":  # also gates the upload's own /validate there (D20)
         return "GUI uploads are off for {0}: set {1}=on in .env to allow them".format(line.orchestrator, key)
     return None
+
+
+def _built_here(argv: Sequence[str], line: argparse.Namespace) -> bool:
+    """An allowlist: the shapes of the helpers below. compare and preconfigs join it with their helpers (R6; R7 in step 10)."""
+    verb, stage = argv[0], len(argv) > 1 and argv[1].startswith("-")  # cli.main: validate/upload with an option first run the stage
+    if verb in ("list", "build", "variables"):
+        return True
+    if verb == "render":
+        return line.template is not None and line.csv is not None
+    if verb in ("validate", "upload") and not stage:  # FOLDER --csv
+        return line.csv is not None
+    if verb in ("validate", "upload"):  # the stage only with --yaml (validate's own file arguments go out unparsed) or upload --template --csv
+        return line.yaml is not None or (verb == "upload" and line.template is not None and line.csv is not None)
+    return False
 
 
 def _refuse(fingerprint: str) -> None:
@@ -379,5 +390,6 @@ def render(template: Any, csv_path: Any, out: Any, validate_on: Optional[str] = 
                + (["--substitute"] if substitute else []), **context)
 
 
-# shortcut: compare and preconfigs get their helpers with their CLI additions (R6: compare --dry-run/--set/--fix/--captures,
-# R7: preconfigs --orchestrator N [--show NAME]), which are not merged yet; run(argv) already runs them as they are.
+# shortcut: compare and preconfigs get their helpers, and their place in _built_here, with their CLI additions (R6: compare
+# --dry-run/--set/--fix/--captures; R7: preconfigs --orchestrator N [--show NAME], merged on gui, its helper in step 10); until
+# then run() refuses them.
