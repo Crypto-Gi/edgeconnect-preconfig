@@ -338,6 +338,71 @@ class CompareLayout(unittest.TestCase):
         self.assertEqual(err.getvalue(), "error: capture 'x' lacks appliance or deployment.sysConfig data\n")
 
 
+def zoned(zone="LAN", host="br-1"):
+    ref = copy.deepcopy(REFERENCE)
+    ref["applianceInfo"]["hostname"] = host
+    ref["deploymentInfo"]["deploymentInterfaces"][0].update(zone=zone, interfaceLabel="Data")
+    return ref
+
+
+def run_compare(reference, others, argv=("--yes",), answers=()):
+    """cmd_compare on in-memory references (no capture, no translate, no Orchestrator): (exit code, output, build_site call or None)."""
+    import yaml
+    with tempfile.TemporaryDirectory() as tmp:
+        folder = Path(tmp)
+        (folder / "build.json").write_text(json.dumps({"site_type": "br", "orchestrator": "lab", "validator": "lab", "capture": "c",
+                                                        "target_release": "9.7.1.42046", "appliance": {"hostName": "br-1", "nePk": "1.NE"}}))
+        (folder / "reference.yaml").write_text(yaml.safe_dump(reference))
+        built = {}
+
+        def build_site(folder, info, name, sheet, rows_for=None):
+            built.update(sheet=by_path(sheet), rows_for=rows_for)
+            return folder
+        names = [o["applianceInfo"]["hostname"] for o in others]
+        with mock.patch("capture.capture", side_effect=lambda nick, site, *a: site), \
+                mock.patch("translate.Capture", side_effect=lambda c: mock.Mock(run={"appliance": {"nePk": c + ".NE"}})), \
+                mock.patch("translate.build", side_effect=[copy.deepcopy(o) for o in others]), \
+                mock.patch("translate.prune", side_effect=lambda value, allowed, ledger: value), \
+                mock.patch.object(cli, "build_site", side_effect=build_site), mock.patch.object(cli, "ensure_sites_csv"), \
+                mock.patch.object(cli, "validate_rows", return_value=0), \
+                contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(out):
+            code = cli.main(["compare", tmp] + names + list(argv)) if not answers else cli.cmd_compare([tmp] + names + list(argv), scripted(*answers))
+        return code, out.getvalue(), built or None
+
+
+class CompareLayoutChoice(unittest.TestCase):
+    """Zone, label, segment and firewall mode that differ between the compared sites are offered as columns (docs/decisions/0018)."""
+    def test_a_differing_zone_is_a_ticked_choice_and_an_equal_one_stays_fixed(self):
+        rows = by_path(sheet_rows(zoned(), others=[zoned("Guest", "br-2")]))
+        zone = rows["deploymentInfo.deploymentInterfaces[0].zone"]
+        self.assertEqual((zone["decision"], zone["column"]), ("variable", "lan0_zone"))
+        self.assertEqual(rows["deploymentInfo.deploymentInterfaces[0].interfaceLabel"]["decision"], "fixed")  # equal at both sites
+        p = cli.Picker(zoned(), list(rows.values()), {})
+        self.assertTrue(p.on["deploymentInfo.deploymentInterfaces[0].zone"])  # a choice, ticked, not locked
+        same = by_path(sheet_rows(zoned(), others=[zoned("LAN", "br-2")]))
+        self.assertEqual(same["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "fixed")
+        self.assertEqual(by_path(sheet_rows(zoned()))["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "fixed")  # one site: decision 0006
+
+    def test_yes_makes_it_a_column(self):
+        code, out, built = run_compare(zoned(), [zoned("Guest", "br-2")])
+        self.assertEqual(code, 0)
+        self.assertEqual(built["sheet"]["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "variable")
+        self.assertNotIn("Warning", out)
+
+    def test_unticking_keeps_it_fixed_with_a_warning(self):
+        import yaml
+        from generate import Builder
+        base = yaml.safe_load(yaml.safe_dump(zoned()))  # what cmd_compare reads back from reference.yaml, so the numbers match its list
+        probe = Builder()
+        probe.find_secrets(base)
+        rows = [{k: cli.cell(v) for k, v in r.items()} for r in classify(base, probe.secret_paths, None, [zoned("Guest", "br-2")])]
+        number = next(r["n"] for r in cli.Picker(base, rows, {}).free if r["path"].endswith("[0].zone"))
+        code, out, built = run_compare(zoned(), [zoned("Guest", "br-2")], argv=("--name", "br"), answers=("edit", str(number), "", "y"))
+        self.assertEqual(code, 0)
+        self.assertEqual(built["sheet"]["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "fixed")
+        self.assertIn("Warning: deploymentInterfaces[lan0].zone stays fixed: br-2 gets br-1's value LAN", out)
+
+
 class ListLogin(unittest.TestCase):
     def client(self, versions_error=None):
         client = mock.Mock(write_requests=0, config=mock.Mock(base_url="https://orch.example.com/gms/rest"))

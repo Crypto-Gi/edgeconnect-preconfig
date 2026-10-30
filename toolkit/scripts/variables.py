@@ -7,7 +7,8 @@ Replaces the per-section modes in decisions.py, which still work with `translate
 Rules, first match wins: secret, hostname, the site's own interface address, an address equal to or inside the site's own
 interface addresses (linked to that interface); then in applianceInfo and deploymentInfo (the Deployment page and the
 appliance's initial settings) interface names, labels, types, zones, segments, firewall and deployment mode are fixed and every
-other value is a variable (owner, docs/decisions/0006); then, when other sites of the same type are given (`others`), what they
+other value is a variable (owner, docs/decisions/0006), except that a label, zone, segment or firewall mode that differs at the
+other sites given is a variable the user may untick (owner, docs/decisions/0018); then, when other sites of the same type are given (`others`), what they
 show: a field that differs is a variable, one that is equal everywhere is fixed, one the others lack is fixed and flagged (a
 different site type). The template-group and overlay lists are fixed unless the sites differ. Without `others`:
 bandwidth/ASN/router ID/peer, blank, any other address (fixed, flagged), everything else (fixed).
@@ -27,6 +28,8 @@ COLUMN_OK = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ALWAYS_SECTIONS = ("applianceInfo", "deploymentInfo")  # the Deployment page and the appliance's initial settings
 ALWAYS = "deployment page or appliance info: always per site"
 LAYOUT = "interface names, labels, zones, segments, firewall and deployment mode stay fixed unless you flip them"
+LAYOUT_COMPARED = {"interfaceLabel", "zone", "segment", "firewallMode"}  # differing at the compared sites: a ticked choice (docs/decisions/0018)
+LAYOUT_DIFFERS = "zone, label, segment or firewall mode that differs between the sites you gave: per site unless you untick it"
 LAYOUT_KEYS = {"interfaceName", "dhcpInterfaceName", "raInterfaceName", "haInterface", "interfaceLabel", "interfaceType", "zone", "segment", "firewallMode", "deploymentMode"}
 BANDWIDTH_KEY = re.compile(r"(?i)bandwidth$")
 SITE_NUMBER_KEY = re.compile(r"^(asn|peerAsn|routerId|rtr_id|vxlanId|vni|ipsecUdpPort|peerIpAddress|peerIp|remoteIp|haPeer\w+|macAddress)$")
@@ -192,6 +195,8 @@ def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Op
             else:
                 local_cols[value] = unique(column_name(reference, path))
                 row(path, value, "variable", "inside one of this site's own subnets", local_cols[value])
+        elif section in ALWAYS_SECTIONS and key in LAYOUT_COMPARED and any(o.get(path, value) != value for o in seen_at):  # owner, docs/decisions/0018
+            row(path, value, "variable", LAYOUT_DIFFERS, unique(column_name(reference, path)))
         elif section in ALWAYS_SECTIONS and key in LAYOUT_KEYS:  # owner's rule, docs/decisions/0006
             row(path, value, "fixed", LAYOUT)
         elif section in ALWAYS_SECTIONS and value not in (None, ""):  # blank in the source: nothing to vary (decision 0006)

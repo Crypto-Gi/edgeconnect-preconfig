@@ -37,7 +37,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT  # noqa: E402
+from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT, LAYOUT_DIFFERS  # noqa: E402
 from common import DEFAULT_TEMPLATES_DIR, EdgeConnectError, PermissionDeniedError, captured_output, client_for, load_yaml, output_root, parse_yaml, record, redact_secrets, toolkit_version, utc_stamp, validators, work_dir, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 
 PROG = "edgeconnect-preconfig"
@@ -282,7 +282,7 @@ class Picker:
         for r in rows:
             r["label"] = labelled(reference, r["path"]).replace("deploymentInfo.", "", 1)  # the section column says it
             r["locked"] = (r["path"] == "applianceInfo.hostname" or r["reason"].startswith("secret")
-                           or (r["decision"] == "variable" and r["path"].split(".")[0] in ALWAYS_SECTIONS))  # docs/decisions/0006
+                           or (r["decision"] == "variable" and r["path"].split(".")[0] in ALWAYS_SECTIONS and r["reason"] != LAYOUT_DIFFERS))  # docs/decisions/0006, 0018
             r["follows"] = primary.get(r.get("linked_to") or "") if r.get("linked_to") else None
             rank = ranking.get(setting_key(reference, r["path"]))
             r["pct"] = rank["differs_pct"] if rank else None
@@ -731,6 +731,9 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         if answer in ("e", "edit") and not interact(picker, "all", read):
             print("nothing written")
             return 1
+    for r in picker.free:
+        if r["reason"] == LAYOUT_DIFFERS and not picker.on[r["path"]]:
+            print("Warning: {} stays fixed: {} gets {}'s value {}".format(r["label"], ", ".join(names), info["appliance"].get("hostName"), r["value"] or '""'))
     name = finish(picker, reference, info["site_type"], a.name, a.yes, read)
     if not name:
         return 1
