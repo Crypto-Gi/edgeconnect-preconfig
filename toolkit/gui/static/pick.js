@@ -45,7 +45,7 @@ const pick = {
   build: "", key: "", start: "top10", extras: new Set(), unticks: new Set(), good: null,
   rows: [], columns: [], ref: null, siteType: "", tab: "sections", query: "", onlyOn: false, closed: new Set(),
   pending: new Map(), notes: new Map(), busy: false, dirty: false, timer: 0, opened: 0, message: "", lineEls: [],
-  sites: [], captures: null, orchestrator: "", finding: 0,
+  sites: [], captures: null, orchestrator: "", finding: 0, compared: [], noRow: {},
 };
 const GONE = /the earlier read is gone/;  // the server's refusal of a captures_from whose folders were cleared
 
@@ -73,13 +73,15 @@ const P = {};
   P.tabTable = el("button", { class: "btn", type: "button", role: "tab", id: "pick-tab-table", "aria-controls": "pick-table", text: "Table" });
   P.sections = el("div", { id: "pick-sections", role: "tabpanel", "aria-labelledby": "pick-tab-sections", class: "pick-panels" });
   P.tbody = el("tbody");
+  P.head = el("tr");
   P.table = el("div", { id: "pick-table", role: "tabpanel", "aria-labelledby": "pick-tab-table", class: "table-wrap", hidden: "" },
-    el("table", null, el("caption", { class: "sr-only", text: "Every setting, as the command line's tick list shows it" }),
-      el("thead", null, el("tr", null, ...["#", "Per site", "Setting", "Value now", "% different", "Column"].map((name) => el("th", { scope: "col", text: name })))), P.tbody));
+    el("table", null, el("caption", { class: "sr-only", text: "Every setting, as the command line's tick list shows it" }), el("thead", null, P.head), P.tbody));
+  P.noRow = el("ul", { class: "notes pick-norow", "aria-label": "Compared sites that get no row", hidden: "" });
   P.yaml = el("ol", { class: "yaml" });
   P.yamlBox = el("div", { class: "yaml-box", tabindex: "0", role: "region", "aria-label": "reference.yaml, read only; secrets show as <SECRET>" }, P.yaml);
   P.work = el("div", { class: "pick-grid" },
     el("div", { class: "pick-left" },
+      P.noRow,
       el("div", { class: "tabs", role: "tablist", "aria-label": "View" }, P.tabSections, P.tabTable),
       P.sections, P.table),
     el("section", { class: "panel pick-right", "aria-labelledby": "pick-yaml-title" },
@@ -155,7 +157,7 @@ async function openPick(encoded, comparing) {
   if (!build) return listBuildsToPick();
   if (build === pick.build) return pick.rows.length ? draw() : undefined;  // open already, or still loading
   Object.assign(pick, { build, key: encodeURIComponent(build), start: "top10", extras: new Set(), unticks: new Set(), good: null, rows: [], columns: [],
-    ref: null, pending: new Map(), notes: new Map(), message: "", siteType: "", sites: [], captures: null, orchestrator: "" });
+    ref: null, pending: new Map(), notes: new Map(), message: "", siteType: "", sites: [], captures: null, orchestrator: "", compared: [], noRow: {} });
   P.siteList.replaceChildren();
   P.siteText.textContent = "Find the other sites of this design on the build's Orchestrator, tick up to 4, then compare.";
   const opened = ++pick.opened;
@@ -243,7 +245,7 @@ async function preview() {
   const result = ran && ran.result;
   const picked = result && result.status === "done" && result.outputs.find((item) => item.kind === "picker");
   if (picked) {
-    Object.assign(pick, { rows: picked.rows, columns: picked.columns, good: sent, message: "" });
+    Object.assign(pick, { rows: picked.rows, columns: picked.columns, good: sent, message: "", compared: picked.sites || [], noRow: picked.no_row || {} });
     const ticked = picked.rows.find((row) => row.path === pick.scroll);
     if (ticked) setTimeout(() => scrollYaml(ticked));
   } else if (result) {  // refused (a locked row, a follower): back to the last state the CLI accepted, with its reason at the row
@@ -295,6 +297,13 @@ function draw() {
   }));
   const ordered = [];
   for (const section of sections) for (const row of section.rows) { ordered.push(row); for (const f of followers.get(row.path) || []) ordered.push(f); }
+  const base = pick.compared.length ? "Value at " + pick.build : "Value now";  // compare (R10): each site's own value beside the base's
+  P.head.replaceChildren(...["#", "Per site", "Setting", base].map((name) => el("th", { scope: "col", text: name })),
+    ...pick.compared.map((site) => el("th", { scope: "col", class: "site" }, site, pick.noRow[site] ? el("small", { text: "no row" }) : null)),
+    ...["% different", "Column"].map((name) => el("th", { scope: "col", text: name })));
+  const without = pick.compared.filter((site) => pick.noRow[site]);
+  P.noRow.hidden = !without.length;
+  P.noRow.replaceChildren(...without.map((site) => el("li", { class: "lock", text: pick.noRow[site] })));
   P.tbody.replaceChildren(...ordered.filter(matches).map((row) => tableRow(row)));
   drawYamlMarks();
   if (focused) {
@@ -344,13 +353,24 @@ function tableRow(row) {
   return hoverable(el("tr", { class: on ? "on" : "" },
     el("td", { class: "mono", text: row.n == null ? "-" : String(row.n) }),
     el("td", null, box(row, "t")),
-    el("td", null, el("span", { text: (row.follows ? "↳ " : "") + row.label }),
+    el("td", { class: "setting" }, el("span", { text: (row.follows ? "↳ " : "") + row.label }),
       row.locked ? el("div", { class: "lock", text: "🔒 always per site: " + row.locked_why }) : null,
       row.follows ? el("div", { class: "lock", text: follower(row) }) : null,
       note ? el("div", { class: "why tone-bad", text: note }) : null),
-    el("td", { class: "mono", text: row.value === "" ? '""' : row.value }),
+    el("td", { class: "mono site", title: String(row.value), text: row.value === "" ? '""' : row.value }),
+    ...pick.compared.map((site) => siteCell(row, site)),
     el("td", { text: row.pct == null ? "" : row.pct + "%" }),
     el("td", { class: "mono", text: on ? (pick.pending.has(row.path) ? "…" : row.column) : "" })), row);
+}
+
+// A site's own value as the CLI formats it: null where the site lacks the setting, a secret as its <SECRET:path> placeholder.
+function siteCell(row, site) {
+  const value = (row.site_values || {})[site];
+  if (value == null) return el("td", { class: "site mono" }, el("span", { "aria-hidden": "true", text: "–" }), el("span", { class: "sr-only", text: "not set at " + site }));
+  const differs = value !== row.value && !value.startsWith("<SECRET:");  // a placeholder says nothing about the value behind it
+  return el("td", { class: "site mono" + (differs ? " differs" : ""), title: value },
+    differs ? el("span", { "aria-hidden": "true", text: "≠ " }) : null, value === "" ? '""' : value,
+    differs ? el("span", { class: "sr-only", text: ", differs from " + pick.build }) : null);
 }
 
 /* the YAML viewer: read only, secrets already <SECRET> from the server */
@@ -462,6 +482,7 @@ function startCompare() {
   const chosen = [...P.siteList.querySelectorAll("input:checked")].map((box) => box.site);
   if (!chosen.length) { P.siteText.textContent = "Tick at least one other site first."; return; }
   Object.assign(pick, { sites: chosen, captures: null, start: "compare" });  // a new set of sites is read afresh
+  setTab("table");  // the sites' own values are columns of the table
   P.siteText.textContent = "Comparing with " + chosen.map((site) => site.hostname || site.nepk).join(", ") + ".";
   drawStarts();
   preview();

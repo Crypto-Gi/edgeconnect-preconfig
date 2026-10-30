@@ -24,13 +24,17 @@ SCALARS = {"hostname": "branch-b", "nepk": "3.NE"}
 SECRET = "Pp0e-Pw-91"  # a PPPoE password in the sample's capture: the CLI never reads it, and nothing the GUI shows may hold it
 
 
-def pppoe(folder, hostname):
+def pppoe(folder):
     """The capture of `folder` with a PPPoE session whose password is left in the capture, as if its redaction had missed it."""
     session = {"USERNAME": "user", "PASSWORD": SECRET, "ETH": "wan0", "LCP-FAILURE": 3, "LCP-INTERVAL": 20, "DNSTYPE": "AUTO",
                "CONNECT_TIMEOUT": 30, "CONNECT_POLL": 5, "SERVICENAME": "", "ACNAME": "", "DEFAULTROUTE": True}
     (folder / "capture" / "pppoe.live.json").write_text(json.dumps({"label": "live", "data": {"pppoe0": session}}), encoding="utf-8")
     index = json.loads((folder / "capture-index.json").read_text(encoding="utf-8"))
     (folder / "capture-index.json").write_text(json.dumps(index + [{"id": "pppoe", "label": "live", "status": "ok", "file": "capture/pppoe.live.json"}]), encoding="utf-8")
+
+
+def rename(folder, hostname):
+    """The capture of `folder` as the read of an appliance called hostname."""
     data = json.loads((folder / "capture" / "appliance.live.json").read_text(encoding="utf-8"))
     data["data"]["hostName"] = hostname
     (folder / "capture" / "appliance.live.json").write_text(json.dumps(data), encoding="utf-8")
@@ -52,8 +56,10 @@ class CompareTests(Fixture):
             shutil.copytree(str(COMPARE_CAPTURES / FIXTURE[appliance.lower()]), str(folder))
             run = json.loads((folder / "run.json").read_text(encoding="utf-8"))
             run.update(stage="capture", role=role, orchestrator=orchestrator)
-            if appliance.startswith("secret-"):
-                pppoe(folder, appliance)
+            if appliance.startswith(("secret-", "plain-")):  # a site of its own name; a secret- one also has a PPPoE session
+                if appliance.startswith("secret-"):
+                    pppoe(folder)
+                rename(folder, appliance)
                 run["appliance"]["hostName"] = appliance
             (folder / "run.json").write_text(json.dumps(run), encoding="utf-8")
             return folder
@@ -65,7 +71,7 @@ class CompareTests(Fixture):
             threading.Event().wait(0.02)
         assert task.state == "done", task.result.text
         cls.base = cls.tmp / "preconfig-output" / "branch-a"
-        FIXTURE.update({"secret-a": "base", "secret-b": "scalars"})
+        FIXTURE.update({"secret-a": "base", "secret-b": "scalars", "plain-c": "partner-only"})
 
     @classmethod
     def manager_for(cls):
@@ -208,6 +214,28 @@ class CompareTests(Fixture):
         folder.mkdir()
         (folder / "build.json").write_text(json.dumps({"orchestrator": "Lab", "appliance": {"hostName": "Branch-B", "nePk": "3.NE"}}), encoding="utf-8")
         self.assertIn(_identity("lab", "host", "branch-b"), TaskManager._keys(folder))
+
+    def test_the_picker_carries_each_sites_own_value_and_the_sites_without_a_row(self):
+        """R10, as the pick screen draws it: a column per site in the order typed, null where a site lacks the setting, a secret
+        as its placeholder, and the Note of a site that gets no row."""
+        tasks = self.manager()
+        self.assertEqual(self.wait(tasks.create({"action": "build", "orchestrator": "lab", "hostname": "secret-a", "nepk": "1.NE"}), "done", "failed").state, "done")
+        sites = [{"hostname": "plain-c", "nepk": "5.NE"}, {"hostname": "secret-b", "nepk": "3.NE"}]
+        first = self.compare(tasks, build="secret-a", sites=sites)
+        saved = self.compare(tasks, build="secret-a", sites=sites, captures_from=first.id, save=True, name="r10")
+        for task in (first, saved):
+            with self.subTest(task=task.id):
+                self.assertEqual(task.state, "done", task.result.text)
+                picker = [r for r in task.result.outputs if r["kind"] == "picker"][-1]
+                self.assertEqual(picker["sites"], ["plain-c", "secret-b"])
+                self.assertEqual(list(picker["no_row"]), ["plain-c"])  # it has routes secret-a lacks, and no PPPoE
+                self.assertIn("sites.csv gets no row for plain-c", picker["no_row"]["plain-c"])
+                rows = {r["path"]: r for r in picker["rows"]}
+                self.assertEqual(list(rows["localRoutes.routes[1].metric"]["site_values"].items()), [("plain-c", "50"), ("secret-b", "60")])
+                self.assertEqual(rows["pppoe.pppoeInterfaces[0].password"]["site_values"],
+                                 {"plain-c": None, "secret-b": "<SECRET:pppoe.pppoeInterfaces[0].password>"})
+                self.assertEqual(rows["pppoe.pppoeInterfaces[0].userName"]["site_values"], {"plain-c": None, "secret-b": "user"})
+                self.assertNotIn(SECRET, json.dumps(task.result.outputs))
 
 
 if __name__ == "__main__":
