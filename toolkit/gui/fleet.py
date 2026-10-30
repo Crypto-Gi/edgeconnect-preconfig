@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 
 import common
 from common import AuthenticationError, ConfigurationError, EdgeConnectError, PermissionDeniedError, ServerError, TransportError
+from engine import uploads_setting
 from upload import orchestrator_identity
 
 GREEN, AMBER, RED = "green", "amber", "red"
@@ -28,7 +29,6 @@ SLOW_SECONDS = 2.0
 SERVER_TEXT = 100
 _SLOT = re.compile(r"^orch_(\d+)$")
 _COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
-_ON, _OFF = {"on", "true", "yes", "1"}, {"off", "false", "no", "0", ""}  # as the automation GUI reads <nickname>_gui_writes
 _NICKNAME = re.compile(r"^[a-z0-9_]+$")  # automation's config.py: a nickname, and the names it reserves
 _RESERVED = {"default", "orchestrator", "edgeconnect", "ec"}
 _REFUSE = "the automation tools (edgeconnect-auto) stop at this key: "
@@ -217,10 +217,10 @@ def _gui_settings(name: str, env: Mapping[str, str]) -> Dict[str, Any]:
     color = env.get("{}_gui_color".format(name), "")
     if color and not _COLOR.match(color):
         raise ConfigurationError("{}_gui_color must be a colour like #1f6feb".format(name))
-    uploads = env.get("{}_gui_preconfig_uploads".format(name), "").strip().lower()
-    if uploads not in _ON | _OFF:
+    uploads = uploads_setting(name, env)  # as the upload gate reads it
+    if uploads == "bad":
         raise ConfigurationError("{}_gui_preconfig_uploads must be on or off".format(name))
-    return {"label": env.get("{}_gui_label".format(name), ""), "color": color, "writes": uploads in _ON}
+    return {"label": env.get("{}_gui_label".format(name), ""), "color": color, "writes": uploads == "on"}
 
 
 def _origin(base_url: str) -> str:

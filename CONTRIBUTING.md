@@ -20,6 +20,16 @@ pip install -r requirements.txt
 python3 -m unittest discover -s tests
 ```
 
+The browser tests in `tests/e2e/` (the GUI from an appliance to written YAML files, and axe-core on every screen in both themes) are skipped there. CI's browser job runs them; to run them yourself:
+
+```bash
+pip install playwright==1.64.1 && python -m playwright install chromium
+npm install --prefix /tmp/axe axe-core@4.10.3
+EDGECONNECT_BROWSER_TESTS=1 AXE_CORE_JS=/tmp/axe/node_modules/axe-core/axe.min.js python3 -m unittest discover -s tests -p test_browser.py
+```
+
+`EDGECONNECT_BROWSER_PATH` names a Chromium binary to use instead of Playwright's own. `python3 tests/e2e/gui_launcher.py` starts the GUI over the same fake Orchestrator and prints its link, for a look by hand.
+
 The lab harnesses in `tests/harnesses/` need a lab Orchestrator and are run by maintainers; [docs/TESTING_AND_VERIFICATION.md](docs/TESTING_AND_VERIFICATION.md) records what they proved.
 
 ## Repository structure
@@ -28,7 +38,7 @@ The lab harnesses in `tests/harnesses/` need a lab Orchestrator and are run by m
 edgeconnect-preconfig/
 ├── README.md                                 # Overview, quick start and links
 ├── CONTRIBUTING.md                           # This file
-├── .github/workflows/test.yml                # CI: the offline tests on Python 3.9 and 3.13, Linux and macOS
+├── .github/workflows/test.yml                # CI: the offline tests on Python 3.9 and 3.13, Linux and macOS; the GUI in Chromium
 ├── LICENSE                                   # Apache License 2.0
 ├── NOTICE                                    # Copyright, trademarks, bundled templates
 ├── requirements.txt                          # Jinja2>=3.1.0, PyYAML>=6.0
@@ -37,6 +47,7 @@ edgeconnect-preconfig/
 ├── docs/
 │   ├── INSTALL.md                            # setup.sh walkthrough, manual install, .env
 │   ├── COMMAND_LINE.md                       # every command, errors, stage scripts, output folders
+│   ├── GUI.md                                # the local web GUI: starting it, each screen, uploads
 │   ├── AGENT_SKILLS.md                       # installing the skill in each AI agent
 │   ├── TESTING_AND_VERIFICATION.md           # Verification report: unit tests, captures, live applies
 │   ├── assets/demo.gif                       # README demo (a lab run, names and addresses replaced)
@@ -64,6 +75,7 @@ edgeconnect-preconfig/
 │   ├── test_env_example.py                   # every .env key the scripts read is documented in .env.example
 │   ├── test_layout.py                        # the skill copy and dist/ match toolkit/; the work folder is found from both
 │   ├── test_variables.py
+│   ├── e2e/                                  # the GUI in a browser (Playwright, axe-core); the CI browser job runs it
 │   └── harnesses/                            # corpus.py, lab_diff.py, probes.py, rank_variables.py, raw_diff.py, scan.py, suite.py
 └── dist/                                     # Pre-built archives for Claude Desktop / Cowork upload
     ├── building-edgeconnect-preconfig-templates.zip

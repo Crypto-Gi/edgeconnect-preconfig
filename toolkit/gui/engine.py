@@ -126,11 +126,21 @@ def _refusal(argv: Sequence[str], approver: Optional[Callable[..., Any]]) -> Opt
     return uploads_off(line.orchestrator, common.env_map())  # also gates the upload's own /validate there (D20)
 
 
+def _uploads_key(orchestrator: str) -> str:
+    return "{}_gui_preconfig_uploads".format(orchestrator.strip().lower().replace("-", "_"))
+
+
+def uploads_setting(orchestrator: str, env: Mapping[str, str]) -> str:
+    """<nickname>_gui_preconfig_uploads (D6) as "on" (only on, any case), "off" (off, blank or no key) or "bad" (anything else,
+    true and yes included). The gate below and the fleet panel (fleet.py, red for bad) both read the switch only here."""
+    value = env.get(_uploads_key(orchestrator), "").strip().lower()
+    return value if value in ("on", "off") else "off" if not value else "bad"
+
+
 def uploads_off(orchestrator: str, env: Mapping[str, str]) -> Optional[str]:
     """Why GUI uploads to this Orchestrator are refused (its <nickname>_gui_preconfig_uploads is not on, D6), or None."""
-    key = "{}_gui_preconfig_uploads".format(orchestrator.strip().lower().replace("-", "_"))
-    if env.get(key, "").strip().lower() != "on":
-        return "GUI uploads are off for {0}: set {1}=on in .env to allow them".format(orchestrator, key)
+    if uploads_setting(orchestrator, env) != "on":  # bad is refused like off
+        return "GUI uploads are off for {0}: set {1}=on in .env to allow them".format(orchestrator, _uploads_key(orchestrator))
     return None
 
 

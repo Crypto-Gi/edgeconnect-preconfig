@@ -44,7 +44,8 @@
 .yaml li { display: flex; gap: .7rem; padding: 0 .6rem 0 0; border-left: 3px solid transparent; white-space: pre; }
 .yaml li::before { content: attr(data-n); color: var(--muted); min-width: 2.6rem; text-align: right; flex: none; }
 .yaml li.on { background: var(--glow); border-left-color: var(--signal); }
-.yaml li.hover { background: color-mix(in srgb, var(--gate) 18%, transparent); border-left-color: var(--gate); }
+.yaml li.hover { background: var(--glow); border-left-color: var(--gate); }  /* a gate tint put the light theme's tag and line numbers under 4.5:1 */
+.yaml li.on::before, .yaml li.hover::before { color: var(--text); }  /* muted on a highlighted line is 4.15:1 in the light theme */
 .yaml .tag { margin-left: auto; padding-left: 1rem; color: var(--signal); font-weight: 500; }
 
 @media (max-width: 900px) {

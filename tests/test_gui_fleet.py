@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "toolkit" / "scripts"))
 sys.path.insert(0, str(ROOT / "toolkit" / "gui"))
 import common  # noqa: E402  guard-ok: imported after the sys.path insert
+import engine  # noqa: E402  guard-ok: imported after the sys.path insert
 import fleet  # noqa: E402  guard-ok: imported after the sys.path insert
 
 KEY = "k3y-Value-0123456789"
@@ -172,6 +173,21 @@ class FleetTests(unittest.TestCase):
         self.assertEqual((result["badcolor"].status, result["badcolor"].reason), ("red", "fix the settings: badcolor_gui_color must be a colour like #1f6feb"))
         self.assertEqual((result["baduploads"].status, result["baduploads"].reason), ("red", "fix the settings: baduploads_gui_preconfig_uploads must be on or off"))
         self.assertEqual([call[0] for call in self.opener.calls if call[0].startswith("bad")], [])  # bad settings send nothing
+
+    def test_only_on_opens_uploads_in_the_panel_as_at_the_upload_gate(self):
+        """One helper reads <nickname>_gui_preconfig_uploads for the panel and the gate: on (any case) opens uploads; off and
+        blank are off; anything else, true and yes included, is red in the panel and refused at the gate like off."""
+        values = {"a": "on", "b": "ON", "c": "off", "d": "", "e": "true", "f": "yes", "g": "1", "h": "maybe"}
+        result = self.check(dotenv(*values, **{name + "_gui_preconfig_uploads": value for name, value in values.items()}))
+        env = common.env_map(self.path)
+        expected = {"a": ("green", True), "b": ("green", True), "c": ("green", False), "d": ("green", False),
+                    "e": ("red", False), "f": ("red", False), "g": ("red", False), "h": ("red", False)}
+        for name, (status, opened) in expected.items():
+            with self.subTest(value=values[name]):
+                self.assertEqual((result[name].status, result[name].writes), (status, opened))
+                if status == "red":
+                    self.assertEqual(result[name].reason, "fix the settings: {}_gui_preconfig_uploads must be on or off".format(name))
+                self.assertEqual(engine.uploads_off(name, env) is None, opened)
 
     def test_a_base_url_with_a_user_name_or_password_is_red_and_sends_nothing(self):
         Path(self.path).write_text(dotenv("creds").replace("https://", "https://user:pa55word@"), encoding="utf-8")

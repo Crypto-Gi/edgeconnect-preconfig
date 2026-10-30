@@ -23,6 +23,7 @@ Verified on real hardware: 65 appliances (ECOS 9.3.7 to 9.7.2) captured and vali
 - [Quick start](#quick-start)
 - [Why not write the YAML by hand?](#why-not-write-the-yaml-by-hand)
 - [Commands](#commands)
+- [Local web GUI](#local-web-gui)
 - [Use it with an AI agent](#use-it-with-an-ai-agent)
 - [Safety](#safety)
 - [The EdgeConnect toolkit](#the-edgeconnect-toolkit)
@@ -130,6 +131,30 @@ Every command also appends one line to `reports/preconfig.jsonl` in the current 
 | `upload --yaml FILE\|DIR ... --orchestrator NICK [--name NAME] [--serial SERIAL]` | Makes the same checks and uploads every file that passes, without `--approve` ([decision 0017](docs/decisions/0017-upload-yaml-needs-no-approve.md)); the name is the file name unless `--name` (one file only) |
 
 Every option, the messages a command can stop with and what to do, the stage scripts and the output folders: [docs/COMMAND_LINE.md](docs/COMMAND_LINE.md).
+
+## Local web GUI
+
+The same commands in a browser, on this computer only (the `gui` branch for now). From the repository folder, in its Python environment:
+
+```bash
+python3 -m toolkit.gui                          # opens your browser; Ctrl+C stops it
+python3 -m toolkit.gui --port 8765 --no-browser # prints the sign-in link instead
+```
+
+It listens on 127.0.0.1 only and prints a sign-in link that works once. It reads the same `.env` as the command line (`EC_DOTENV` names another) and writes to `preconfig-output/` and `reports/` in the current folder, where everything stays after it stops.
+
+| Screen | What it does |
+|---|---|
+| Home | Every Orchestrator in `.env` checked at once (green, amber or red, validator yes or no, uploads on or off), the tasks of this session, and the earlier builds with their template and CSV to download |
+| Build a template from an appliance | Pick an appliance, choose a validator, and `build`; shows `summary.md` |
+| Choose what changes per site | Tick boxes by section (Top 10, Top 20, All) beside a read-only `reference.yaml`; Save downloads the template and `sites.csv` |
+| Compare with other sites | On the same screen: tick up to 4 sites of the same design and start from what differs |
+| Make the preconfig files | Choose your template and filled CSV: create the YAML files, create and validate, or create, validate and upload |
+| Check or upload existing YAML files | `validate --yaml` and `upload --yaml` |
+| Inventory | The appliances and the preconfigs on the Orchestrator; open one to read its YAML, secrets as `<SECRET:path>` |
+| See what changed | The run log, one run at a time with every row it touched |
+
+Uploads are off until you set `<nickname>_gui_preconfig_uploads=on` in `.env` for that Orchestrator; with it off, no upload goes there, and none of an upload's own requests either (its name and serial check, its `/validate`). Reads, builds and `/validate` on a validator still run. A CSV upload shows the ready rows first and needs that Orchestrator's nickname typed to approve; the approval works once and for those rows only. An upload of existing YAML files is one button, as `upload --yaml` needs no `--approve` ([decision 0017](docs/decisions/0017-upload-yaml-needs-no-approve.md)). The GUI never applies a preconfig: every upload is staged with `autoApply` off. More: [docs/GUI.md](docs/GUI.md).
 
 ## Use it with an AI agent
 
