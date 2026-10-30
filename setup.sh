@@ -238,7 +238,7 @@ case "$SCOPE" in
 esac
 PRECONFIG_SCRIPTS="$ROOT/edgeconnect-preconfig/toolkit/scripts"
 
-# A clean clone is updated on the branch it is on (a clone on gui stays on gui); a detached one goes back to main.
+# A clean clone is updated on the branch it is on (a clone on gui stays on gui); a detached one is left alone.
 update_clone() {
   if [ -n "$(git -C "$ROOT/$1" status --porcelain --untracked-files=no)" ]; then
     echo "$1: already cloned, has local changes, not updated (commit or discard them, then run again)"
@@ -246,8 +246,8 @@ update_clone() {
   fi
   branch=$(git -C "$ROOT/$1" symbolic-ref --short -q HEAD) || branch=""
   if [ -z "$branch" ]; then
-    branch=main
-    git -C "$ROOT/$1" checkout -q main || die "$1: could not switch to main"
+    echo "$1: already cloned, not on a branch (detached at $(git -C "$ROOT/$1" rev-parse --short HEAD)), not updated (git -C $ROOT/$1 checkout main, then run again)"
+    return 0
   fi
   git -C "$ROOT/$1" pull -q --ff-only origin "$branch" || die "$1: could not update $branch (diverged, not on GitHub, or no network; git -C $ROOT/$1 checkout main to go back to main)"
   echo "$1: already cloned, updated $branch to $(git -C "$ROOT/$1" rev-parse --short HEAD)"
@@ -381,7 +381,7 @@ else
   for repo in $REPOS; do
     for skill_dir in "$ROOT/$repo"/skills/*/; do
       skill="$(basename "$skill_dir")"
-      # Installed or not, every picked skill goes to every chosen agent: that also updates it from main.
+      # Installed or not, every picked skill goes to every chosen agent: that also updates it from the clone's branch.
       # shellcheck disable=SC2086
       (cd "$SKILLS_CWD" && npx -y skills add "$ROOT/$repo" -s "$skill" $SCOPE_FLAG $AGENT_FLAGS -y >/dev/null) || die "$skill: the skills installer failed"
       echo "$skill: installed for $SKILL_AGENTS"

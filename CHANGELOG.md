@@ -3,7 +3,7 @@
 ## Unreleased (gui branch)
 
 - **`edgeconnect-preconfig gui`** starts the local web GUI (`--port`, `--no-browser`, as `python3 -m toolkit.gui`, which still works) from the command `setup.sh` installs, once the clone is on the `gui` branch. In an installed agent skill, which has no GUI, it stops with one error line (exit 2). `--help` lists it.
-- **`setup.sh` re-run keeps each clone on its branch**: a clean clone is pulled (fast-forward only) on the branch it is on, so a clone on `gui` stays on `gui` instead of being switched back to `main`. A detached clone goes back to `main`; a branch that is not on GitHub or has diverged stops the run without switching.
+- **`setup.sh` re-run keeps each clone on its branch**: a clean clone is pulled (fast-forward only) on the branch it is on, so a clone on `gui` stays on `gui` instead of being switched back to `main`. A detached clone is left alone with a message (its commits are never dropped); a branch that is not on GitHub or has diverged stops the run without switching.
 - **GUI:** leaving a page (Back, a typed address) now closes a dialog left open on it, such as Save template and CSV, which stayed over the next page until Close was pressed.
 
 ## 1.4.0-rc.1 (2026-10-30, pre-release from the `gui` branch)

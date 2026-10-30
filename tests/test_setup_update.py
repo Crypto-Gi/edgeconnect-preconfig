@@ -66,12 +66,18 @@ class UpdateClone(unittest.TestCase):
         self.assertEqual(git("rev-parse", "--abbrev-ref", "HEAD", cwd=self.root / "repo"), "main")
         self.assertEqual(git("rev-parse", "HEAD", cwd=self.root / "repo"), new)
 
-    def test_a_detached_clone_goes_back_to_main(self):
+    def test_a_detached_clone_is_left_alone_and_keeps_its_commits(self):
         repo = self.root / "repo"
         git("checkout", "-q", "--detach", "HEAD", cwd=repo)
+        (repo / "mine").write_text("mine")
+        git("add", "mine", cwd=repo)
+        git("commit", "-q", "-m", "mine", cwd=repo)
+        mine = git("rev-parse", "HEAD", cwd=repo)
         code, out = self.update()
         self.assertEqual(code, 0, out)
-        self.assertEqual(git("rev-parse", "--abbrev-ref", "HEAD", cwd=repo), "main")
+        self.assertIn("not on a branch (detached at", out)
+        self.assertEqual(git("rev-parse", "HEAD", cwd=repo), mine)
+        self.assertEqual(git("rev-parse", "--abbrev-ref", "HEAD", cwd=repo), "HEAD")
 
     def test_local_changes_are_left_alone(self):
         repo = self.root / "repo"

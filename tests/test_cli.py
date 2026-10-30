@@ -1016,10 +1016,6 @@ class Build(unittest.TestCase):
         self.assertIn("  example.csv         this appliance's own values, secrets blank - copy it to start your sites.csv", lines)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class GuiCommand(unittest.TestCase):
     """edgeconnect-preconfig gui: the local web GUI from the command setup.sh installs."""
 
@@ -1045,3 +1041,7 @@ class GuiCommand(unittest.TestCase):
             code, _, err = self.run_main(["gui"])
         self.assertEqual(code, 2)
         self.assertIn("the GUI is not in this copy of the toolkit", err)
+
+
+if __name__ == "__main__":
+    unittest.main()
