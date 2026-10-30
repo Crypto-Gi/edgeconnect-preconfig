@@ -14,7 +14,7 @@ This document records the complete multi-phase testing and verification history 
 | **4. Closed-Loop Feature Testbeds (Batches `0`–`9`)** | Purpose-built lab topologies on 5 KVM `EC-V` appliances (Dual-WAN, MPLS bridge, EdgeHA bridge, Multi-VRF, ZTP discovery onboarding, ECOS `9.7.1` sections) | `10` multi-section batches (`31` non-hardware sections) | **`10 / 10` (`100%`)** applied & re-captured with **`0` mismatches, `0` missing leaves** |
 | **5. Round 1 Live Apply & Diff Cohort (`25` Appliances)** | 25 diverse reference appliances (8 Hubs, 2 EdgeHA peers, 15 Branches) converted to Jinja2 + CSV, adapted, applied to lab appliances, re-captured, and diffed | `25` live appliance applies (`2,778` leaf values) | **`25 / 25` (`100%`)** `completionStatus=True`, **`2,778` matched, `0` mismatches, `0` missing** |
 | **6. Round 2 Live Apply & Diff Cohort (`15` Appliances on ECOS `9.7.1`)** | 10 newly captured appliances (ECOS `9.3.7`–`9.7.2`) + 5 multi-feature appliances applied to an ECOS `9.7.1` lab appliance | `15` live appliance applies (`1,747` leaf values) | **`15 / 15` (`100%`)** `completionStatus=True`, **`1,747` matched, `0` mismatches, `0` missing** |
-| **7. Offline Unit & Regression Suite (`unittest`)** | Secret redaction, GET-only enforcement, YAML 1.2 scalar parsing, Jinja/CSV round-trip, partial-batch validation, conflict-skipping upload, release payload gaps found by the audit below | run `python3 -m unittest discover -s tests` for the current count (`571` on the gui branch) | all passing (gui branch, 2026-10-30) |
+| **7. Offline Unit & Regression Suite (`unittest`)** | Secret redaction, GET-only enforcement, YAML 1.2 scalar parsing, Jinja/CSV round-trip, partial-batch validation, conflict-skipping upload, release payload gaps found by the audit below | run `python3 -m unittest discover -s tests` for the current count (`643` on the gui branch, 3 skipped) | all passing (gui branch, 2026-10-30) |
 | **8. Independent Audit (2026-10-17)** | Static audit of every script, rerun of phases 1–3, corpus extended from `45` to `65` appliances, live closed loop of every section that was `/validate`-only | `32` defects fixed, each with a regression test | See [Independent Audit](#independent-audit-2026-10-17) |
 
 ---
@@ -234,6 +234,12 @@ The YAML-level diff saw none of these. Fixed in the converter: route flags and c
 - Tunnels: `esp ""` to `auto`, anti-replay `disable` to `0`, `secrecyGroup: disable` with PFS off; pre-`/validate` rejection of a short PSK, IKEv2 without identifiers and `no_encap` without `remoteIp`.
 - Ledger only (no preconfig field): firewall rules Orchestrator did not push, business hours, hub membership of overlays.
 - Other: secure web services kept when any value differs from the default, management routes and pass-through shaping read from the running config, IP SLA actions and probe sources, flow-redirection wait time 50 when the running config omits the line.
+
+## Local Web GUI (1.4.0-rc.1)
+
+- Offline, in the unit suite: `tests/test_gui_*.py` pin the approval (typed nickname, single use, bound to one batch and one Orchestrator, expiry), the engine (one CLI command line in-process, offline against a fake Orchestrator), the fleet status, the server's security (one-use link, session cookie, Host and Origin checks, JSON-only POSTs, no API key in any response), the tasks, the run log tables, each screen's task (build, pick, compare, make, inventory) and the colour contrast of every text pair in both themes. `tests/test_golden.py` pins that the command line prints and writes what it did before the GUI's additions.
+- In a browser (CI job `browser`, Chromium through Playwright 1.64.1): `tests/e2e/test_browser.py` goes from finding an appliance to written YAML files on the fake Orchestrator of `tests/e2e/gui_launcher.py`, and runs axe-core 4.10.3 on every screen in both themes, failing on any serious or critical violation. How to run it yourself: [CONTRIBUTING.md](../CONTRIBUTING.md#running-the-tests).
+- Not run yet: the checks against a lab Orchestrator and the WSL check that [docs/gui/BUILD_PLAN.md](gui/BUILD_PLAN.md) lists as open.
 
 ## Harness notes
 

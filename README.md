@@ -87,9 +87,14 @@ Saved ~/edgeconnect/preconfig-output/ref-branch  (/validate on lab: accepted)
   ref-branch.csv      empty sheet (headers only) for new sites
   example.csv         this appliance's own values, secrets blank - copy it to start your sites.csv
   summary.md          what was carried and what was not; verdict: Incomplete for preconfig: 4 gap(s), 0 toolkit error(s).
+
+Next: choose the per-site settings
+  edgeconnect-preconfig variables ~/edgeconnect/preconfig-output/ref-branch
+or let other sites of the same design choose them
+  edgeconnect-preconfig compare ~/edgeconnect/preconfig-output/ref-branch <site> <site>
 ```
 
-`summary.md` lists every item the YAML does not carry, so you know what to set by hand. What `upload` prints without `--approve`, for a `sites.csv` with one bad address:
+The folder is named after the appliance's hostname. `ref-branch.csv` is an empty sheet for new sites; `example.csv` holds this appliance's own row. `summary.md` lists every item the YAML does not carry, so you know what to set by hand. A read the converter does not expect (a new release's payload, an item of another shape) does not stop the build: that part is listed in `summary.md` and the rest is written ([decision 0015](docs/decisions/0015-unexpected-config-runs-with-warnings.md)). What `upload` prints without `--approve`, for a `sites.csv` with one bad address:
 
 ```text
 checking (no upload without --approve) sites.csv on lab ...
@@ -121,10 +126,11 @@ Every command also appends one line to `reports/preconfig.jsonl` in the current 
 
 | Command | What it does |
 |---|---|
-| `list --orchestrator NICK` | Tests the `.env` profile and lists the appliances |
-| `build --orchestrator NICK --appliance NAME\|nePk [--target-ecos ECOS]` | Reads the appliance (GET only), converts it, and keeps the folder only if `/validate` accepts it. `--target-ecos` (for example `9.6.2.1`), the ECOS of the appliances the preconfig is for, is optional: it is recorded in `build.json` and the summary, and no rule depends on it at present |
-| `variables FOLDER` | Choose the per-site settings: Top 10, Top 20 or all, by section |
-| `compare FOLDER SITE [SITE ...]` | Let other sites of the same design choose them; a CSV row per site, except a site whose settings differ in shape (a Note names it) |
+| `list --orchestrator NICK [--search TEXT]` | Tests the `.env` profile and lists the appliances |
+| `preconfigs --orchestrator NICK [--show NAME\|ID]` | Lists the preconfigs already on the Orchestrator, or prints one as YAML with secrets as `<SECRET:path>`; GET only. A YAML with an alias (`*name`, `<<:`) is refused |
+| `build --orchestrator NICK --appliance NAME\|nePk [--out DIR] [--validate-on NICK] [--target-release REL] [--target-ecos ECOS]` | Reads the appliance (GET only), converts it, and keeps the folder only if `/validate` accepts it. `--target-ecos` (for example `9.6.2.1`), the ECOS of the appliances the preconfig is for, is optional: it is recorded in `build.json` and the summary, and no rule depends on it at present |
+| `variables FOLDER [--pick top10\|top20\|all] [--set COL,...] [--fix COL,...] [--name NAME] [--yes] [--dry-run]` | Choose the per-site settings: Top 10, Top 20 or all, by section; `--dry-run` prints the columns and writes nothing |
+| `compare FOLDER SITE [SITE ...] [--set COL,...] [--fix COL,...] [--captures DIR ...] [--name NAME] [--yes] [--dry-run]` | Let 1 to 4 other sites of the same design choose them; a CSV row per site, except a site whose settings differ in shape (a Note names it). A differing zone, label, segment or firewall mode is a ticked column ([decision 0018](docs/decisions/0018-compare-offers-differing-layout-as-columns.md)) |
 | `validate FOLDER --csv FILE` | Validates every row; writes `rendered/<preconfig_name>.yml` for those that pass |
 | `upload FOLDER --csv FILE [--approve]` | Validates again, skips conflicts, and uploads only with `--approve` |
 | `validate --yaml FILE\|DIR ... --orchestrator NICK` | Checks existing preconfig YAML files (shape, `<SECRET:` placeholders, `/validate`, name and serial conflicts); never writes |
@@ -134,14 +140,14 @@ Every option, the messages a command can stop with and what to do, the stage scr
 
 ## Local web GUI
 
-The same commands in a browser, on this computer only (the `gui` branch for now). From the repository folder, in its Python environment:
+The same commands in a browser, on this computer only. It is new in 1.4.0-rc.1, a pre-release from the `gui` branch; `setup.sh` installs `main`, which does not have it yet, and `edgeconnect-preconfig` has no `gui` command. From a clone of the `gui` branch, in a Python environment with `requirements.txt` installed:
 
 ```bash
-python3 -m toolkit.gui                          # opens your browser; Ctrl+C stops it
-python3 -m toolkit.gui --port 8765 --no-browser # prints the sign-in link instead
+python3 -m toolkit.gui                          # from the repository folder; opens your browser; Ctrl+C stops it
+python3 -m toolkit.gui --port 8765 --no-browser # a fixed port; prints the sign-in link instead
 ```
 
-It listens on 127.0.0.1 only and prints a sign-in link that works once. It reads the same `.env` as the command line (`EC_DOTENV` names another) and writes to `preconfig-output/` and `reports/` in the current folder, where everything stays after it stops.
+It listens on 127.0.0.1 only, on any free port unless `--port` names one, and prints a sign-in link that works once. It reads the same `.env` as the command line (`EC_DOTENV` names another) and writes to `preconfig-output/` and `reports/` in the current folder (`EDGECONNECT_REPORT_DIR` names another log folder), where everything stays after it stops.
 
 | Screen | What it does |
 |---|---|
@@ -169,7 +175,7 @@ Then ask in plain words, for example *"Read appliance `2.NE` from Orchestrator `
 ## Safety
 
 - **Read-only capture.** Appliances are read with `GET` only, and secrets are redacted before anything touches disk.
-- **Nothing applies.** The only writes are `upload --approve` and `upload --yaml`, to the Orchestrator you name, always with `autoApply` off. Applying a preconfig is done by a person in Orchestrator; no script here can do it ([decision 0008](docs/decisions/0008-the-toolkit-cannot-apply.md)).
+- **Nothing applies.** The only writes are `upload --approve` and `upload --yaml` (also when the GUI runs them), to the Orchestrator you name, always with `autoApply` off. Applying a preconfig is done by a person in Orchestrator; no script here can do it ([decision 0008](docs/decisions/0008-the-toolkit-cannot-apply.md)).
 - **Validators are named.** `/validate` runs only on Orchestrators listed exactly in `EC_VALIDATORS`.
 - It never writes a `.yml` for a row that fails, never overwrites an existing preconfig name or serial, and never changes Template Groups or Business Intent Overlays.
 
@@ -189,7 +195,7 @@ Three repositories, one `setup.sh`:
 python3 -m unittest discover -s tests
 ```
 
-The offline tests run in CI on Python 3.9 and 3.13. What was verified on real appliances, and the apply-time behaviours `/validate` does not catch: [docs/TESTING_AND_VERIFICATION.md](docs/TESTING_AND_VERIFICATION.md). Ground rules, the repository layout and how to rebuild `dist/`: [CONTRIBUTING.md](CONTRIBUTING.md).
+The offline tests run in CI on Python 3.9 and 3.13, on Linux and macOS; a second job runs the GUI in Chromium (a smoke test and an accessibility check). What was verified on real appliances, and the apply-time behaviours `/validate` does not catch: [docs/TESTING_AND_VERIFICATION.md](docs/TESTING_AND_VERIFICATION.md). Ground rules, the repository layout and how to rebuild `dist/`: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 If this saves you a day of YAML, a star helps other engineers find it. Bugs and ideas: [open an issue](https://github.com/Crypto-Gi/edgeconnect-preconfig/issues).
 

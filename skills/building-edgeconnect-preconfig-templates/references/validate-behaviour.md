@@ -54,6 +54,8 @@ Passing `/validate` **never** guarantees that `POST /gms/appliance/preconfigurat
 | 20 | **Branch NAT on a VLAN Subinterface** | `interfaceName: lan1.55` on a `branchNatMapsConfig` rule | Fails the whole section: `LAN interface ... not found in deployment configuration` | `validate.apply_time_error` rejects the row before `/validate` |
 | 21 | **`no_encap` Tunnel Without `remoteIp`** | A passthrough tunnel with `tunnelEncap: no_encap` and no `remoteIp` | Fails the whole tunnel batch with HTTP 500 (ECOS 9.6.2.1) | `validate.apply_time_error` rejects the row |
 | 22 | **Short IPsec Pre-Shared Key** | `presharedKey` under 8 characters | Fails: `Preshared Key must contain at least 8 characters` | `validate.apply_time_error` rejects the row |
+| 23 | **Next Hop `0.0.0.0` or `::` With an Interface** | A local route (`localRoutes` or `segmentLocalRoutes`) with next hop `0.0.0.0` or `::` and an `interfaceName` other than `default` | ECOS 9.7 rejects the whole routes step: `Interface cannot be specified when Next Hop is 0.0.0.0 for prefix ...`; ECOS 9.6.2.1 applies it (lab, 2026-10-28) | `mappers` write such a route without `interfaceName` for every ECOS (`docs/decisions/0016`); `validate --yaml` and `upload --yaml` print a warning for a file that still has one |
+| 24 | **Inline Router With One Side Only** | `deploymentInfo` in `inline-router` mode with only WAN (or only LAN) interfaces | The deployment step fails (`Must provide both LAN side and WAN side interfaces for inline router mode`), and later steps that need it (OSPF interfaces) fail with it (lab, 2026-10-28) | Written as the source has it, ledgered `unresolved`, and shown as `Warning: apply will fail` at the top of `summary.md` and in the translate output |
 
 ---
 
