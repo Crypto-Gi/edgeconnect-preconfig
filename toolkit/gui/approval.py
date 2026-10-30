@@ -5,11 +5,13 @@ is exchanged for a single-use approval bound to one batch fingerprint (upload.ru
 which the run's approver redeems just before the first upload. A batch that changed since it was checked has another
 fingerprint, so it is refused and nothing is sent.
 """
+import datetime
+import getpass
 import secrets
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Sequence
+from typing import Any, Callable, Dict, List, Sequence
 
 APPROVAL_SECONDS = 600
 
@@ -74,8 +76,19 @@ class GuiApprovals:
         if grant.orchestrator != orchestrator:
             raise ApprovalError("approval is for a different Orchestrator")
 
-    def approver(self, token: str, orchestrator: str) -> Callable[[str], None]:
-        """The run context's approver for one upload run: redeems the token against the fingerprint run_batch passes it."""
-        def approve(fingerprint: str) -> None:
+    def approver(self, token: str, orchestrator: str, typed: Sequence[str] = ()) -> Callable[[str], Dict[str, Any]]:
+        """The run context's approver for one upload run: redeems the token against the fingerprint run_batch passes it and
+        returns who approved what, which the run log keeps as its approval record (as the automation GUI's engine.Approval)."""
+        def approve(fingerprint: str) -> Dict[str, Any]:
             self.redeem(token, fingerprint, orchestrator)
+            return {"by": _os_user(), "time": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+                    "plan_fingerprint": fingerprint, "orchestrator": orchestrator, "typed_orchestrator": typed[0] if typed else "",
+                    "typed": list(typed)}
         return approve
+
+
+def _os_user() -> str:
+    try:
+        return getpass.getuser()
+    except Exception:  # no user name in the environment or the password database; the approval still stands
+        return "unknown"

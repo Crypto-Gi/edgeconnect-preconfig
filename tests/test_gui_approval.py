@@ -63,6 +63,13 @@ class GuiApprovalTests(unittest.TestCase):
         with self.assertRaisesRegex(ApprovalError, "different Orchestrator"):
             self.approvals.redeem(token, "f" * 64, "other")
 
+    def test_the_approver_returns_the_approval_record(self):
+        token = self.issue()
+        record = self.approvals.approver(token, "lab", ["lab"])("f" * 64)
+        self.assertEqual({k: record[k] for k in ("plan_fingerprint", "orchestrator", "typed_orchestrator", "typed")},
+                         {"plan_fingerprint": "f" * 64, "orchestrator": "lab", "typed_orchestrator": "lab", "typed": ["lab"]})
+        self.assertTrue(record["by"] and record["time"])
+
     def test_unknown_token_is_refused(self):
         with self.assertRaisesRegex(ApprovalError, "unknown"):
             self.approvals.redeem("made-up", "f" * 64, "lab")
