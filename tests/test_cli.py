@@ -527,6 +527,13 @@ class CompareShape(unittest.TestCase):
         self.assertEqual([r["hostname"] for r in built["rows_for"]], ["br-3"])
         self.assertEqual(built["sheet"]["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "fixed")  # differs only at br-2, which gets no row
 
+    def test_a_comment_only_the_partner_has_keeps_its_row_with_a_note(self):
+        def commented(o):
+            o["deploymentInfo"]["deploymentInterfaces"][0]["interfaceComment"] = "printers"
+        rows, notes = self.rows_and_notes(renamed(change=commented))
+        self.assertEqual(rows, ["br-2"])
+        self.assertEqual(notes, ["Note: br-2's comment deploymentInfo.deploymentInterfaces[0].interfaceComment is left out of its row: br-1 has none there."])
+
     def test_dhcp_relay_against_server_is_named(self):
         def relay(o):
             o["deploymentInfo"]["dhcpInfo"][0] = {"dhcpInterfaceName": "lan0", "dhcpType": "relay", "dhcpProxyServers": ["192.0.2.50"]}

@@ -44,6 +44,7 @@ PROG = "edgeconnect-preconfig"
 STATES = {1: "yes", 2: "NO", 3: "unsupported version", 4: "yes (out of sync)", 5: "yes (syncing)"}  # /appliance `state`
 NOT_STAGES = {"cells", "cli", "common", "decisions", "mappers", "runlog", "synth", "variables"}  # libraries, not commands
 INTERFACE_NAME_KEYS = ("interfaceName", "dhcpInterfaceName", "raInterfaceName")
+COMMENT = re.compile(r"(?i)comment$")  # free text: one only a partner has is left out of its row, never a reason for no row
 DESIGN_KEYS = LAYOUT_KEYS - LAYOUT_COMPARED - set(INTERFACE_NAME_KEYS)  # differing at a compared site: another design, no row (docs/decisions/0018)
 ADDRESS_REASONS = ("this site's own interface address", "inside one of this site's own subnets")
 
@@ -582,6 +583,7 @@ def shape_note(mine: Dict[str, Any], theirs: Dict[str, Any], site: str, base: st
     The template holds the base's settings only: a row would drop the site's own extra settings and give it the base's."""
     from variables import only_at
     extra, missing = only_at(mine, theirs)
+    extra = [p for p in extra if not COMMENT.search(p)]
     parts = ["{} uses DHCP {} on {}, {} uses {}".format(site, theirs[p], mine.get(p[:-len("dhcpType")] + "dhcpInterfaceName"), base, v)
              for p, v in mine.items() if p.endswith(".dhcpType") and theirs.get(p, v) != v]
     for paths, what in ((extra, "{} has {} setting(s) {} lacks"), (missing, "{} lacks {} setting(s) {} has")):
@@ -716,7 +718,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     base = a.folder if (a.folder / "build.json").is_file() else a.folder.parent
     from capture import Stop, capture
     from translate import Capture, NothingToConvert, allowed_paths, build, prune
-    from variables import classify, sheet_items, write_sheet
+    from variables import classify, only_at, sheet_items, write_sheet
     caps = []
     for site in a.sites:
         print("reading {} from {} (GET only) ...".format(site, info["orchestrator"]), flush=True)
@@ -771,9 +773,13 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     print("{} settings are the same at every site and stay fixed.".format(same))
     if only:
         print("{} settings exist only at some of the sites and are left fixed.".format(only))
-    for n in names:
+    for n, _, s in zip(names, others, seen):
+        comments = [p for p in only_at(mine, s)[0] if COMMENT.search(p)]
         if n in notes:
             print(notes[n])
+        elif comments:
+            print("Note: {}'s comment{} {} {} left out of its row: {} has none there.".format(
+                n, "s" if len(comments) > 1 else "", ", ".join(comments[:3]) + (" ..." if len(comments) > 3 else ""), "are" if len(comments) > 1 else "is", base_host))
     if not a.yes:
         answer = read("Build the template with these settings per site? [Y/n/edit] ").strip().lower()
         if answer in ("n", "no"):
