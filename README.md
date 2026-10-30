@@ -102,6 +102,8 @@ Approval required: review the rows above and re-run with --approve to upload the
 
 Run the same `upload` with `--approve` to stage the ready rows in Orchestrator.
 
+Every command also appends one line to `reports/preconfig.jsonl` in the current folder (file mode 0600, secret cells replaced by `<SECRET:column>`), in the format of the automation tools' report log, so `edgeconnect-auto report summarize reports/preconfig.jsonl` reads it. Set `EDGECONNECT_REPORT_DIR` to log elsewhere, or to an empty value to turn the log off.
+
 ## Why not write the YAML by hand?
 
 | | By hand (a text editor or Orchestrator's preconfiguration page) | edgeconnect-preconfig |

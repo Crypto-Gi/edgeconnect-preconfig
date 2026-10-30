@@ -430,6 +430,32 @@ class Problem(str):
         return made
 
 
+_SECRET_CELLS: "contextvars.ContextVar[Optional[Dict[str, str]]]" = contextvars.ContextVar("edgeconnect_preconfig_secret_cells", default=None)
+
+
+@contextlib.contextmanager
+def collecting_secrets() -> Iterator[Dict[str, str]]:
+    """Collect the secret CSV cells the block reads (cell -> column), for the run log to redact; never recorded."""
+    cells: Dict[str, str] = {}
+    token = _SECRET_CELLS.set(cells)
+    try:
+        yield cells
+    finally:
+        _SECRET_CELLS.reset(token)
+
+
+# the automation tools' secret-looking keys (util._SECRET_KEYS)
+SECRET_HEADER = re.compile(r"(?:api[-_]?key|authorization|cookie|csrf|password|passphrase|secret|token|psk|preshared|private[-_]?key|auth[-_]?key)", re.I)
+
+
+def note_secrets(columns: Optional[Dict[str, Dict[str, Any]]], row: Dict[str, str]) -> None:
+    """The row's secret cells: columns.json's secret columns, or without one (a template from elsewhere) secret-looking headers."""
+    cells = _SECRET_CELLS.get()
+    if cells is not None:
+        secret = [n for n, meta in columns.items() if meta.get("secret")] if columns else [n for n in row if n and SECRET_HEADER.search(n)]
+        cells.update((row[name], name) for name in secret if row.get(name))
+
+
 def problem_data(row: Optional[int], problem: str, secrets: Any = ()) -> Dict[str, Any]:
     """A problem as data: row, column and value when the message carries them, and the message; for a secret column the value
     is <SECRET> and a message that could hold the cell is replaced, so the record never holds a secret (the printed text may
@@ -515,6 +541,7 @@ def client_for(nickname: str, dotenv_path: Optional[str] = None) -> ApiClient:
         name=norm,
         tls_sha256=pin,
     )
+    record("orchestrator", name=nickname, url=normalized_url)
     return ApiClient(cfg)
 
 

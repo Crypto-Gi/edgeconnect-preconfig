@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import client_for, normalize_serial, parse_yaml, utc_stamp, validators, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
+from common import client_for, normalize_serial, parse_yaml, record, utc_stamp, validators, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 
 PATH = "/gms/appliance/preconfiguration/validate"
 
@@ -106,6 +106,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         for path in args.files:
             result = validate_text(client, path.read_text(encoding="utf-8"))
             results.append(dict(result, file=str(path)))
+            record("file", status="passed" if result["accepted"] else "validate failed", name=path.stem, file=str(path), detail=result["error"] or "")
             print("{} {}{}".format("ACCEPTED" if result["accepted"] else "REJECTED", path.name, "" if result["accepted"] else ": " + result["error"]))
     except Stop as stop:
         print("STOPPED: {}".format(stop), file=sys.stderr)
