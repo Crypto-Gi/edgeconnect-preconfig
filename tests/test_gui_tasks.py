@@ -1,0 +1,277 @@
+"""GUI tasks (docs/gui/BUILD_PLAN.md step 5): each action is one engine run in its own thread with a state; reads run in parallel,
+runs on one appliance queue, an upload holds its Orchestrator's lock and is sent only after the typed approval. Offline: the
+fake Orchestrator of the engine tests."""
+import csv
+import io
+import json
+import os
+import shutil
+import stat
+import sys
+import tempfile
+import threading
+import time
+import unittest
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "gui"))
+os.environ["EDGECONNECT_REPORT_DIR"] = ""  # a command logs to reports/ (runlog.py); the run-log tests set their own folder
+import capture  # noqa: E402  guard-ok: modules are imported after the sys.path insert, as in the other test modules
+import cli  # noqa: E402  guard-ok: imported after the sys.path insert
+import common  # noqa: E402  guard-ok: imported after the sys.path insert
+import engine  # noqa: E402  guard-ok: imported after the sys.path insert
+import upload  # noqa: E402  guard-ok: imported after the sys.path insert
+import validate  # noqa: E402  guard-ok: imported after the sys.path insert
+from gui_tasks import TaskError, TaskManager, dumps  # noqa: E402  guard-ok: imported after the sys.path insert
+from test_golden import write_capture  # noqa: E402  guard-ok: the shared synthetic capture
+from test_gui_engine import Echoing, Unreadable  # noqa: E402  guard-ok: the engine tests' fake Orchestrator and stdin
+
+KEY = "fake-KEY-never-in-a-response-5e1d"
+ENV = "orch_1=lab\norch_2=other\nlab_base_url=https://orch.example.com\nlab_api_key={0}\nother_base_url=https://other.example.com\nother_api_key={0}\nEC_VALIDATORS=lab\n".format(KEY)
+
+
+class Fixture(unittest.TestCase):
+    """One build (h1) and one site type (t) in a scratch output folder, with .env files beside it; a new TaskManager per test."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp())
+        cls.orch = Echoing()
+        environ = {k: v for k, v in os.environ.items() if k.upper() != "EC_VALIDATORS" and not k.lower().endswith("_gui_preconfig_uploads")}
+        cls.patches = [mock.patch.dict(os.environ, environ, clear=True), mock.patch.object(sys, "stdin", Unreadable()),
+                       mock.patch.object(capture, "capture", side_effect=lambda *a, **k: write_capture(common.work_dir() / "cap-{}".format(threading.get_ident()))),
+                       mock.patch.object(cli, "client_for", return_value=cls.orch), mock.patch.object(validate, "client_for", return_value=cls.orch),
+                       mock.patch.object(upload, "client_for", return_value=cls.orch)]
+        for patch in cls.patches:
+            patch.start()
+        cls.on = cls.dotenv("on.env", ENV + "lab_gui_preconfig_uploads=on\n")
+        context = {"dotenv": str(cls.on), "out_dir": cls.tmp, "work_dir": cls.tmp / "work"}
+        assert engine.build("lab", "h1", **context).status == "done"
+        cls.build = cls.tmp / "preconfig-output" / "h1"
+        assert engine.variables(cls.build, "top10", name="t", yes=True, **context).status == "done"
+        cls.site = cls.build / "site-t"
+        with (cls.site / "sites.csv").open(newline="", encoding="utf-8") as handle:
+            cls.example = next(csv.DictReader(handle))
+
+    @classmethod
+    def tearDownClass(cls):
+        for patch in reversed(cls.patches):
+            patch.stop()
+        shutil.rmtree(str(cls.tmp), ignore_errors=True)
+
+    @classmethod
+    def dotenv(cls, name, text):
+        path = cls.tmp / name
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def setUp(self):
+        self.orch.existing[:] = [{"id": 1, "name": "taken", "serialNum": None}]
+        self.orch.calls[:] = []
+        self.orch.together = None
+        self.managers = []
+        self.addCleanup(self.cancel_all)
+
+    def cancel_all(self):
+        for tasks in self.managers:  # a task left waiting for its approval would keep its thread for 10 minutes
+            for task in tasks.list():
+                try:
+                    tasks.cancel(task.id)
+                except TaskError:
+                    pass
+
+    def manager(self, dotenv=None, **options):
+        tasks = TaskManager(str(dotenv or self.on), str(self.tmp), str(self.tmp / "work"), **options)
+        self.managers.append(tasks)
+        return tasks
+
+    def wait(self, task, *states):
+        deadline = time.monotonic() + 15
+        while task.state not in states:
+            self.assertLess(time.monotonic(), deadline, "task stayed {} ({})".format(task.state, task.message))
+            time.sleep(0.01)
+        return task
+
+    def csv_text(self, rows):
+        out = io.StringIO()
+        writer = csv.DictWriter(out, fieldnames=list(self.example))
+        writer.writeheader()
+        writer.writerows({**self.example, "preconfig_name": name, "hostname": name, **cells} for name, cells in rows)
+        return out.getvalue()
+
+    def upload(self, tasks, *names, orchestrator="lab"):
+        return tasks.create({"action": "upload", "orchestrator": orchestrator, "build": "h1", "site": "t", "csv_text": self.csv_text([(n, {}) for n in names])})
+
+
+class TaskTests(Fixture):
+    def test_an_upload_waits_for_the_typed_nickname_then_uploads(self):
+        tasks = self.manager()
+        task = self.wait(self.upload(tasks, "site-x", "site-y"), "awaiting_approval", "failed", "rejected")
+        self.assertEqual((task.state, task.view()["result"]["counts"], self.orch.posts()), ("awaiting_approval", {"PLANNED": 2}, []))
+        self.assertEqual(task.view()["result"]["approval"]["gates"][0]["expected"], "lab")
+        self.assertIsNotNone(task.view()["deadline"])
+        tasks.approve(task.id, ["lab"])
+        self.wait(task, "done", "failed", "rejected")
+        self.assertEqual((task.state, task.message, task.view()["deadline"]), ("done", "2 CREATED", None))
+        self.assertEqual([e["name"] for e in self.orch.existing[1:]], ["site-x", "site-y"])
+        self.assertEqual([e["state"] for e in task.events if "state" in e], ["queued", "running", "awaiting_approval", "uploading", "done"])
+        lines = [e["line"] for e in task.events if "line" in e]
+        self.assertIn("uploading sites.csv on lab ...", lines)
+        self.assertLess(lines.index("uploading sites.csv on lab ..."), [i for i, e in enumerate(task.events) if e.get("state") == "done"][0])
+
+    def test_the_upload_lock_queues_a_second_upload_and_reads_still_run(self):
+        tasks = self.manager()
+        first = self.wait(self.upload(tasks, "site-a"), "awaiting_approval")
+        second = self.upload(tasks, "site-b")
+        read = self.wait(tasks.create({"action": "validate_yaml", "orchestrator": "lab", "files": [(self.site / "rendered" / "h1_preconfig.yml").read_text(encoding="utf-8")]}),
+                         "done", "failed")
+        self.assertEqual((read.state, second.state), ("done", "queued"))
+        tasks.cancel(first.id)
+        self.wait(first, "cancelled")
+        self.wait(second, "awaiting_approval")
+        tasks.cancel(second.id)
+        self.assertEqual((self.wait(second, "cancelled").state, self.orch.posts()), ("cancelled", []))
+        # another Orchestrator has its own lock
+        other = self.manager(self.dotenv("both.env", ENV + "lab_gui_preconfig_uploads=on\nother_gui_preconfig_uploads=on\n"))
+        held = self.wait(self.upload(other, "site-c"), "awaiting_approval")
+        elsewhere = other.create({"action": "upload", "orchestrator": "other", "template_text": (self.site / "t.jinja2").read_text(encoding="utf-8"),
+                                  "csv_text": self.csv_text([("site-d", {})])})  # a template upload locks no site folder
+        self.assertEqual(self.wait(elsewhere, "awaiting_approval", "failed", "rejected").state, "awaiting_approval")
+        other.cancel(held.id)
+
+    def test_reads_run_in_parallel(self):
+        self.orch.together = threading.Barrier(2, timeout=10)  # each /validate waits until both runs are inside it
+        tasks = self.manager()
+        text = (self.site / "rendered" / "h1_preconfig.yml").read_text(encoding="utf-8")
+        both = [tasks.create({"action": "validate_yaml", "orchestrator": "lab", "files": [text]}) for _ in range(2)]
+        self.assertEqual([self.wait(task, "done", "failed").state for task in both], ["done", "done"], [t.result.text for t in both if t.result])
+
+    def test_runs_on_one_appliance_queue_behind_each_other(self):
+        release = threading.Event()
+        self.orch.together = release  # the site check waits inside /validate
+        tasks = self.manager()
+        check = self.wait(tasks.create({"action": "validate", "build": "h1", "site": "t", "csv_text": self.csv_text([("q-1", {})])}), "running")
+        preview = tasks.create({"action": "variables", "build": "h1", "pick": "top20"})
+        listing = self.wait(tasks.create({"action": "list", "orchestrator": "lab"}), "done", "failed")
+        time.sleep(0.3)
+        self.assertEqual((check.state, preview.state, listing.state), ("running", "queued", "done"))
+        release.set()
+        self.assertEqual((self.wait(check, "done", "failed").state, self.wait(preview, "done", "failed").state), ("done", "done"))
+        self.assertEqual([r["kind"] for r in preview.result.outputs], ["dry-run", "picker"])  # a preview writes nothing
+
+    # ------------------------------------------------------------ the approval gates, through the task layer
+
+    def test_with_the_switch_off_nothing_is_sent(self):
+        tasks = self.manager(self.dotenv("off.env", ENV))
+        task = self.wait(self.upload(tasks, "site-off"), "rejected", "failed", "awaiting_approval")
+        self.assertEqual((task.state, self.orch.calls), ("rejected", []))
+        self.assertIn("GUI uploads are off for lab", task.result.text)
+        files = tasks.create({"action": "upload_yaml", "orchestrator": "lab", "files": ["applianceInfo:\n  hostname: h\n"]})
+        self.assertEqual((self.wait(files, "rejected", "failed", "done").state, self.orch.calls), ("rejected", []))
+
+    def test_a_wrong_or_other_nickname_is_rejected(self):
+        tasks = self.manager()
+        for typed in ("Lab", "other", ""):
+            task = self.wait(self.upload(tasks, "site-w"), "awaiting_approval")
+            tasks.approve(task.id, [typed])
+            self.wait(task, "rejected", "done", "failed")
+            self.assertEqual((task.state, task.message), ("rejected", "upload approval refused: the nickname typed is not lab; nothing was uploaded"), typed)
+        self.assertEqual(self.orch.posts(), [])
+
+    def test_an_unanswered_approval_expires(self):
+        tasks = self.manager(approval_seconds=0.3)
+        task = self.wait(self.upload(tasks, "site-e"), "awaiting_approval")
+        self.assertEqual((self.wait(task, "expired").message, self.orch.posts()), ("no approval within 0.005 minutes; nothing was uploaded", []))
+        with self.assertRaisesRegex(TaskError, "not awaiting approval"):
+            tasks.approve(task.id, ["lab"])
+
+    def test_an_approval_is_used_once(self):
+        tasks = self.manager()
+        task = self.wait(self.upload(tasks, "site-r"), "awaiting_approval")
+        tasks.approve(task.id, ["lab"])
+        with self.assertRaisesRegex(TaskError, "not awaiting approval"):
+            tasks.approve(task.id, ["lab"])
+        self.wait(task, "done")
+        with self.assertRaises(TaskError) as refused:
+            tasks.approve(task.id, ["lab"])
+        self.assertEqual((refused.exception.status, len(self.orch.posts()), tasks.approvals._grants), (409, 1, {}))
+
+    def test_an_orchestrator_that_changed_identity_since_the_check_gets_nothing(self):
+        tasks = self.manager()
+        task = self.wait(self.upload(tasks, "site-i"), "awaiting_approval")
+        real = self.orch.get
+        with mock.patch.object(self.orch, "get", lambda path, query=None: {"serialNumber": "OTHER-SERIAL"} if path == "/gmsserver/info" else real(path, query)):
+            tasks.approve(task.id, ["lab"])
+            self.wait(task, "rejected", "done", "failed")
+        self.assertEqual((task.state, self.orch.posts()), ("rejected", []))
+        self.assertIn("NOT APPROVED, nothing uploaded: the batch changed since it was approved", task.result.text)
+
+    # ------------------------------------------------------------ requests, files and folders
+
+    def test_imported_files_are_saved_0600_under_names_from_python(self):
+        tasks = self.manager()
+        template = (self.site / "t.jinja2").read_text(encoding="utf-8")
+        task = self.wait(tasks.create({"action": "render", "template_text": template, "csv_text": self.csv_text([("r-1", {})]),
+                                       "file_name": "../../outside.csv"}), "done", "failed")
+        self.assertEqual((task.state, task.folder.parent), ("done", self.tmp / "preconfig-output" / "runs"))
+        self.assertEqual(stat.S_IMODE(task.folder.stat().st_mode), 0o700)
+        names = sorted(str(p.relative_to(task.folder)) for p in task.folder.rglob("*") if p.is_file())
+        self.assertEqual(names, ["rendered/r-1.yml", "sites.csv", "template.jinja2"])
+        self.assertEqual({stat.S_IMODE((task.folder / n).stat().st_mode) for n in names}, {0o600})
+        self.assertEqual(task.result.files, [str(task.folder / "rendered" / "r-1.yml")])
+        self.assertFalse((self.tmp / "outside.csv").exists())
+
+    def test_requests_are_checked_before_anything_runs(self):
+        tasks = self.manager()
+        runs = self.tmp / "preconfig-output" / "runs"
+        before = sorted(runs.iterdir()) if runs.is_dir() else []
+        for request, message in [
+            ({"action": "apply"}, "unknown action"),
+            ({"action": "list", "orchestrator": "nope"}, "unknown Orchestrator 'nope'; configured: lab, other"),
+            ({"action": "list"}, "unknown Orchestrator ''"),
+            ({"action": "variables", "build": "../h1"}, "build must name a build folder"),
+            ({"action": "variables", "build": "h1.previous-1"}, "build must name a build folder"),
+            ({"action": "variables", "build": "missing"}, "there is no build folder"),
+            ({"action": "variables", "build": "h1", "pick": "top5"}, "pick must be"),
+            ({"action": "variables", "build": "h1", "set": "a,b"}, "set must list"),
+            ({"action": "validate", "build": "h1", "site": "../t", "csv_text": "x"}, "site must name a site folder"),
+            ({"action": "validate", "build": "h1", "site": "t"}, "csv_text is required"),
+            ({"action": "upload", "orchestrator": "lab", "template_text": "x"}, "csv_text is required"),
+            ({"action": "validate_yaml", "orchestrator": "lab", "files": "x"}, "files must list"),
+            ({"action": "build", "orchestrator": "lab", "appliance": "h1", "validate_on": "nope"}, "unknown Orchestrator 'nope'"),
+        ]:
+            with self.assertRaisesRegex(TaskError, message):
+                tasks.create(request)
+        self.assertEqual((tasks.list(), self.orch.calls), ([], []))
+        self.assertEqual(sorted(runs.iterdir()) if runs.is_dir() else [], before)  # a refused request leaves no folder
+
+    def test_earlier_builds_list_their_site_types_and_skip_unfinished_folders(self):
+        out = self.tmp / "preconfig-output"
+        for name in (".building-h2", ".incomplete-h3", "h1.previous-20261030T000000Z"):
+            (out / name).mkdir(exist_ok=True)
+            (out / name / "build.json").write_text("{}", encoding="utf-8")
+        tasks = self.manager()
+        builds = tasks.builds()
+        self.assertEqual(builds["folder"], str(out))
+        self.assertEqual([(b["appliance"], b["orchestrator"], bool(b["built"])) for b in builds["builds"]], [("h1", "lab", True)])
+        site = [s for s in builds["builds"][0]["site_types"] if s["name"] == "t"][0]
+        self.assertEqual(site, {"name": "t", "template_url": "/api/builds/h1/t/template", "csv_url": "/api/builds/h1/t/csv"})
+        self.assertEqual(tasks.site_file("h1", "t", "template"), self.site / "t.jinja2")
+        self.assertEqual(tasks.site_file("h1", "t", "csv").parent, self.site)
+        for args in (("h1", "../t", "csv"), ("h1", "t", "columns"), ("..", "t", "csv"), ("h1", "missing", "csv")):
+            with self.assertRaises(TaskError):
+                tasks.site_file(*args)
+
+    def test_a_task_view_is_json_and_names_its_state(self):
+        tasks = self.manager()
+        task = self.wait(tasks.create({"action": "list", "orchestrator": "lab"}), "done", "failed")
+        view = json.loads(dumps(task.view()))
+        self.assertEqual((view["action"], view["state"], view["orchestrator"], view["result"]["status"]), ("list", "done", "lab", "done"))
+        self.assertIn("h1", task.full_result()["text"])
+
+
+if __name__ == "__main__":
+    unittest.main()
