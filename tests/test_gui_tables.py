@@ -120,6 +120,20 @@ class TableTests(unittest.TestCase):
         self.assertEqual((result["size"], result["page"], result["sort"], result["rows"][0]["name"]), (50, 3, "name", "row-00100"))
         self.assertEqual(gui_tables.page(rows(3), {"page": "x"})["page"], 1)
 
+    def test_digits_that_are_not_decimal_sort_as_text(self):
+        data = [dict(id=value, _problem=False, _text="") for value in ("\u00b2", "10", "9")]
+        self.assertEqual([row["id"] for row in gui_tables.select(data, {"sort": "id"})[0]], ["9", "10", "\u00b2"])
+
+    def test_a_run_id_the_server_would_refuse_gets_a_line_id_that_opens(self):
+        with tempfile.TemporaryDirectory() as directory:
+            ids = ("run-ok_1", "run-../x", "run-\u00e9", "run-" + "a" * 80)
+            (Path(directory) / "preconfig.jsonl").write_text("".join(json.dumps({"summary": {"run_id": run_id, "rows": []}}) + "\n" for run_id in ids), encoding="utf-8")
+            log = gui_tables.RunLog(Path(directory))
+            listed = sorted(run["run_id"] for run in log.runs()[0])
+            self.assertEqual(listed, ["preconfig-line-2", "preconfig-line-3", "preconfig-line-4", "run-ok_1"])
+            for run_id in listed:
+                self.assertTrue(gui_tables.RUN_ID.match(run_id) and log.find(run_id), run_id)
+
     def test_numbers_and_numeric_text_sort_as_numbers_and_blanks_go_last(self):
         data = [dict(id=value, _problem=False, _text="") for value in ("10", "9", "", "100", None)]
         self.assertEqual([row["id"] for row in gui_tables.select(data, {"sort": "id"})[0]], ["9", "10", "100", "", None])
@@ -148,13 +162,12 @@ class TableTests(unittest.TestCase):
             result = gui_tables.page(runs, {"q": "run-0000000012", "orchestrator": "lab", "sort": "status", "size": "50"}, gui_tables.RUN_FILTERS, "timestamp", True)
             problems = gui_tables.page(runs, {"problems": "1"}, gui_tables.RUN_FILTERS, "timestamp", True)
             queried = time.monotonic() - started
-            started = time.monotonic()
-            log.runs()
-            cached = time.monotonic() - started
+            with mock.patch.object(gui_tables, "_read", wraps=gui_tables._read) as read:
+                self.assertEqual(len(log.runs()[0]), 10000)
+                read.assert_not_called()  # an unchanged log is not read again
         self.assertEqual((len(runs), result["matching"], len(result["rows"]), problems["matching"]), (10000, 50, 50, 200))
         self.assertLess(loaded, 15, "first load of 10,000 runs")
         self.assertLess(queried, 1, "two queries over 10,000 runs")
-        self.assertLess(cached, 1, "an unchanged log is not read again")
 
 
 class RouteTests(ServerCase):
@@ -209,6 +222,22 @@ class RouteTests(ServerCase):
             with self.subTest(path=path):
                 self.assertEqual(self.request("GET", path, cookie=False)[0].status, 401)
                 self.assertEqual(self.request("GET", path, host="evil.example:{}".format(self.port))[0].status, 421)
+
+    def test_secrets_in_a_hand_made_line_never_reach_a_page_or_a_csv(self):
+        row = {"row": 1, "item": "api_key=SEKRET", "scope": "s.yml", "outcome": "FAILED", "reason": "refused: Authorization: Bearer abc123", "password": "plain"}
+        summary = {"run_id": "run-secret", "timestamp": "2026-10-30T11:00:00+00:00", "workflow": "preconfig upload", "status": "FAILED", "password": "plain",
+                   "command": "edgeconnect-preconfig upload x api_key=SEKRET", "blocking_issues": ["Authorization: Bearer abc123"], "rows": [row]}
+        with (self.reports / "preconfig.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({"summary": summary}) + "\n")
+        for path in ("/api/runs/run-secret", "/api/runs/run-secret/rows.csv", "/api/runs?q=run-secret", "/api/runs.csv?q=run-secret"):
+            with self.subTest(path=path):
+                response, text = self.request("GET", path)
+                self.assertEqual(response.status, 200)
+                self.assertIn("<REDACTED>" if "rows.csv" in path else "run-secret", text)  # the row CSV names no run
+                for leak in ("plain", "SEKRET", "abc123"):
+                    self.assertNotIn(leak, text)
+        detail = json.loads(self.request("GET", "/api/runs/run-secret")[1])
+        self.assertEqual((detail["run"]["password"], detail["rows"]["rows"][0]["item"]), ("<REDACTED>", "api_key=<REDACTED>"))
 
     def test_with_the_run_log_off_the_table_says_so(self):
         self.server.runlog = gui_tables.RunLog(None)

@@ -13,7 +13,6 @@ import hmac
 import json
 import os
 import platform
-import re
 import secrets
 import shutil
 import subprocess
@@ -34,7 +33,6 @@ from gui_tasks import FINAL, TaskError, TaskManager, dumps
 STATIC = Path(__file__).with_name("static")
 MAX_BODY = 5 * 1024 * 1024
 _TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".txt": "text/plain; charset=utf-8"}
-_RUN_ID = re.compile(r"^[\w-]{1,80}$", re.ASCII)  # run-<hex> or <log>-line-<n>: also safe in a file name and a header
 _HEADERS = {
     "Content-Security-Policy": "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     "X-Content-Type-Options": "nosniff",
@@ -176,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
             folder = str(log.directory) if log.directory is not None else None
             return self._json(200, dict(gui_tables.page(runs, query, gui_tables.RUN_FILTERS, "timestamp", True), folder=folder, unreadable=unreadable))
         parts = path.split("/")
-        if len(parts) not in (4, 5) or parts[2] != "runs" or not _RUN_ID.match(parts[3]) or (len(parts) == 5 and parts[4] != "rows.csv"):
+        if len(parts) not in (4, 5) or parts[2] != "runs" or not gui_tables.RUN_ID.match(parts[3]) or (len(parts) == 5 and parts[4] != "rows.csv"):
             raise TaskError("not found", 404)
         summary = log.find(parts[3])
         if summary is None:

@@ -319,7 +319,9 @@ export; a run's page with its per-row table. `gui_tables.py` copied.
 Done when: 10,000 logged runs stay responsive and a run's row CSV matches the run log.
 Built as: `toolkit/gui/gui_tables.py`, automation's of 7af5e9d without its inventory, change and issue tables: `select` / `page` (search,
 exact-match filters, problems only, sort with blanks last, page sizes 25 to 200, facets), `RunLog` over `reports/preconfig.jsonl` only
-(re-read when its size or time changes; a line that is not a record with a `summary` is counted as unreadable), `run_detail`, and
+(re-read when its size or time changes; a line that is not a record with a `summary` is counted as unreadable; every line is
+redacted again on load with `runlog.redact`, after an `Authorization: Bearer|Basic` token is masked, which that redactor misses;
+a run ID outside `[A-Za-z0-9_-]` gets a `<log>-line-<n>` ID), `run_detail`, and
 automation's formula-safe `csv_text`. Routes, GET only behind the session cookie: `/api/runs[.csv]` and `/api/runs/<run_id>[/rows.csv]`,
 the run ID matched against `[A-Za-z0-9_-]{1,80}` before the log is searched for it (it never names a file). The screen is
 `static/tables.js` (automation's `PagedTable`, unchanged) and `static/runs.js` (the runs table, the run page with its facts, notes,

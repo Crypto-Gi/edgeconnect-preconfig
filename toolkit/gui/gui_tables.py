@@ -5,15 +5,18 @@ only ever holds one page (the run log can have tens of thousands of runs). The r
 `report summarize --rows-csv` writes. Not copied: the inventory, change and issue tables of automation's own screens.
 Changed: the runs come from preconfig's own log, reports/preconfig.jsonl (runlog.py), whose every line already holds
 automation's summary with its rows, so automation's rebuilding of older report shapes (reporting._summary_of) is not needed;
-a line that is not such a record is counted as unreadable, as a damaged line is.
+a line that is not such a record is counted as unreadable, as a damaged line is. Every line is redacted again on load with the
+CLI's own run-log redactor, so a line edited or written by hand shows no key=value secret either.
 """
 import csv
 import io
 import json
+import re
 import threading
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
+import runlog
 from runlog import LOG_NAME
 
 PAGE_SIZES = (25, 50, 100, 200)
@@ -24,6 +27,10 @@ RUN_FILTERS = ("orchestrator", "workflow", "status", "source")
 _PROBLEMS = ("BLOCKED", "FAILED", "SKIPPED", "NOT WRITTEN", "INVALID", "UNVERIFIED")
 ROW_FIELDS = ("row", "item", "scope", "outcome", "reason")
 _FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+RUN_ID = re.compile(r"^[\w-]{1,80}$", re.ASCII)  # what the server accepts in /api/runs/<run_id>; also safe in a file name and a header
+_NO_CELLS = runlog.Masker({})  # a log line read back has no CSV cells to mask: only the key and key=value redaction applies
+# runlog's key=value pattern takes only the first word after "Authorization:", so the scheme's token is masked first
+_SCHEME_TOKEN = re.compile(r"(?i)(authorization\s*[:=]\s*)(?:bearer|basic)\s+[^\s,;\"\\]+")
 
 
 def spreadsheet_safe(value: Any) -> Any:
@@ -91,7 +98,7 @@ def _integer(value: Any, default: int) -> int:
 
 def _sort_key(value: Any) -> Tuple[int, Any]:
     """Numbers (and numeric text such as row numbers) in number order, before text in case-insensitive order."""
-    if isinstance(value, str) and value.isdigit():
+    if isinstance(value, str) and value.isdecimal():  # isdigit() also takes "²", which int() refuses
         return (0, int(value))
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return (1, str(value).lower())
@@ -179,9 +186,10 @@ def _read(path: Path) -> Tuple[List[Dict[str, Any]], int]:
         if not line.strip():
             continue
         try:
-            summary = dict(json.loads(line)["summary"])
-            if not str(summary.get("run_id", "")).startswith("run-"):
-                summary["run_id"] = "{}-line-{}".format(path.stem, number)  # give a line without a run ID one a link can name
+            summary = runlog.redact(dict(json.loads(_SCHEME_TOKEN.sub(r"\1<REDACTED>", line))["summary"]), _NO_CELLS)
+            run_id = str(summary.get("run_id", ""))
+            if not (run_id.startswith("run-") and RUN_ID.match(run_id)):
+                summary["run_id"] = "{}-line-{}".format(path.stem, number)  # give a line without a usable run ID one a link can name
             summary.setdefault("source", "not recorded")
             summary["_row"] = run_row(summary)
             summary["_outcomes"] = [outcome_row(row) for row in summary.get("rows") or []]
