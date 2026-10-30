@@ -249,6 +249,9 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
     dep = cap.data("deployment")
     dep = dep if isinstance(dep, dict) else {}
     if not app.get("hostName") or not dep.get("sysConfig") or not isinstance(dep["sysConfig"], dict):
+        if (getattr(cap, "run", None) or {}).get("reachable") is False:  # run.json knows: no need to guess
+            raise NothingToConvert("capture {!r} lacks appliance or deployment.sysConfig data: it was captured while the appliance was unreachable and the Orchestrator "
+                                   "had no cached copy; capture it again while it is reachable".format(str(cap.folder)))
         raise NothingToConvert("capture {!r} lacks appliance or deployment.sysConfig data (appliance may be offline with no Orchestrator cache)".format(str(cap.folder)))
     ctx = Ctx(cap, ledger, target_ecos)
     # every read below: a read that failed (failed_read) or has another shape is ledgered not-readable and nothing is written from it
