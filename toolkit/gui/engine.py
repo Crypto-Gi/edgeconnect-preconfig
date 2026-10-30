@@ -157,12 +157,16 @@ def _main(argv: List[str]) -> int:
         return 1
 
 
-def run(argv: Sequence[str], approver: Optional[Callable[[str], Any]] = None, **context: Any) -> Result:
-    """Run one CLI command line in this thread and return its Result. context: RunContext fields (dotenv, env, work_dir, out_dir...)."""
+def run(argv: Sequence[str], approver: Optional[Callable[[str], Any]] = None, on_line: Optional[Callable[[str], None]] = None,
+        **context: Any) -> Result:
+    """Run one CLI command line in this thread and return its Result. context: RunContext fields (dotenv, env, work_dir, out_dir...).
+    on_line gets each printed line as it comes, secret values replaced as in Result.text."""
     argv = [str(a) for a in argv]
     # as automation's _refuse: without a GUI approval run_batch is refused, never left to upload unapproved, even past the gates
     run_context = common.RunContext(recorder=common.Recorder(), approver=approver or _refuse, source="gui", **context)
-    out = io.StringIO()
+    found = _secret_forms(argv)  # read before the run, from the input files the command line names
+    held = on_line is not None and _held(argv, found)
+    out = _Lines(_scrub(found), on_line) if on_line is not None and not held else io.StringIO()
     with common.running(run_context), common.captured_output(out), _no_stdin():
         refusal = _refusal(argv, approver)
         if refusal:
@@ -174,7 +178,12 @@ def run(argv: Sequence[str], approver: Optional[Callable[[str], Any]] = None, **
             withheld = r["detail"].split(":")[0] + ": the parser's message is not shown, as it may quote a secret"
             text, r["detail"] = text.replace(r["detail"], withheld), withheld
     text, outputs = _each(text, _no_snippet), _each(outputs, _no_snippet)
-    scrub = _scrubber(argv)
+    scrub = _scrub(found)
+    if isinstance(out, _Lines):
+        out.end()
+    elif held:
+        for line in scrub(text).splitlines():
+            on_line(line)
     rows = [_row(r) for r in outputs if r["kind"] in ("row", "file")]
     status = "done" if code == 0 else "rejected" if refusal or (code == 2 and any(l.startswith(NOT_APPROVED) for l in text.splitlines())) else "failed"
     return Result(
@@ -213,10 +222,10 @@ def _approval(argv: Sequence[str], outputs: Sequence[Mapping[str, Any]]) -> Opti
 
 # ---------------------------------------------------------------- secrets in text (BUILD_PLAN "Engineering rules")
 
-def _scrubber(argv: Sequence[str]) -> Callable[[Any], Any]:
-    """Replace every literal secret value of the run's inputs, in strings at any depth: a CSV secret column's cells (from
-    columns.json, or secret-like headers without one) by <SECRET:column>, a secret value of a YAML file the argv names by its
-    <SECRET:path>. Each in every form the CLI can print it in, and its start where the CLI cut a message short."""
+def _secret_forms(argv: Sequence[str]) -> Dict[str, str]:
+    """Every literal secret value of the run's inputs, in each form the CLI can print it in, with its placeholder: a CSV secret
+    column's cells (from columns.json, or secret-like headers without one) by <SECRET:column>, a secret value of a YAML file
+    the argv names by its <SECRET:path>."""
     try:
         line = _line(argv) if argv else None
     except _LineError:
@@ -225,6 +234,11 @@ def _scrubber(argv: Sequence[str]) -> Callable[[Any], Any]:
     for value, placeholder in (_csv_secrets(argv, line) + _yaml_secrets(line)) if line else []:
         for form in _forms(value):
             found.setdefault(form, placeholder)
+    return found
+
+
+def _scrub(found: Mapping[str, str]) -> Callable[[Any], Any]:
+    """Replace each secret form in strings at any depth, and its start where the CLI cut a message short."""
     if not found:
         return lambda value: value
     # The CLI cuts messages ([:1000] /validate errors, [:300], [:200]); a cut piece ends a line or a "; " list item (PyYAML's
@@ -339,6 +353,58 @@ def _pairs(value: Any, redacted: Any) -> Iterator[Tuple[str, str]]:
         yield value, redacted
 
 
+# ---------------------------------------------------------------- printed lines as they come (BUILD_PLAN step 5)
+
+def _held(argv: Sequence[str], found: Mapping[str, str]) -> bool:
+    """Lines that can be made safe only once the run has ended are handed over then: a --yaml run (the parser's message for a file
+    that does not parse is withheld by its recorder result, made after its line) and a secret that spans lines."""
+    try:
+        line = _line(argv) if argv else None
+    except _LineError:
+        return True
+    return line is None or line.yaml is not None or any("\n" in form or "\r" in form for form in found)
+
+
+_MARK = re.compile(r'(in "[^"\n]*", line \d+, column \d+):$')
+_CARET = re.compile(r"[ \t]*\^")
+
+
+class _Lines(io.StringIO):
+    """The run's capture, also handing each finished line to on_line: the PyYAML snippet withheld as _no_snippet does, then scrubbed."""
+
+    def __init__(self, scrub: Callable[[str], str], on_line: Callable[[str], None]) -> None:
+        super().__init__()
+        self._scrub, self._on_line, self._open, self._after_mark = scrub, on_line, "", 0
+
+    def write(self, text: str) -> int:
+        written = super().write(text)
+        *lines, self._open = (self._open + text).split("\n")
+        for line in lines:
+            self._line(line)
+        return written
+
+    def end(self) -> None:
+        if self._open:
+            self._line(self._open)
+        self._open = ""
+
+    def _line(self, line: str) -> None:
+        if self._after_mark == 1:  # the source line PyYAML quotes
+            self._after_mark = 2
+            return
+        if self._after_mark == 2:  # and its ^ under it
+            self._after_mark = 0
+            caret = _CARET.match(line)
+            if caret:
+                line = line[caret.end():]
+                if not line:
+                    return
+        mark = _MARK.search(line)
+        if mark:
+            line, self._after_mark = line[:mark.start()] + mark.group(1) + " (the source snippet is withheld: it may hold a secret)", 1
+        self._on_line(self._scrub(line))
+
+
 # ---------------------------------------------------------------- one helper per action; paths are made absolute here
 
 def _abs(path: Any) -> str:
@@ -359,9 +425,11 @@ def build(orchestrator: str, appliance: str, out: Any = None, validate_on: Optio
                + _opt("--target-release", target_release) + _opt("--target-ecos", target_ecos), **context)
 
 
-def variables(folder: Any, pick: str, settings: Sequence[str] = (), name: Optional[str] = None, yes: bool = False, **context: Any) -> Result:
-    """--pick is always given, so no tick list or question is shown (BUILD_PLAN: no hidden prompts)."""
-    return run(["variables", _abs(folder), "--pick", pick] + _opt("--set", ",".join(settings) or None) + _opt("--name", name) + (["--yes"] if yes else []), **context)
+def variables(folder: Any, pick: str, settings: Sequence[str] = (), name: Optional[str] = None, yes: bool = False,
+              fixed: Sequence[str] = (), dry_run: bool = False, **context: Any) -> Result:
+    """--pick is always given, so no tick list or question is shown (BUILD_PLAN: no hidden prompts); dry_run is the preview."""
+    return run(["variables", _abs(folder), "--pick", pick] + _opt("--set", ",".join(settings) or None) + _opt("--fix", ",".join(fixed) or None)
+               + _opt("--name", name) + (["--yes"] if yes else []) + (["--dry-run"] if dry_run else []), **context)
 
 
 def validate(folder: Any, csv_path: Any, orchestrator: Optional[str] = None, **context: Any) -> Result:
