@@ -114,7 +114,7 @@ def _refusal(argv: Sequence[str], approver: Optional[Callable[..., Any]]) -> Opt
     except _LineError as error:
         return "the GUI could not read this command line ({})".format(error)
     if line is None or not _built_here(argv, line):  # every other verb or stage reads inputs the secret scrub does not know
-        return ("the GUI runs only the command lines it builds (list, build, variables, validate FOLDER --csv, upload FOLDER --csv, "
+        return ("the GUI runs only the command lines it builds (list, preconfigs [--show], build, variables, validate FOLDER --csv, upload FOLDER --csv, "
                 "upload --template --csv, render --template --csv, upload or render --site-dir --csv --out, validate --yaml, upload --yaml); for existing YAML files use "
                 "validate --yaml or upload --yaml, which parse each file first")
     if argv[0] != "upload":
@@ -130,10 +130,12 @@ def _refusal(argv: Sequence[str], approver: Optional[Callable[..., Any]]) -> Opt
 
 
 def _built_here(argv: Sequence[str], line: argparse.Namespace) -> bool:
-    """An allowlist: the shapes of the helpers below. compare and preconfigs join it with their helpers (R6; R7 in step 10)."""
+    """An allowlist: the shapes of the helpers below. compare joins it with its helper (R6)."""
     verb, stage = argv[0], len(argv) > 1 and argv[1].startswith("-")  # cli.main: validate/upload with an option first run the stage
     if verb in ("list", "build", "variables"):
         return True
+    if verb == "preconfigs":  # exactly what preconfigs() builds: GET only, and the CLI redacts what it prints
+        return argv[1:2] == ["--orchestrator"] and (len(argv) == 3 or (len(argv) == 5 and argv[3] == "--show"))
     # a saved site folder with --out: what it writes goes to the run's own folder, never into the build folder
     site_out = line.site_dir is not None and line.out is not None
     if verb == "render":
@@ -425,7 +427,15 @@ def _opt(flag: str, value: Any) -> List[str]:
 
 
 def list_appliances(orchestrator: str, search: Optional[str] = None, **context: Any) -> Result:
+    """Each appliance list prints is an output {"kind": "appliance", hostname, nepk, model, ecos, site, reachable} (R8)."""
     return run(["list", "--orchestrator", orchestrator] + _opt("--search", search), **context)
+
+
+def preconfigs(orchestrator: str, show: Optional[str] = None, **context: Any) -> Result:
+    """The preconfigs on the Orchestrator (outputs of kind "preconfig", never their configData), or with show (a name or id) one
+    as YAML with its secrets redacted by the CLI (kind "preconfig-yaml"). A YAML that does not parse ends failed, the CLI's
+    one line naming where it broke, never its text. GET only."""
+    return run(["preconfigs", "--orchestrator", orchestrator] + _opt("--show", show), **context)
 
 
 def build(orchestrator: str, appliance: str, out: Any = None, validate_on: Optional[str] = None, target_release: Optional[str] = None,
@@ -477,6 +487,5 @@ def render_site(site_dir: Any, csv_path: Any, out: Any, validate_on: Optional[st
                + (["--substitute"] if substitute else []), **context)
 
 
-# shortcut: compare and preconfigs get their helpers, and their place in _built_here, with their CLI additions (R6: compare
-# --dry-run/--set/--fix/--captures; R7: preconfigs --orchestrator N [--show NAME], merged on gui, its helper in step 10); until
-# then run() refuses them.
+# shortcut: compare gets its helper, and its place in _built_here, with its CLI addition (R6: compare --dry-run/--set/--fix/--captures);
+# until then run() refuses it.

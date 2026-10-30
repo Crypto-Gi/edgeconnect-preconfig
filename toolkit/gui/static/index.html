@@ -82,6 +82,51 @@
       </section>
     </section>
 
+    <section id="view-inventory" class="view" aria-labelledby="inv-title" hidden>
+      <a class="back" href="#/">← All tasks</a>
+      <div class="eyebrow" id="inv-orch"></div>
+      <h1 id="inv-title">Inventory</h1>
+      <p class="lede">What this Orchestrator has now. Reading changes nothing: every request to it is a GET.</p>
+      <section class="panel" aria-labelledby="inv-apps-title">
+        <div class="panel-head">
+          <h2 id="inv-apps-title">Appliances</h2>
+          <button class="btn" id="inv-apps-refresh" type="button">Read again</button>
+        </div>
+        <form class="toolbar" id="inv-search-form" role="search">
+          <label for="inv-search" class="sr-only">Search the appliances</label>
+          <input type="search" id="inv-search" placeholder="Hostname, nePk, model or site" autocomplete="off" spellcheck="false">
+          <button class="btn" type="submit">Search</button>
+        </form>
+        <p class="muted" id="inv-apps-text" role="status"></p>
+        <div class="table-wrap"><table>
+          <caption class="sr-only">Appliances on this Orchestrator</caption>
+          <thead><tr id="inv-apps-head"></tr></thead>
+          <tbody id="inv-apps"></tbody>
+        </table></div>
+        <div class="pager">
+          <span class="count" id="inv-apps-count"></span>
+          <span class="btns"><button class="btn" id="inv-apps-prev" type="button">Previous</button><button class="btn" id="inv-apps-next" type="button">Next</button></span>
+        </div>
+      </section>
+      <section class="panel" aria-labelledby="inv-pcs-title">
+        <div class="panel-head">
+          <h2 id="inv-pcs-title">Preconfigs</h2>
+          <button class="btn" id="inv-pcs-refresh" type="button">Read again</button>
+        </div>
+        <p class="muted" id="inv-pcs-text" role="status"></p>
+        <div class="table-wrap"><table>
+          <caption class="sr-only">Preconfigs on this Orchestrator; open one to see its YAML</caption>
+          <thead><tr><th scope="col">Name</th><th scope="col">Serial</th><th scope="col">Tag</th><th scope="col">Last change</th><th scope="col">Id</th></tr></thead>
+          <tbody id="inv-pcs"></tbody>
+        </table></div>
+      </section>
+      <section class="panel" id="inv-yaml-panel" aria-labelledby="inv-yaml-title" hidden>
+        <h2 id="inv-yaml-title" tabindex="-1"></h2>
+        <p class="muted" id="inv-yaml-text" role="status"></p>
+        <div class="table-wrap"><pre class="mono" id="inv-yaml" tabindex="0" aria-label="The preconfig's YAML, read only"></pre></div>
+      </section>
+    </section>
+
     <section id="view-runs" class="view" aria-labelledby="runs-title" hidden>
       <a class="back" href="#/">← All tasks</a>
       <div class="eyebrow">Run log</div>
@@ -128,5 +173,6 @@
 <script src="runs.js"></script>
 <script src="pick.js"></script>
 <script src="build.js"></script>
+<script src="inventory.js"></script>
 </body>
 </html>
