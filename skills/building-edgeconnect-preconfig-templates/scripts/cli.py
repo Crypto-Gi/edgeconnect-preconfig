@@ -153,9 +153,11 @@ def cmd_preconfigs(argv: List[str]) -> int:
         print(table(["Name", "Serial", "Tag", "Last change", "Id"], [[cell(v) for v in r.values()] for r in rows]) if rows else "no preconfigs")
         print("{} preconfig(s) on {}; print one with: {} preconfigs --orchestrator {} --show NAME|ID".format(len(rows), a.orchestrator, PROG, a.orchestrator))
         return 0
-    hits = [i for i in items if a.show in (str(i.get("id")), i.get("name"))]
-    if len(hits) != 1:
-        raise Fail("preconfig {!r}: {} matches by name or id on {}".format(a.show, len(hits), a.orchestrator))
+    hits = [i for i in items if str(i.get("id")) == a.show] or [i for i in items if i.get("name") == a.show]  # an id is unique, a name may not be
+    if len(hits) > 1:
+        raise Fail("preconfig {!r}: {} preconfigs have that name on {} (ids {}): give the id".format(a.show, len(hits), a.orchestrator, ", ".join(str(i.get("id")) for i in hits)))
+    if not hits:
+        raise Fail("preconfig {!r}: 0 matches by name or id on {}".format(a.show, a.orchestrator))
     item = hits[0]
     label = "preconfig {} (id {})".format(item.get("name"), item.get("id"))
     if not item.get("configData"):
@@ -172,7 +174,10 @@ def cmd_preconfigs(argv: List[str]) -> int:
     if not isinstance(doc, dict):
         raise Fail("{}: its YAML is not a mapping of sections, so it is not shown".format(label))
     import yaml
-    shown = yaml.safe_dump(redact_secrets(doc, numbers=True)[0], sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)
+    try:
+        shown = yaml.safe_dump(redact_secrets(doc, strict=True)[0], sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)
+    except RecursionError:  # an alias inside itself (a: &a [*a])
+        raise Fail("{}: its YAML refers to itself, so it is not shown".format(label))
     record("preconfig-yaml", name=item.get("name"), id=item.get("id"), text=shown)
     print("# {} on {}, secrets redacted as <SECRET:path>\n{}".format(label, a.orchestrator, shown), end="")
     return 0

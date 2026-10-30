@@ -603,22 +603,23 @@ def find_default_template(release: str) -> Tuple[Optional[Path], str]:
     return None, "no default templates in {}".format(DEFAULT_TEMPLATES_DIR)
 
 
-def redact_secrets(value: Any, path: str = "$", numbers: bool = False) -> Tuple[Any, List[str]]:
+def redact_secrets(value: Any, path: str = "$", strict: bool = False) -> Tuple[Any, List[str]]:
     """Return (copy with secrets replaced by <SECRET:path>, list of redacted paths).
 
-    numbers: a number under a secret key is a secret too (YAML reads an unquoted `presharedKey: 123456` as one); a capture keeps
-    its numeric fields as they are."""
+    strict (for YAML, which reads `presharedKey: 123456` as a number and `password: 2024-01-15` as a date): every value under a
+    secret key but null is one placeholder, a mapping or list included, and so is a value of a YAML tag that hides a mapping or
+    text from the walk (!!set, !!omap, !!pairs, !!binary). A capture's JSON (strict off) keeps its non-text values as they are."""
     found: List[str] = []
 
     def walk(item: Any, where: str, secret_key: bool) -> Any:
+        if strict and item is not None and (secret_key or isinstance(item, (set, frozenset, tuple, bytes))):
+            found.append(where)
+            return "<SECRET:{}>".format(where)
         if isinstance(item, dict):
             server = any(s in item for s in _SERVER_SIBLINGS)  # e.g. NAC/RADIUS server: its "key" is a shared secret
             return {k: walk(v, "{}.{}".format(where, k), bool(_SECRET_KEY.search(str(k))) or (k == "key" and server)) for k, v in item.items()}
         if isinstance(item, list):
             return [walk(v, "{}[{}]".format(where, i), secret_key) for i, v in enumerate(item)]
-        if numbers and secret_key and isinstance(item, (int, float)) and not isinstance(item, bool):
-            found.append(where)
-            return "<SECRET:{}>".format(where)
         if isinstance(item, str) and item:
             if secret_key:
                 found.append(where)
