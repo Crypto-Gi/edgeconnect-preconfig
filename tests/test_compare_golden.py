@@ -27,6 +27,7 @@ RELEASE = "9.7.1.42046"
 SCENARIOS = {  # name -> partner captures (typed as their hostnames), and the answers typed when it is not --yes
     "identical-sites": {"partners": ["identical"]},
     "scalar-differences": {"partners": ["scalars"]},
+    "scalar-unticked": {"partners": ["scalars"], "answers": ["edit", "27", "", "y"]},  # 27: the route metric that differs; a warning names branch-b
     "layout-differs-column": {"partners": ["zone"]},
     "layout-differs-fixed": {"partners": ["zone"], "answers": ["edit", "6", "", "y"]},  # 6: deploymentInterfaces[lan0].zone in the tick list
     "partner-only-route": {"partners": ["partner-only"]},

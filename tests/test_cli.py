@@ -460,6 +460,22 @@ def renamed(host="br-2", change=None):
     return other
 
 
+class CompareUntick(unittest.TestCase):
+    def test_every_unticked_setting_that_differs_warns_naming_only_those_sites(self):
+        import yaml
+        from generate import Builder
+        asn = renamed("br-3", lambda o: o["bgpSystemConfig"].update(asn=65002))
+        base = yaml.safe_load(yaml.safe_dump(REFERENCE))  # what cmd_compare reads back, so the numbers match its list
+        probe = Builder()
+        probe.find_secrets(base)
+        rows = [{k: cli.cell(v) for k, v in r.items()} for r in classify(base, probe.secret_paths, None, [renamed(), asn])]
+        number = next(r["n"] for r in cli.Picker(base, rows, {}).free if r["path"] == "bgpSystemConfig.asn")
+        code, out, built = run_compare(REFERENCE, [renamed(), asn], argv=("--name", "br"), answers=("edit", str(number), "", "y"))
+        self.assertEqual(built["sheet"]["bgpSystemConfig.asn"]["decision"], "fixed")
+        self.assertIn("Warning: bgpSystemConfig.asn stays fixed: br-3 gets br-1's value 65001", out)  # br-2 has 65001 too: not named
+        self.assertEqual(sum(line.startswith("Warning:") for line in out.splitlines()), 1)
+
+
 class CompareShape(unittest.TestCase):
     """A site with settings the base lacks, or without the base's settings, gets no sites.csv row and a Note naming it."""
     def rows_and_notes(self, *others):

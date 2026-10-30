@@ -782,9 +782,12 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         if answer in ("e", "edit") and not interact(picker, "all", read):
             print("nothing written")
             return 1
-    for r in picker.free:
-        if r["reason"] == LAYOUT_DIFFERS and not picker.on[r["path"]] and kept:
-            print("Warning: {} stays fixed: {} gets {}'s value {}".format(r["label"], ", ".join(shown), base_host, r["value"] or '""'))
+    label = {r["path"]: r["label"] for r in picker.rows}
+    for r in picker.sheet(reference):  # a fixed setting gives every row the base's value: say so where a site has another
+        differs = [n for n, _, s in kept if r["decision"] == "fixed" and r["path"] in mine and cell(s.get(r["path"])) != cell(mine[r["path"]])]
+        if differs:
+            print("Warning: {} stays fixed: {} {} {}'s value {}".format(label[r["path"]], ", ".join(differs), "gets" if len(differs) == 1 else "get",
+                                                                         base_host, cell(mine[r["path"]]) or '""'))
     name = finish(picker, reference, info["site_type"], a.name, a.yes, read)
     if not name:
         return 1
