@@ -736,9 +736,11 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
             other = prune(build(cap, [], info.get("target_ecos")), allowed, [])
         except NothingToConvert:
             raise Fail("{}: no appliance or deployment data could be read (offline with no Orchestrator cache?), so it cannot be compared".format(site))
-        except Exception as error:  # a damaged capture: one line naming the site as typed, not a traceback
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:  # a damaged capture: one line naming the site as typed, not a traceback
             detail = Path(error.filename).name if isinstance(error, OSError) and error.filename else str(error)[:200]
             raise Fail("{}: its capture could not be read ({}: {}); run compare again to read it afresh".format(site, type(error).__name__, detail))
+        except Exception as error:  # anything else is a bug in the toolkit, not in the capture
+            raise Fail("{}: toolkit error {}: {} (please report it)".format(site, type(error).__name__, str(error)[:200]))
         if base_ne and (cap.run.get("appliance") or {}).get("nePk") == base_ne:
             refuse_base(site)
         others.append(other)
