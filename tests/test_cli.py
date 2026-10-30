@@ -377,6 +377,11 @@ class CompareLayout(unittest.TestCase):
             self.assertEqual(len(err.splitlines()), 1)
             self.assertNotIn("cap-2026", err)  # the site as typed, not the capture folder
 
+    def test_a_partner_typed_twice_is_refused(self):
+        code, out, built = run_compare(REFERENCE, [], argv=("br-2", "BR-2", "--yes"))
+        self.assertEqual((code, built), (2, None))
+        self.assertIn("error: BR-2 is given twice", out)
+
     def test_the_base_appliance_is_refused_as_its_own_partner(self):
         for typed in ("br-1", "BR-1", "1.NE"):
             code, out, built = run_compare(REFERENCE, [], argv=(typed, "--yes"))

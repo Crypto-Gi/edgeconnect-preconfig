@@ -712,9 +712,11 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
 
     def refuse_base(site: str) -> None:
         raise Fail("{} is the appliance this build was read from: give other sites of the same design".format(site))
-    for site in a.sites:
+    for i, site in enumerate(a.sites):
         if site.lower() in {str(me.get(k) or "").lower() for k in ("hostName", "nePk")}:
             refuse_base(site)
+        if site.lower() in (s.lower() for s in a.sites[:i]):  # two rows with one preconfig_name otherwise
+            raise Fail("{} is given twice: give each other site once".format(site))
     base = a.folder if (a.folder / "build.json").is_file() else a.folder.parent
     from capture import Stop, capture
     from translate import Capture, NothingToConvert, allowed_paths, build, prune
