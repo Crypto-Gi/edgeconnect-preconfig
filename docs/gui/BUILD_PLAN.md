@@ -177,9 +177,9 @@ Inventory (D8)
 ## Who changes what (owner, 30 Oct 05:19Z, D19)
 
 Every change to the CLI or the toolkit scripts (`toolkit/scripts/`, fixes and the additions listed below alike) is made
-separately from the GUI work and lands on `main` first, as its own change with its own tests and review; the GUI work writes
+separately from the GUI work and lands on `gui` first, as its own pull request with its own tests and review; the GUI work writes
 the exact specification of each CLI addition it needs, with the tests that prove it. The GUI pull requests change only the GUI
-itself (`toolkit/gui/`, its tests, CI and docs). A GUI step that needs a CLI addition starts after that addition is on `main`.
+itself (`toolkit/gui/`, its tests, CI and docs). A GUI step that needs a CLI addition starts after that addition is merged into `gui`.
 
 ## What the CLI gains (only additions)
 
@@ -197,7 +197,7 @@ itself (`toolkit/gui/`, its tests, CI and docs). A GUI step that needs a CLI add
 
 Text printed by every existing command stays byte-identical.
 
-## Existing CLI bugs found in the gap review (being fixed as 1.3.3 in PR #8, not merged yet; golden copies are recorded after it merges)
+## Existing CLI bugs found in the gap review (fixed as 1.3.3, PR #8, merged into `gui`; golden copies are recorded in step 1)
 
 1. `validate --yaml` / `upload --yaml` on an Orchestrator not in `EC_VALIDATORS` crash with a traceback instead of the
    one-line refusal: the stage runs as `__main__`, so it raises `__main__.Stop`, which `upload.yaml_main` (catching
@@ -223,7 +223,7 @@ How (from the gap review): the run context is a `contextvars` value, because sta
 the GUI installs one thread-routing `sys.stdout`/`sys.stderr` so each run's printed lines go to that run only (today's
 `quiet()` swaps the whole process's stdout); module values read at import (`VALIDATORS`, `WORK_DIR`,
 `translate.IGNORE_OWNERSHIP`) and current-folder defaults are read from the context; `sys.stdin` is an empty stream in the
-GUI, so a prompt fails at once instead of hanging. Once 1.3.3 (PR #8) is merged, `run_stage` imports the stage module and calls its `main(argv)`, so stage runs no longer touch
+GUI, so a prompt fails at once instead of hanging. Since 1.3.3 (PR #8) `run_stage` imports the stage module and calls its `main(argv)`, so stage runs no longer touch
 `sys.argv` or `sys.modules['__main__']`; stage modules are imported once per process, so their import-time state (`VALIDATORS`
 from `.env`) must move into the run context like the verbs'.
 Golden outputs mask timestamps, absolute paths and the toolkit commit.
