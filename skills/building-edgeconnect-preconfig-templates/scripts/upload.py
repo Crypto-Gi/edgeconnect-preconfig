@@ -14,6 +14,7 @@ Behavior:
 """
 import argparse
 import base64
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -21,7 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cells import cell_problems, interface_addresses, option_limits, subnet_problems  # noqa: E402
-from common import EdgeConnectError, Problem, client_for, normalize_serial, output_root, parse_yaml, problem_data, record, resolve_output_filename, utc_stamp, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
+from common import EdgeConnectError, Problem, client_for, run_context, normalize_serial, output_root, parse_yaml, problem_data, record, resolve_output_filename, utc_stamp, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 from render import flow_through, read_rows, render_row  # noqa: E402
 from validate import Stop, validate_text  # noqa: E402
 
@@ -49,6 +50,37 @@ def existing_names_serials(client: Any) -> Tuple[set, set]:
             except ValueError:
                 serials.add(str(p.get("serialNum")).strip().upper())
     return names, serials
+
+
+PLACEHOLDER_SERIAL = "00-00-00-00-00-00"  # what cloud Orchestrators report as their serial
+
+
+class Refused(Exception):
+    """The run's approver (cli-requests R2) did not approve the batch: nothing was sent."""
+
+
+def orchestrator_identity(client: Any) -> Dict[str, Optional[str]]:
+    """Who this run talks to, for the approval fingerprint: the Orchestrator's serial (the placeholder counts as none) and base URL."""
+    try:
+        info = client.get("/gmsserver/info")
+    except EdgeConnectError:  # the fingerprint still names the URL; a run that reads the serial gets another one, so it is refused, never sent
+        info = None
+    serial = str(info.get("serialNumber") or "").strip() if isinstance(info, dict) else ""
+    return {"serial": None if serial in ("", PLACEHOLDER_SERIAL) else serial, "base_url": getattr(getattr(client, "config", None), "base_url", None)}
+
+
+def batch_fingerprint(template_path: Path, csv_path: Path, columns_path: Optional[Path], ready: List[Dict[str, Any]], identity: Dict[str, Any]) -> str:
+    """SHA-256 of a canonical JSON of what an approval covers: the input files' bytes, each ready row and the Orchestrator."""
+    def digest(data: bytes) -> str:
+        return hashlib.sha256(data).hexdigest()
+    doc = {
+        "template": digest(template_path.read_bytes()),
+        "csv": digest(csv_path.read_bytes()),
+        "columns": digest(columns_path.read_bytes()) if columns_path and columns_path.is_file() else None,
+        "rows": [{"preconfig_name": i["entry"]["preconfig_name"], "serial": i["entry"]["serial_number"], "yaml_sha256": digest(i["text"].encode("utf-8"))} for i in ready],
+        "orchestrator": identity,
+    }
+    return digest(json.dumps(doc, sort_keys=True, separators=(",", ":")).encode("utf-8"))
 
 
 def upload_ready(client: Any, ready_to_upload: List[Dict[str, Any]]) -> int:
@@ -99,6 +131,7 @@ def run_batch(
     columns: Optional[Dict[str, Dict[str, Any]]] = None,
     approve: bool = False,
     release: Optional[str] = None,
+    columns_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     limits = option_limits(release)
     seen_addresses: Dict[str, int] = {}
@@ -218,7 +251,17 @@ def run_batch(
             ready_to_upload.append({"entry": entry, "text": text})
             print("ROW {:2d} | VALID    | {:<24} | .yml written immediately -> {}".format(idx, pcfg_name, yml_path), flush=True)
 
-        uploaded_count = upload_ready(client, ready_to_upload) if approve and ready_to_upload else 0
+        if ready_to_upload:  # recorded with or without --approve, so the GUI can show it and bind its approval to it
+            fingerprint = batch_fingerprint(template_path, csv_path, columns_path, ready_to_upload, orchestrator_identity(client))
+            record("fingerprint", value=fingerprint, rows=len(ready_to_upload))
+        if approve and ready_to_upload:
+            run = run_context()
+            if run and run.approver:
+                try:
+                    run.approver(fingerprint)
+                except Exception as err:
+                    raise Refused(" ".join(str(err).split()) or type(err).__name__) from None
+            uploaded_count = upload_ready(client, ready_to_upload)
     finally:  # recorded also when /validate stops the batch: the rows before it have their .yml written
         for entry in row_results:
             problems = problems_of.get(entry["row"], []) + ([entry["detail"]] if entry["status"] == "upload-failed" else [])
@@ -380,6 +423,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         columns = meta.get("columns")
         release = meta.get("release")
         out_dir = args.out or site_dir
+        columns_path = site_dir / "columns.json"
     else:
         if not args.template:
             parser.error("provide --site-dir or --template")
@@ -388,14 +432,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         meta = json.loads(args.columns.read_text(encoding="utf-8")) if args.columns and args.columns.exists() else {}
         columns, release = meta.get("columns"), meta.get("release")
         out_dir = args.out or (output_root() / template_path.stem)
+        columns_path = args.columns
 
     if not csv_path:
         parser.error("--csv is required: the CSV of sites to upload (pass example.csv explicitly only to upload the source appliance's own values)")
     client = client_for(args.orchestrator)
     try:
-        report = run_batch(template_path, csv_path, out_dir, client, columns, approve=args.approve, release=release)
+        report = run_batch(template_path, csv_path, out_dir, client, columns, approve=args.approve, release=release, columns_path=columns_path)
     except Stop as stop:  # 401/403/network on /validate: every row would fail the same way
         print("STOPPED: {}".format(stop), file=sys.stderr)
+        return 2
+    except Refused as refused:
+        print("NOT APPROVED, nothing uploaded: {}".format(refused), file=sys.stderr)
         return 2
     s = report["summary"]
     print(
