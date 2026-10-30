@@ -302,6 +302,20 @@ class DryRunThenSave(Fixture):
             self.assertEqual(set(next(csv.reader(handle))) - {"preconfig_name", "serial_number", "tag", "autoApply"}, set(dry["columns"]))
 
 
+    def test_the_run_log_is_skipped_for_what_argparse_parsed_as_a_dry_run(self):
+        self.assertEqual(self.run_cli(["build", "--orchestrator", "lab", "--appliance", "h1"])[0], 0)
+        folder = str(self.tmp / "preconfig-output" / "h1")
+        reports = self.tmp / "reports"
+        with mock.patch.dict(os.environ, {"EDGECONNECT_REPORT_DIR": str(reports)}):
+            code, text = self.run_cli(["variables", folder, "--pick", "top10", "--dry"])  # argparse takes the abbreviation
+            self.assertEqual(code, 0, text)
+            self.assertFalse(reports.exists())
+            with self.assertRaises(SystemExit):  # compare has no --dry-run (R6): argparse refuses it, and the run is logged as any other
+                self.run_cli(["compare", folder, "h2", "--dry-run"])
+        [line] = (reports / "preconfig.jsonl").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(json.loads(line)["workflow"], "preconfig compare")
+
+
 class ParallelBuilds(unittest.TestCase):
     def test_two_builds_and_a_render_in_parallel_each_get_only_their_own_lines(self):
         tmp = Path(tempfile.mkdtemp())

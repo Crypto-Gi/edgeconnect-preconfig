@@ -254,6 +254,17 @@ class FixAndDryRun(unittest.TestCase):
         rows = by_path(picker["rows"])
         self.assertEqual((rows["localRoutes.staticRoutes[1].nextHop"]["on"], rows["bgpSystemConfig.neighbors[0].peerIpAddress"]["on"]), (False, False))
 
+    def test_fix_takes_a_label_as_set_does_and_names_every_unknown_once(self):
+        path = "deploymentInfo.deploymentInterfaces[0].interfaceName"
+        label = "deploymentInterfaces[lan0].interfaceName"  # what the tick list shows
+        _, _, err, ticked = self.run_cli("--pick", "top10", "--set", label, "--dry-run")
+        self.assertTrue(by_path(ticked["rows"])[path]["on"], err)
+        code, _, err, undone = self.run_cli("--pick", "top10", "--set", label, "--fix", label, "--dry-run")
+        self.assertEqual(code, 0, err)
+        self.assertFalse(by_path(undone["rows"])[path]["on"])
+        code, _, err, _ = self.run_cli("--pick", "top10", "--fix", "a,hostname,b", "--dry-run")
+        self.assertEqual((code, err), (2, "error: --fix: hostname cannot be fixed: always per site, hostname; no setting named a, b\n"))
+
     def test_dry_run_prints_the_columns_and_records_where_each_value_is(self):
         before = sorted((str(p), p.stat().st_mtime_ns) for p in self.folder.rglob("*"))
         code, out, err, picker = self.run_cli("--pick", "top10", "--set", "bgpSystemConfig.asn", "--dry-run")

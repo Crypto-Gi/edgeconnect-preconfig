@@ -397,12 +397,12 @@ class Picker:
     def fix_by_name(self, names: List[str], reference: Dict[str, Any]) -> List[str]:
         """--fix: column names or paths made FIXED (the opposite of --set); returns the reason for each name it refused."""
         columns = {r["path"]: s["column"] for r, s in zip(self.rows, self.sheet(reference))}  # the names a dry run showed
-        problems, fixed = [], []
+        problems, unknown, fixed = [], [], []
         for name in names:
-            hit = [r for r in self.rows if name in (r["path"], r["column"], columns[r["path"]])]
+            hit = [r for r in self.rows if name in (r["path"], r["column"], columns[r["path"]], r["label"])]
             hit = [r for r in hit if r["follows"] is None] or hit  # a column a follower shares names the row it follows
             if not hit:
-                problems.append("no setting named {}".format(name))
+                unknown.append(name)
             for r in hit:
                 if r["locked"]:
                     problems.append("{} cannot be fixed: always per site, {}".format(name, self.locked_why(r)))
@@ -412,7 +412,7 @@ class Picker:
                     fixed.append(r)
         for r in fixed:
             self.on[r["path"]] = False
-        return problems
+        return problems + (["no setting named {}".format(", ".join(unknown))] if unknown else [])
 
     @staticmethod
     def locked_why(r: Dict[str, Any]) -> str:
@@ -627,6 +627,8 @@ def cmd_variables(argv: List[str], read: Callable[[str], str] = input) -> int:
     p.add_argument("--yes", action="store_true", help="accept the choice without the tick list or questions")
     p.add_argument("--dry-run", action="store_true", help="print the columns this choice gives and write nothing: no questions, no Orchestrator")
     a = p.parse_args(argv)
+    if a.dry_run:
+        record("dry-run")  # the run log skips this run: a preview writes nothing (cli-requests R5)
     info = load_build(a.folder)
     base = a.folder if (a.folder / "build.json").is_file() else a.folder.parent
     from variables import load_ranking
@@ -815,8 +817,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     if argv[0] in ("-V", "--version", "version"):
         print(toolkit_version())
         return 0
-    if "--dry-run" in argv[1:]:  # shortcut: an abbreviated --dry still logs; a preview writes nothing, not even its run-log line (cli-requests R5)
-        return run_verb(argv[0], argv[1:])
     import runlog
     with runlog.logged(argv) as log:  # one line in reports/preconfig.jsonl per command (cli-requests R4)
         log["code"] = run_verb(argv[0], argv[1:])
