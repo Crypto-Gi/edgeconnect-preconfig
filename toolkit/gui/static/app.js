@@ -261,7 +261,7 @@ async function loadBuilds() {
   $("builds-text").className = "muted";
   $("builds-text").textContent = "Builds in " + data.folder + ", newest first. They stay there after the GUI stops.";
   const rows = data.builds.map((build) => el("tr", null,
-    el("td", { text: build.appliance }),
+    el("td", null, el("a", { href: "#/variables/" + encodeURIComponent(build.appliance), text: build.appliance, title: "Choose what changes per site" })),
     el("td", { text: build.orchestrator }),
     el("td", { class: "mono", text: String(build.built || "").replace("T", " ") }),
     el("td", null, build.site_types.length ? el("ul", { class: "notes" }, ...build.site_types.map((site) => el("li", null,

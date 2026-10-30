@@ -335,6 +335,13 @@ viewer (above), and compare feeding the same screen. The CLI gains `--fix` and `
 Done when: Save with Top 10 plus extras gives byte-identical files to the same `variables` command in the CLI; `--fix` undoes
 `--set`; a locked row is refused with its reason; `--dry-run` writes nothing and calls no Orchestrator; a lab build
 matches the CLI's.
+Built as (without compare, which waits for R6): `static/build.js` (the build card: appliances from the `list` task's recorded
+rows (R8); validators only; progress from the capture's `requests.jsonl`, method, path and
+status only; `summary.md` as text) and `static/pick.js` / `pick.css` (the check-box screen, the table tab, and the YAML viewer from
+`GET /api/builds/<build>/reference`, secrets as `<SECRET>` through `engine.hide_secrets`). The browser keeps only the person's
+ticks (`--set`) and unticks (`--fix`), runs the dry run after each flip (debounced, one at a time, the newest state drawn), and on a
+refusal goes back to the last accepted state with the CLI's reason at the row. `PICK_STARTS` is the hook for "Different between
+your sites". Screens in their own files push to `SCREENS` in `app.js`. Tested in `tests/test_gui_pick.py`. Not yet: the lab build.
 
 ## Step 9: Make the preconfig files, upload, existing YAML
 Upload the template and the CSV, the three choices (create; create and validate; create, validate and upload), the matching of

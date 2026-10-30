@@ -76,6 +76,12 @@ class Task:
             self.events.append({"line": text, "time": time.time()})
             self.changed.notify_all()
 
+    def progress(self, done: int, text: str) -> None:
+        """One request of a build's capture, from its request log, as it is read: the count so far and `GET /path ok`."""
+        with self.changed:
+            self.events.append({"progress": text, "done": done, "time": time.time()})
+            self.changed.notify_all()
+
     def view(self) -> Dict[str, Any]:
         """The task as the browser sees it; the whole Result (rows, issues, text) comes from result()."""
         found = self.result
@@ -171,7 +177,7 @@ class TaskManager:
             sites = [site.name[len("site-"):] for site in sorted(folder.glob("site-*"))
                      if site.is_dir() and _NAME.match(site.name) and ".previous-" not in site.name and (site / "{}.jinja2".format(site.name[len("site-"):])).is_file()]
             url = "/api/builds/{}/{{}}/{{}}".format(quote(folder.name))
-            found.append({"appliance": folder.name, "orchestrator": str(info.get("orchestrator") or ""), "built": str(info.get("built") or ""),
+            found.append({"appliance": folder.name, "site_type": str(info.get("site_type") or ""), "orchestrator": str(info.get("orchestrator") or ""), "built": str(info.get("built") or ""),
                           "site_types": [{"name": name, "template_url": url.format(quote(name), "template"), "csv_url": url.format(quote(name), "csv")} for name in sites]})
         return {"folder": str(self.out_root), "builds": sorted(found, key=lambda build: build["built"], reverse=True)}
 
@@ -184,6 +190,15 @@ class TaskManager:
         if which not in ("template", "csv") or not path.is_file():
             raise TaskError("not found", 404)
         return path
+
+    def build_text(self, build: str, which: str) -> Dict[str, Any]:
+        """A build's reference.yaml or summary.md, every secret shown as <SECRET>; where each value is comes from the dry run."""
+        folder = self._build({"build": build})
+        reference = folder / "reference.yaml"
+        if which not in ("reference", "summary") or not reference.is_file():
+            raise TaskError("not found", 404)
+        text = (reference if which == "reference" else folder / "summary.md").read_text(encoding="utf-8")
+        return {"text": engine.hide_secrets(reference, text)}
 
     def close(self) -> None:
         """Ctrl+C: from now on no task starts uploading (it ends cancelled), and an upload already sending is waited for."""
@@ -296,8 +311,9 @@ class TaskManager:
                     raise TaskError("{!r} is not an appliance hostname or nePk as the appliance list shows it".format(value))
             keys = [_identity(orch, "host", hostname), _identity(orch, "ne", nepk)] if hostname else [_identity(orch, "ne", nepk)]
             validate_on = self._orchestrator(opt("validate_on"), required=False) or None
-            return self._read(task, keys + ["appliance:" + cli.safe_name(appliance).lower()], lambda: engine.build(
-                orch, appliance, out=self.out_root, validate_on=validate_on, target_release=opt("target_release"), target_ecos=opt("target_ecos"), **context))
+            log = Path(self.work_dir) / "reference" / orch  # where capture() keeps its request log while it reads
+            return self._read(task, keys + ["appliance:" + cli.safe_name(appliance).lower()], lambda: _watched(task, log, appliance, lambda: engine.build(
+                orch, appliance, out=self.out_root, validate_on=validate_on, target_release=opt("target_release"), target_ecos=opt("target_ecos"), **context)))
         if action == "variables":
             build = self._build(request)
             pick = request.get("pick") or "top10"
@@ -441,6 +457,45 @@ class TaskManager:
             return
         result = self._sealed(task, call(approver))
         task.set(result.status, _summary(result), result)
+
+
+def _watched(task: Task, folder: Path, appliance: str, call: Callable[[], engine.Result]) -> engine.Result:
+    """Run a build while handing each request of its capture's request log (.incomplete-<appliance>-<stamp>-<pid>/requests.jsonl,
+    as capture.py names it) to the browser: only the method, path and status, never a message. The build's appliance lock keeps a
+    second capture of it out; the exact name keeps out another box whose name starts with this one's (h1-b for h1)."""
+    stop = threading.Event()
+    own = re.compile(r"\.incomplete-" + re.escape(appliance) + r"-\d{8}T\d{6}Z-\d+$")
+
+    def watch() -> None:
+        log, offset, done = None, 0, 0
+        while True:
+            finished = stop.is_set()
+            try:
+                if log is None:
+                    logs = [p for p in folder.glob(".incomplete-*/requests.jsonl") if own.match(p.parent.name) and p.stat().st_mtime >= task.created - 1]
+                    log = max(logs, key=lambda p: p.stat().st_mtime) if logs else None
+                if log is not None:
+                    with log.open(encoding="utf-8") as handle:
+                        handle.seek(offset)
+                        text = handle.read()
+                    complete = text[:text.rfind("\n") + 1]
+                    offset += len(complete.encode("utf-8"))
+                    for line in complete.splitlines():
+                        item = json.loads(line)
+                        done += 1
+                        task.progress(done, "{} {} {}".format(item.get("method"), item.get("path"), item.get("status")))
+            except (OSError, ValueError):  # renamed when the capture ends, or a line still being written
+                pass
+            if finished:
+                return
+            stop.wait(0.25)
+    watcher = threading.Thread(target=watch, name=task.id + "-progress", daemon=True)
+    watcher.start()
+    try:
+        return call()
+    finally:
+        stop.set()
+        watcher.join(2)
 
 
 def _identity(orchestrator: str, kind: str, value: str) -> str:

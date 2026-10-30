@@ -147,6 +147,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(200, tasks.builds())
         if path.startswith("/api/builds/"):
             parts = [unquote(part) for part in path.split("/")[3:]]
+            if len(parts) == 2:  # /api/builds/<build>/reference or /summary, secrets as <SECRET>
+                return self._json(200, tasks.build_text(*parts))
             if len(parts) != 3:
                 raise TaskError("not found", 404)
             found = tasks.site_file(*parts)
