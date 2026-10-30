@@ -273,6 +273,11 @@ def cmd_build(argv: List[str]) -> int:
 
 # ---------------------------------------------------------------- variables
 
+def fit(label: str, width: int) -> str:
+    """label cut to width from the middle, so the field name at its end still shows (two routes' .advertise and .advertiseToBgp differ)."""
+    return label if len(label) <= width else label[:width - 3 - width // 2] + "..." + label[-(width // 2):]
+
+
 class Picker:
     """The per-site choice for every sheet row of a build, shown as Top N or section by section.
 
@@ -295,6 +300,12 @@ class Picker:
             r["support"] = rank["appliances"] if rank else 0
             parts = r["path"].split(".")
             r["section"] = ".".join(parts[:2]).split("[")[0] if parts[0] == "deploymentInfo" and len(parts) > 2 else parts[0].split("[")[0]
+        for name in (lambda r: labelled(reference, r["path"], prefix=True), lambda r: r["path"]):  # the GUI shows labels: two lan0 routes get their prefixes, then positions
+            same = {}
+            for r in rows:
+                same.setdefault(r["label"], []).append(r)
+            for r in [r for alike in same.values() if len(alike) > 1 for r in alike]:
+                r["label"] = name(r).replace("deploymentInfo.", "", 1)
         self.free = [r for r in rows if not r["locked"] and r["follows"] is None]
         self.free.sort(key=lambda r: (r["section"], r["path"]))
         for n, r in enumerate(self.free, 1):
@@ -328,14 +339,14 @@ class Picker:
         pick = "VARIABLE" if r["locked"] or self.on.get(r["path"]) else "fixed"
         pct = "{}%".format(r["pct"]) if r.get("pct") is not None else ""
         extra = "  ".join(self.value_at(o, r) for o in self.others)
-        return " {:>4}  {:<52} {:<30} {:>5}  {}{}".format(num, r["label"][:52], self.value(r), pct, pick, ("   " + extra) if extra else "")
+        return " {:>4}  {:<52} {:<30} {:>5}  {}{}".format(num, fit(r["label"], 52), self.value(r), pct, pick, ("   " + extra) if extra else "")
 
     @staticmethod
     def value_at(other: Dict[str, Any], r: Dict[str, str]) -> str:
         return "| " + (cell(other[r["path"]]) if r["path"] in other else "-")[:20]
 
     def follower_lines(self, r: Dict[str, str]) -> List[str]:
-        return ["        {:<52} follows {}".format(f["label"][:52], "#{}".format(r["n"]) if "n" in r else "the line above") for f in self.rows if f["follows"] is r]
+        return ["        {:<52} follows {}".format(fit(f["label"], 52), "#{}".format(r["n"]) if "n" in r else "the line above") for f in self.rows if f["follows"] is r]
 
     def show(self, rows: List[Dict[str, str]], title: str) -> List[str]:
         out = ["  -- {} {}".format(title, "-" * max(0, 60 - len(title)))]
@@ -390,15 +401,25 @@ class Picker:
         return [self.line(r) for r in hits[:40]] + (["  ... {} more".format(len(hits) - 40)] if len(hits) > 40 else []) or ["  nothing matches {!r}".format(word)]
 
     def set_by_name(self, names: List[str]) -> List[str]:
-        """--set: column names or paths made VARIABLE; returns the names that match nothing."""
-        unknown = []
+        """--set: column names or paths made VARIABLE; returns why each name it could not set was refused."""
+        problems, unknown = [], []
         for name in names:
             hit = [r for r in self.free if name in (r["path"], r["column"], r["label"])]
-            if not hit:
-                unknown.append(name)
             for r in hit:
                 self.on[r["path"]] = True
-        return unknown
+            if hit:
+                continue
+            other = [r for r in self.rows if name in (r["path"], r["column"], r["label"])]
+            other = next(iter([r for r in other if r["follows"] is None] or other), None)  # as fix_by_name: a shared column names the row followed
+            if other is not None and other["locked"]:  # before follows: a locked row may follow a locked row, which --set cannot take either
+                problems.append("{} is always per site already ({})".format(name, self.locked_why(other)))
+            elif other is not None and other["follows"] is not None and other["follows"]["locked"]:  # sheet() makes it VARIABLE already
+                problems.append("{} is always per site already (it follows {}, {})".format(name, other["follows"]["column"], self.locked_why(other["follows"])))
+            elif other is not None and other["follows"] is not None:
+                problems.append("{} follows {}; set {} instead".format(name, other["follows"]["column"], other["follows"]["column"]))
+            else:
+                unknown.append(name)
+        return problems + (["no setting named {}".format(", ".join(unknown))] if unknown else [])
 
     def fix_by_name(self, names: List[str], reference: Dict[str, Any]) -> List[str]:
         """--fix: column names or paths made FIXED (the opposite of --set); returns the reason for each name it refused."""
@@ -451,7 +472,7 @@ class Picker:
     def record(self, reference: Dict[str, Any], folder: Optional[Path], lines: Optional[Dict[str, List[int]]] = None) -> None:
         """Every row as the picker held it, the chosen columns and the folder written, for the run's recorder.
 
-        A dry run writes no folder (None) and gives lines: each ticked row then also has the lines of its value in reference.yaml."""
+        A dry run writes no folder (None) and gives lines: each row then also has the lines of its value in reference.yaml."""
         rows = []
         for r, sheet_row in zip(self.rows, self.sheet(reference)):
             secret = r["reason"].startswith("secret")
@@ -459,8 +480,8 @@ class Picker:
                          "pct": r["pct"], "support": r["support"], "locked": r["locked"], "locked_why": self.locked_why(r) if r["locked"] else None,
                          "follows": r["follows"]["path"] if r["follows"] is not None else None, "on": sheet_row["decision"] == "variable",
                          "column": sheet_row["column"] if sheet_row["decision"] == "variable" else ""})
-            if lines is not None:
-                rows[-1]["lines"] = lines.get(r["path"]) if rows[-1]["on"] else None
+            if lines is not None:  # every row, ticked or not: the GUI highlights a row's lines on hover
+                rows[-1]["lines"] = lines.get(r["path"])
         record("picker", rows=rows, columns=self.columns(reference), folder=str(folder) if folder else None)
 
     def columns(self, reference: Dict[str, Any]) -> List[str]:
@@ -581,6 +602,18 @@ def layout_differences(reference: Dict[str, Any], other: Dict[str, Any]) -> List
     return out
 
 
+def reused_capture_problem(run: Dict[str, Any], site: str, orchestrator: str) -> str:
+    """Why a --captures folder's run.json cannot stand for `site` (as typed) on `orchestrator`, or '' when it can."""
+    if run.get("stage") != "capture" or run.get("role") != "sample" or run.get("only"):
+        return "is not a full sample capture: give the folders an earlier compare read"
+    if str(run.get("orchestrator") or "").lower() != orchestrator.lower():
+        return "was read from {}, not {}".format(run.get("orchestrator"), orchestrator)
+    appliance = run.get("appliance") or {}
+    if site.lower() not in {str(appliance.get(k) or "").lower() for k in ("hostName", "nePk")}:
+        return "holds {}, not {}: give the folders in the order of the sites".format(appliance.get("hostName") or appliance.get("nePk"), site)
+    return ""
+
+
 def shape_note(mine: Dict[str, Any], theirs: Dict[str, Any], site: str, base: str) -> str:
     """Why `site` cannot be a row of the base's template (sheet items of each), or '' when it fits.
 
@@ -677,9 +710,9 @@ def cmd_variables(argv: List[str], read: Callable[[str], str] = input) -> int:
     else:
         picker.start_top(20 if mode == "top20" else 10)
     if a.set:
-        unknown = picker.set_by_name([s.strip() for s in a.set.split(",") if s.strip()])
-        if unknown:
-            raise Fail("--set: no setting named {}".format(", ".join(unknown)))
+        refused = picker.set_by_name([s.strip() for s in a.set.split(",") if s.strip()])
+        if refused:
+            raise Fail("--set: " + "; ".join(refused))
     if a.fix:
         refused = picker.fix_by_name([s.strip() for s in a.fix.split(",") if s.strip()], reference)
         if refused:
@@ -708,9 +741,17 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     p.add_argument("sites", nargs="+", help="hostnames or nePks on the same Orchestrator (1 to 4; 2 recommended)")
     p.add_argument("--name", help="site type name (default: the appliance's)")
     p.add_argument("--yes", action="store_true", help="build without asking")
+    p.add_argument("--set", help="comma-separated column names or paths to make per site as well")
+    p.add_argument("--fix", help="comma-separated column names or paths to keep fixed, also ones that differ between the sites (applied after --set)")
+    p.add_argument("--captures", nargs="+", type=Path, metavar="DIR", help="sample captures an earlier compare read, one per site in the same order: no site is read again")
+    p.add_argument("--dry-run", action="store_true", help="print the columns this choice gives and write no template: no questions")
     a = p.parse_args(argv)
+    if a.dry_run:
+        record("dry-run")  # the run log skips this run: a preview writes no template (cli-requests R6)
     if len(a.sites) > 4:
         raise Fail("compare takes 1 to 4 other sites")
+    if a.captures and len(a.captures) != len(a.sites):
+        raise Fail("--captures takes one folder per site: {} sites, {} folders".format(len(a.sites), len(a.captures)))
     info = load_build(a.folder)
     me = info.get("appliance") or {}
     base_ne = me.get("nePk")
@@ -726,27 +767,33 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     from capture import Stop, capture
     from translate import Capture, NothingToConvert, allowed_paths, build, prune
     from variables import classify, only_at, sheet_items, write_sheet
-    caps = []
-    for site in a.sites:
+    caps = list(a.captures or [])
+    for site in a.sites[len(caps):]:
         print("reading {} from {} (GET only) ...".format(site, info["orchestrator"]), flush=True)
         try:
             caps.append(capture(info["orchestrator"], site, "sample", 0.2, work_dir() / "samples" / info["orchestrator"]))
         except Stop as stop:
             raise Fail(str(stop))
+    for site, c in zip(a.sites, caps):
+        record("capture", site=site, folder=str(c))  # what a later --captures gives back
     allowed = allowed_paths(info["target_release"])
     others = []
     read_ne = set()
     for site, c in zip(a.sites, caps):
         try:
             cap = Capture(c)
-            other = prune(build(cap, [], info.get("target_ecos")), allowed, [])
+            why = reused_capture_problem(cap.run, site, info["orchestrator"]) if a.captures else None  # before build: a partial capture is not "offline?"
+            other = None if why else prune(build(cap, [], info.get("target_ecos")), allowed, [])
         except NothingToConvert:
             raise Fail("{}: no appliance or deployment data could be read (offline with no Orchestrator cache?), so it cannot be compared".format(site))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:  # a damaged capture: one line naming the site as typed, not a traceback
             detail = Path(error.filename).name if isinstance(error, OSError) and error.filename else str(error)[:200]
-            raise Fail("{}: its capture could not be read ({}: {}); run compare again to read it afresh".format(site, type(error).__name__, detail))
+            raise Fail("{}: its capture{} could not be read ({}: {}); run compare {}to read it afresh".format(
+                site, " " + str(c) if a.captures else "", type(error).__name__, detail, "without --captures " if a.captures else "again "))
         except Exception as error:  # anything else is a bug in the toolkit, not in the capture
             raise Fail("{}: toolkit error {}: {} (please report it)".format(site, type(error).__name__, str(error)[:200]))
+        if why:
+            raise Fail("--captures: {} {}".format(c, why))
         ne = (cap.run.get("appliance") or {}).get("nePk")
         if base_ne and ne == base_ne:
             refuse_base(site)
@@ -776,14 +823,25 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     rows = [{k: cell(v) for k, v in r.items()} for r in classify(reference, probe.secret_paths, None, [o for _, o, _ in kept])]
     picker = Picker(reference, rows, {}, [s for _, _, s in kept])
     differ = [r for r in picker.free if picker.on[r["path"]]]
+    if a.set:
+        refused = picker.set_by_name([x.strip() for x in a.set.split(",") if x.strip()])
+        if refused:
+            raise Fail("--set: " + "; ".join(refused))
+    if a.fix:
+        refused = picker.fix_by_name([x.strip() for x in a.fix.split(",") if x.strip()], reference)
+        if refused:
+            raise Fail("--fix: " + "; ".join(refused))
+    also = [r for r in picker.free if picker.on[r["path"]] and r not in differ]  # what --set added: listed apart, they do not differ
     same = sum(1 for r in rows if r["reason"] == "same at every site you gave")
     only = sum(1 for r in rows if r["flag"] == "true" and r["reason"].startswith("only "))
     locked = sum(1 for r in picker.rows if r["locked"])
     shown = [n for n, _, _ in kept]
     print("\n{} settings are always per site (hostname, secrets, Deployment page, appliance info), and {} more are per site at {} and {}:".format(
-        locked, len(differ), base_host, ", ".join(shown) or "no other site"))
+        locked, sum(1 for r in differ + also if picker.on[r["path"]]), base_host, ", ".join(shown) or "no other site"))
     print("  {:>4}  {:<52} {:<30} {:>5}  {}   {}".format("#", "Setting", base_host, "", "Choice", "   ".join("| " + n for n in shown)))
     print("\n".join(picker.show(differ, "Different between your sites (pre-ticked)")))
+    if also:
+        print("\n".join(picker.show(also, "Also per site (--set)")))
     print("{} settings are the same at every site and stay fixed.".format(same))
     if only:
         print("{} settings exist only at some of the sites and are left fixed.".format(only))
@@ -798,7 +856,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         if comments:
             print("Note: {}'s comment{} {} {} left out of its row: {} has none there.".format(
                 n, "s" if len(comments) > 1 else "", ", ".join(comments[:3]) + (" ..." if len(comments) > 3 else ""), "are" if len(comments) > 1 else "is", base_host))
-    if not a.yes:
+    if not a.yes and not a.dry_run:
         answer = read("Build the template with these settings per site? [Y/n/edit] ").strip().lower()
         if answer in ("n", "no"):
             print("nothing written")
@@ -812,6 +870,10 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         if differs:
             print("Warning: {} stays fixed: {} {} {}'s value {}".format(label[r["path"]], ", ".join(differs), "gets" if len(differs) == 1 else "get",
                                                                          base_host, cell(mine[r["path"]]) or '""'))
+    if a.dry_run:  # the GUI's preview after each tick (cli-requests R6, as variables --dry-run)
+        show_columns(picker, reference)
+        picker.record(reference, None, value_lines((base / "reference.yaml").read_text(encoding="utf-8")))
+        return 0
     name = finish(picker, reference, info["site_type"], a.name, a.yes, read)
     if not name:
         return 1
@@ -819,7 +881,14 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     target = build_site(a.folder, info, name, picker.sheet(reference), rows_for)
     ensure_sites_csv(target)  # every other site may have been left out: sites.csv still holds this site's row
     picker.record(reference, target)
-    return validate_rows(target, target / "sites.csv", info, None)
+    code = validate_rows(target, target / "sites.csv", info, None)
+    record("saved", folder=str(target), validated=code == 0)
+    if code == 1:
+        print("{} is saved: only the rows that failed validation need fixing, in {} (nothing has to be compared again)".format(target, target / "sites.csv"))
+    elif code:  # render STOPPED (validator refused, network), maybe after some rows
+        print("{} is saved, but validation stopped (see STOPPED above): rows that passed before it are in {}; run validate on it when the validator answers".format(
+            target, target / "rendered"))
+    return code
 
 
 # ---------------------------------------------------------------- validate, upload
@@ -831,7 +900,10 @@ def validate_rows(folder: Path, csv_path: Path, info: Dict[str, Any], orchestrat
     print("\nvalidating every row of {} on {} ...".format(csv_path.name, nick), flush=True)
     args = ["--site-dir", str(folder), "--csv", str(csv_path), "--validate", nick] + (["--substitute"] if nick != info["orchestrator"] else [])
     code = render.main(args)
-    print("rows that passed are in {}".format(folder / "rendered") if code == 0 else "fix the FAIL rows in {} and run validate again; the rows that passed are in {}".format(csv_path, folder / "rendered"))
+    if code == 2:  # render STOPPED (validator refused, network) and said why: there are no FAIL rows to fix
+        print("validation stopped (see STOPPED above); rows that passed before it are in {}".format(folder / "rendered"))
+    else:
+        print("rows that passed are in {}".format(folder / "rendered") if code == 0 else "fix the FAIL rows in {} and run validate again; the rows that passed are in {}".format(csv_path, folder / "rendered"))
     return code
 
 

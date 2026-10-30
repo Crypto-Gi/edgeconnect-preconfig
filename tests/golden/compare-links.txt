@@ -6,8 +6,8 @@ reading branch-b from lab (GET only) ...
 25 settings are always per site (hostname, secrets, Deployment page, appliance info), and 2 more are per site at branch-a and branch-b:
      #  Setting                                              branch-a                              Choice   | branch-b
   -- Different between your sites (pre-ticked) -------------------
-   19  localRoutes.routes[lan0].nextHop                     192.0.2.126                           VARIABLE   | 192.0.2.125
-   28  localRoutes.routes[lan0].nextHop                     192.0.2.126                           VARIABLE   | 192.0.2.124
+   19  localRoutes.routes[lan0 192.0.2.192/26].nextHop      192.0.2.126                           VARIABLE   | 192.0.2.125
+   28  localRoutes.routes[lan0 198.51.100.128/25].nextHop   192.0.2.126                           VARIABLE   | 192.0.2.124
 16 settings are the same at every site and stay fixed.
 
 27 columns: hostname, group, site, network_role, address, contact_name, server_per_segment, total_outbound_bandwidth, total_inbound_bandwidth, lan0_ip, wan0_addressing_mode, wan0_ip, wan0_next_hop, wan0_bw_in, wan0_bw_out, wan0_behind_nat, lan0_dhcp_type, lan0_dhcp_address_mask, lan0_start, lan0_end, lan0_gateway, lan0_dns_servers_0, lan0_netbios_node_type, lan0_maximum_lease, lan0_default_lease, local_routes_lan0_next_hop, local_routes_lan0_next_hop_2

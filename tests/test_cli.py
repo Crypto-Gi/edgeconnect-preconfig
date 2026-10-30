@@ -112,7 +112,7 @@ class PickerChoice(unittest.TestCase):
     def test_sheet_builds_a_template_with_the_chosen_columns(self):
         p = self.picker()
         p.start_top(10)
-        self.assertEqual(p.set_by_name(["bgpSystemConfig.asn", "nonsense"]), ["nonsense"])
+        self.assertEqual(p.set_by_name(["bgpSystemConfig.asn", "nonsense"]), ["no setting named nonsense"])
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "variables.csv"
             write_sheet(p.sheet(REFERENCE), path)
@@ -244,6 +244,16 @@ class FixAndDryRun(unittest.TestCase):
                 self.assertEqual((code, out, picker), (2, "", None))
                 self.assertEqual(err, "error: --fix: {} cannot be fixed: always per site, {}\n".format(name, why))
 
+    def test_set_on_a_follower_or_a_locked_row_names_why(self):
+        code, _, err, _ = self.run_cli("--pick", "top10", "--set", "bgpSystemConfig.neighbors[0].peerIpAddress,no_such", "--dry-run")
+        self.assertEqual((code, err), (2, "error: --set: bgpSystemConfig.neighbors[0].peerIpAddress follows local_routes_static_routes_1_next_hop; "
+                                          "set local_routes_static_routes_1_next_hop instead; no setting named no_such\n"))
+        code, _, err, _ = self.run_cli("--pick", "top10", "--set", "hostname", "--dry-run")
+        self.assertEqual((code, err), (2, "error: --set: hostname is always per site already (hostname)\n"))
+        gateway = "deploymentInfo.dhcpInfo[0].gatewayIpAddress"  # locked, and follows lan0_ip, which is locked too: say it is per site
+        code, _, err, _ = self.run_cli("--pick", "top10", "--set", gateway, "--dry-run")
+        self.assertEqual((code, err), (2, "error: --set: {} is always per site already (deployment-page value (docs/decisions/0006))\n".format(gateway)))
+
     def test_a_follower_is_refused_naming_the_row_it_follows(self):
         code, _, err, _ = self.run_cli("--pick", "top10", "--fix", "bgpSystemConfig.neighbors[0].peerIpAddress,no_such", "--dry-run")
         self.assertEqual(code, 2)
@@ -275,10 +285,7 @@ class FixAndDryRun(unittest.TestCase):
         lines = (self.folder / "reference.yaml").read_text().splitlines()
         for row in picker["rows"]:
             with self.subTest(path=row["path"]):
-                if not row["on"]:
-                    self.assertIsNone(row["lines"])
-                    continue
-                first, last = row["lines"]
+                first, last = row["lines"]  # every row, ticked or not: the GUI highlights a row's lines on hover (R9a)
                 self.assertLessEqual(first, last)
                 held = "\n".join(lines[first - 1:last])
                 if row["value"] not in ("<SECRET>", ""):
@@ -466,6 +473,183 @@ class CompareLayoutChoice(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(built["sheet"]["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "fixed")
         self.assertIn("Warning: deploymentInterfaces[lan0].zone stays fixed: br-2 gets br-1's value LAN", out)
+
+
+
+def sample_run(site, orchestrator="lab", **change):
+    """run.json of a full sample capture of `site` (a hostname) on `orchestrator`, as capture.py writes it."""
+    run = {"stage": "capture", "role": "sample", "orchestrator": orchestrator, "only": None, "appliance": {"nePk": site + ".NE", "hostName": site}}
+    run.update(change)
+    return run
+
+
+class FollowsALockedRow(unittest.TestCase):
+    def test_set_on_a_row_that_follows_a_locked_row_says_it_is_per_site(self):
+        from generate import Builder
+        ref = copy.deepcopy(REFERENCE)
+        ref["bgpSystemConfig"]["routerId"] = "192.0.2.1"  # the lan0 host address, a common router ID: it follows lan0_ip, which is locked
+        probe = Builder()
+        probe.find_secrets(ref)
+        rows = [{k: cli.cell(v) for k, v in r.items()} for r in classify(ref, probe.secret_paths, None)]
+        picker = cli.Picker(ref, rows, {})
+        refused = picker.set_by_name(["bgpSystemConfig.routerId"])
+        self.assertEqual(len(refused), 1)
+        self.assertTrue(refused[0].startswith("bgpSystemConfig.routerId is always per site already (it follows lan0_ip, "), refused)
+        self.assertEqual(next(s for s in picker.sheet(ref) if s["path"] == "bgpSystemConfig.routerId")["decision"], "variable")
+
+
+class DistinctLabels(unittest.TestCase):
+    def test_two_routes_on_one_interface_are_named_by_their_prefix(self):
+        """The GUI's check-box screen shows labels: two lan0 routes must not both read localRoutes.routes[lan0].nextHop."""
+        reference = {"localRoutes": {"routes": [{"interfaceName": "lan0", "routeIpSubnet": "10.1.0.0/16", "nextHop": "192.0.2.126"},
+                                                {"interfaceName": "lan0", "routeIpSubnet": "10.2.0.0/16", "nextHop": "192.0.2.126"},
+                                                {"interfaceName": "lan0", "routeIpSubnet": "10.2.0.0/16", "nextHop": "192.0.2.125"},
+                                                {"interfaceName": "wan0", "routeIpSubnet": "0.0.0.0/0", "nextHop": "198.51.100.1"}]}}
+        rows = [{"path": "localRoutes.routes[{}].nextHop".format(n), "column": "c{}".format(n), "decision": "variable", "reason": "", "value": ""}
+                for n in range(4)]
+        labels = [r["label"] for r in cli.Picker(reference, rows, {}).rows]
+        self.assertEqual(labels, ["localRoutes.routes[lan0 10.1.0.0/16].nextHop", "localRoutes.routes[1].nextHop",
+                                  "localRoutes.routes[2].nextHop", "localRoutes.routes[wan0].nextHop"])  # same prefix twice: the position
+
+    def test_a_long_label_keeps_its_field_name_on_the_terminal(self):
+        fields = ("advertise", "advertiseToBgp", "advertiseToOspf")
+        reference = {"localRoutes": {"routes": [{"interfaceName": "lan0", "routeIpSubnet": "198.51.100.128/25", **{f: True for f in fields}},
+                                                {"interfaceName": "lan0", "routeIpSubnet": "192.0.2.192/26", **{f: True for f in fields}}]}}
+        rows = [{"path": "localRoutes.routes[{}].{}".format(n, f), "column": "c{}{}".format(n, f), "decision": "variable", "reason": "", "value": "true"}
+                for n in range(2) for f in fields]
+        picker = cli.Picker(reference, rows, {})
+        shown = [picker.line(r) for r in picker.free]
+        labels = [s[7:59].rstrip() for s in shown]  # the Setting column
+        self.assertEqual(len(set(labels)), len(shown), shown)  # [:52] printed all three as ...].advertise
+        self.assertTrue(all(label.endswith(r["path"].rsplit(".", 1)[1]) for label, r in zip(labels, picker.free)), shown)
+
+
+class CompareForTheGui(unittest.TestCase):
+    """compare --dry-run, --set/--fix, --captures and the saved-with-failures outcome (cli-requests R6)."""
+
+    def compare(self, others, argv, validated=0, runs=None, read=None, built_by=None):
+        """cmd_compare on in-memory references, recorded: (exit code, output, build_site call or None, results, sites read)."""
+        import yaml
+        from common import Recorder, RunContext, running
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "build.json").write_text(json.dumps({"site_type": "br", "orchestrator": "lab", "validator": "lab", "capture": "c",
+                                                            "target_release": "9.7.1.42046", "appliance": {"hostName": "br-1", "nePk": "1.NE"}}))
+            (folder / "reference.yaml").write_text(yaml.safe_dump(zoned()))
+            built, reads, recorder = {}, [], Recorder()
+
+            def build_site(folder, info, name, sheet, rows_for=None):
+                built.update(sheet=by_path(sheet), rows_for=rows_for)
+                return folder / ("site-" + name)
+            names = [o["applianceInfo"]["hostname"] for o in others]
+            run_of = runs or (lambda c: sample_run(Path(c).name))
+            with mock.patch("capture.capture", side_effect=lambda nick, site, *a: reads.append(site) or Path(site)), \
+                    mock.patch.object(cli, "client_for", side_effect=AssertionError("no Orchestrator request")), \
+                    mock.patch("validate.client_for", side_effect=AssertionError("no Orchestrator request")), \
+                    mock.patch("upload.client_for", side_effect=AssertionError("no Orchestrator request")), \
+                    mock.patch("translate.Capture", side_effect=lambda c: mock.Mock(run=run_of(c))), \
+                    mock.patch("translate.build", side_effect=built_by or [copy.deepcopy(o) for o in others]), \
+                    mock.patch("translate.prune", side_effect=lambda value, allowed, ledger: value), \
+                    mock.patch.object(cli, "build_site", side_effect=build_site), mock.patch.object(cli, "ensure_sites_csv"), \
+                    mock.patch.object(cli, "validate_rows", return_value=validated), running(RunContext(recorder=recorder)), \
+                    contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(out):
+                code = cli.cmd_compare([tmp] + names + list(argv), read or scripted())
+            return code, out.getvalue(), built or None, recorder.results, reads
+
+    def picked(self, results):
+        return next(r for r in results if r["kind"] == "picker")
+
+    def test_a_dry_run_asks_nothing_writes_no_template_and_records_the_choice_and_the_captures(self):
+        code, out, built, results, reads = self.compare([zoned("Guest", "br-2")], ["--dry-run"])
+        self.assertEqual((code, built, reads), (0, None, ["br-2"]))  # no prompt (scripted() has no answer), no site folder
+        self.assertIn("lan0_zone", out)
+        picker = self.picked(results)
+        self.assertEqual(picker["folder"], None)
+        self.assertIn("lan0_zone", picker["columns"])
+        zone = next(r for r in picker["rows"] if r["path"].endswith("[0].zone"))
+        self.assertTrue(zone["on"])
+        self.assertEqual(len(zone["lines"]), 2)  # its value's lines in reference.yaml
+        self.assertTrue(all(len(r["lines"]) == 2 for r in picker["rows"]))  # every row, ticked or not (R9a)
+        self.assertIn({"kind": "capture", "site": "br-2", "folder": "br-2"}, results)
+        self.assertIn({"kind": "dry-run"}, results)
+
+    def test_a_dry_run_with_captures_reads_no_site_and_save_after_it_gives_the_same_columns(self):
+        flags = ["--captures", "/work/samples/lab/2.NE/stamp", "--fix", "lan0_zone", "--set", "localRoutes.staticRoutes[1].nextHop"]
+        runs = lambda c: sample_run("br-2")
+        code, out, _, preview, reads = self.compare([zoned("Guest", "br-2")], ["--dry-run"] + flags, runs=runs)
+        self.assertEqual((code, reads), (0, []))  # nothing read again, and no client_for (no request) was ever called
+        columns = self.picked(preview)["columns"]
+        self.assertNotIn("lan0_zone", columns)  # --fix unticks a setting that differs between the sites
+        self.assertIn("and 1 more are per site at br-1 and br-2:", out)  # the --fix'ed one no longer counts, the --set one does
+        fixed_only = self.compare([zoned("Guest", "br-2")], ["--dry-run", "--fix", "lan0_zone"])[1]
+        self.assertIn("and 0 more are per site at br-1 and br-2:", fixed_only)
+        self.assertIn("-- Also per site (--set)", out)
+        self.assertIn("staticRoutes", out.split("-- Also per site (--set)")[1].splitlines()[1])
+        self.assertIn("Warning: deploymentInterfaces[lan0].zone stays fixed: br-2 gets br-1's value LAN", out)
+        code, _, built, saved, reads = self.compare([zoned("Guest", "br-2")], ["--yes", "--name", "br"] + flags, runs=runs)
+        self.assertEqual((code, reads), (0, []))
+        self.assertEqual(self.picked(saved)["columns"], columns)
+        self.assertEqual(built["sheet"]["localRoutes.staticRoutes[1].nextHop"]["decision"], "variable")
+        self.assertEqual(built["sheet"]["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "fixed")
+
+    def test_set_on_a_locked_row_says_why(self):
+        with self.assertRaises(cli.Fail) as refused:
+            self.compare([zoned("Guest", "br-2")], ["--dry-run", "--set", "hostname,nonsense"])
+        self.assertEqual(str(refused.exception), "--set: hostname is always per site already (hostname); no setting named nonsense")
+
+    def test_a_capture_folder_that_does_not_stand_for_its_site_is_refused(self):
+        cases = ((["/c/1", "/c/2"], None, "--captures takes one folder per site: 1 sites, 2 folders"),
+                 (["/c/1"], lambda c: sample_run("br-3"), "--captures: /c/1 holds br-3, not br-2"),
+                 (["/c/1"], lambda c: sample_run("br-2", orchestrator="other"), "--captures: /c/1 was read from other, not lab"),
+                 (["/c/1"], lambda c: sample_run("br-2", only=["appliance"]), "--captures: /c/1 is not a full sample capture"),
+                 (["/c/1"], lambda c: sample_run("br-2", role="reference"), "--captures: /c/1 is not a full sample capture"))
+        for folders, runs, message in cases:
+            with self.subTest(message=message), self.assertRaises(cli.Fail) as refused:
+                self.compare([zoned("Guest", "br-2")], ["--dry-run", "--captures"] + folders, runs=runs)
+            self.assertTrue(str(refused.exception).startswith(message), refused.exception)
+
+    def test_a_partial_capture_is_refused_as_such_before_it_is_converted(self):
+        from translate import NothingToConvert
+        with self.assertRaises(cli.Fail) as refused:  # a partial capture has no deployment data: say it is partial, not "offline?"
+            self.compare([zoned("Guest", "br-2")], ["--dry-run", "--captures", "/c/1"], runs=lambda c: sample_run("br-2", only=["appliance"]),
+                         built_by=NothingToConvert("nothing"))
+        self.assertTrue(str(refused.exception).startswith("--captures: /c/1 is not a full sample capture"), refused.exception)
+
+    def test_set_and_fix_refusals_are_one_line(self):
+        with self.assertRaises(cli.Fail) as refused:
+            self.compare([zoned("Guest", "br-2")], ["--dry-run", "--set", "nope"])
+        self.assertEqual(str(refused.exception), "--set: no setting named nope")
+        with self.assertRaises(cli.Fail) as refused:
+            self.compare([zoned("Guest", "br-2")], ["--dry-run", "--fix", "hostname"])
+        self.assertTrue(str(refused.exception).startswith("--fix: hostname cannot be fixed"), refused.exception)
+
+    def test_a_saved_site_whose_rows_fail_validation_says_it_is_saved(self):
+        code, out, built, results, _ = self.compare([zoned("Guest", "br-2")], ["--yes", "--name", "br"], validated=1)
+        self.assertEqual(code, 1)
+        self.assertIsNotNone(built)
+        self.assertRegex(out, r"site-br is saved: only the rows that failed validation need fixing")
+        self.assertEqual([r for r in results if r["kind"] == "saved"][0]["validated"], False)
+        code, out, _, results, _ = self.compare([zoned("Guest", "br-2")], ["--yes", "--name", "br"], validated=2)  # render STOPPED
+        self.assertEqual(code, 2)
+        self.assertIn("site-br is saved, but validation stopped (see STOPPED above): rows that passed before it are in", out)
+        self.assertNotIn("failed validation", out)
+        code, out, _, results, _ = self.compare([zoned("Guest", "br-2")], ["--yes", "--name", "br"])
+        self.assertEqual(code, 0)
+        self.assertNotIn("is saved", out)
+        self.assertEqual([r for r in results if r["kind"] == "saved"][0]["validated"], True)
+
+
+
+class ValidateRowsAdvice(unittest.TestCase):
+    def test_a_stopped_validation_gives_no_fail_rows_advice(self):
+        import render
+        for code, advice in ((0, "rows that passed are in"), (1, "fix the FAIL rows in"), (2, "validation stopped (see STOPPED above)")):
+            with self.subTest(code=code), mock.patch.object(cli, "check_validator"), mock.patch.object(render, "main", return_value=code), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(cli.validate_rows(Path("site"), Path("site/sites.csv"), {"validator": "lab", "orchestrator": "lab"}, None), code)
+            lines = out.getvalue().splitlines()
+            for text in ("rows that passed are in", "fix the FAIL rows in", "validation stopped (see STOPPED above)"):
+                self.assertEqual(any(line.startswith(text) for line in lines), text == advice, out.getvalue())
 
 
 def renamed(host="br-2", change=None):

@@ -315,10 +315,10 @@ class DryRunThenSave(Fixture):
             code, text = self.run_cli(["variables", folder, "--pick", "top10", "--dry"])  # argparse takes the abbreviation
             self.assertEqual(code, 0, text)
             self.assertFalse(reports.exists())
-            with self.assertRaises(SystemExit):  # compare has no --dry-run (R6): argparse refuses it, and the run is logged as any other
-                self.run_cli(["compare", folder, "h2", "--dry-run"])
+            with self.assertRaises(SystemExit):  # validate has no --dry-run: argparse refuses it, and the run is logged as any other
+                self.run_cli(["validate", folder, "--csv", "x.csv", "--dry-run"])
         [line] = (reports / "preconfig.jsonl").read_text(encoding="utf-8").splitlines()
-        self.assertEqual(json.loads(line)["workflow"], "preconfig compare")
+        self.assertEqual(json.loads(line)["workflow"], "preconfig validate")
 
 
 class ParallelBuilds(unittest.TestCase):
