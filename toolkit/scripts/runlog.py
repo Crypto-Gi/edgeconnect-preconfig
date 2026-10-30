@@ -42,39 +42,73 @@ _SECRET_TEXT = re.compile(r"(?i)(authorization|x-auth-token|api[-_]?key|password
 GRAM = 8  # a run of this many characters of a secret anywhere in the text is masked, as the whole secret is
 
 
+FREE_TEXT = {"message", "reason", "detail", "blocking_issues", "text"}  # error text, which may quote a secret cut or shortened
+CUT = re.compile(r"\.\.\. ?|\Z")  # where PyYAML's snippet (and a cut text) stops; a secret's start may sit just before it
+
+
 class Masker:
-    """Masks the run's secret cells in text: each cell whole (raw, trimmed, repr- and JSON-escaped), any run of GRAM or more of
-    its characters (error text shortens and cuts lines: PyYAML's snippet, /validate text cut at 1000), and a text that ends in
-    the first 4 or more of them (cut there). Built once per log line, so a long CSV costs the length of the text, not rows x text."""
+    """Masks the run's secret cells: everywhere, each cell whole (raw, trimmed, repr- and JSON-escaped, 4+ characters); in free
+    text (FREE_TEXT keys) also any run of GRAM or more of its characters, 4 to 7 of its first characters just before a cut, and
+    cells shorter than 4. Error text shortens and cuts lines (PyYAML's snippet, /validate text cut at 1000); names and paths
+    are left whole, so a site name that shares 8 characters with a key stays readable. Built once per log line: the cost is
+    the length of the text, not rows x text."""
 
     def __init__(self, cells: Mapping[str, str]) -> None:
         self.names = sorted(set(cells.values()))
-        forms = {}
+        forms: Dict[str, int] = {}
         for cell, column in cells.items():
             if cell.strip():
                 for form in {cell, cell.strip(), repr(cell)[1:-1], json.dumps(cell)[1:-1]} - {""}:
                     forms.setdefault(form, self.names.index(column))
-        self.grams = {form[i:i + GRAM]: n for form, n in forms.items() for i in range(len(form) - GRAM + 1)}
-        self.heads = {form[:k]: n for form, n in forms.items() for k in range(4, len(form) + 1)}
-        self.longest = max(map(len, forms), default=0)
-        short = sorted((f for f in forms if len(f) < GRAM), key=len, reverse=True)
-        self.short = re.compile("|".join(map(re.escape, short))) if short else None
         self.forms = forms
+        self.grams: Dict[str, int] = {}
+        self.owners: Dict[str, List[str]] = {}  # gram -> the forms it is part of
+        for form, n in forms.items():
+            for i in range(len(form) - GRAM + 1):
+                self.grams.setdefault(form[i:i + GRAM], n)
+                self.owners.setdefault(form[i:i + GRAM], []).append(form)
+        self.heads = {form[:k]: n for form, n in forms.items() for k in range(4, min(len(form), GRAM))}
+        self.tiny = self.pattern(f for f in forms if len(f) < 4)
+        self.short = self.pattern(f for f in forms if 4 <= len(f) < GRAM)
 
-    def text(self, value: str) -> str:
+    @staticmethod
+    def pattern(forms: Iterator[str]) -> Optional["re.Pattern[str]"]:
+        found = sorted(forms, key=len, reverse=True)
+        return re.compile("|".join(map(re.escape, found))) if found else None
+
+    def text(self, value: str, free: bool) -> str:
         if not self.forms:
             return value
         marks: List[Tuple[int, int, int]] = []
+        runs: List[List[Any]] = []  # [start, end, label, forms seen] of consecutive GRAM hits
         for i in range(len(value) - GRAM + 1):
             n = self.grams.get(value[i:i + GRAM])
             if n is not None:
-                marks.append((i, i + GRAM, n))
-        for k in range(min(len(value), self.longest), 3, -1):
-            if value[-k:] in self.heads:
-                marks.append((len(value) - k, len(value), self.heads[value[-k:]]))
-                break
-        if self.short:
-            marks += [(m.start(), m.end(), self.forms[m.group(0)]) for m in self.short.finditer(value)]
+                if runs and i <= runs[-1][1]:
+                    runs[-1][1] = i + GRAM
+                    runs[-1][3].update(self.owners[value[i:i + GRAM]])
+                else:
+                    runs.append([i, i + GRAM, n, set(self.owners[value[i:i + GRAM]])])
+        for start, end, n, owners in runs:
+            if free:
+                marks.append((start, end, n))
+            else:  # names and paths: only a whole form inside the run
+                piece = value[start:end]
+                for form in owners:
+                    at = piece.find(form)
+                    while at >= 0:
+                        marks.append((start + at, start + at + len(form), self.forms[form]))
+                        at = piece.find(form, at + 1)
+        for regex in (self.short, self.tiny if free else None):
+            if regex:
+                marks += [(m.start(), m.end(), self.forms[m.group(0)]) for m in regex.finditer(value)]
+        if free and self.heads:
+            for cut in CUT.finditer(value):
+                for k in range(min(cut.start(), GRAM), 3, -1):  # one more for a space before the cut
+                    head = value[cut.start() - k:cut.start()].rstrip()
+                    if head in self.heads:
+                        marks.append((cut.start() - k, cut.start() - k + len(head), self.heads[head]))
+                        break
         spans: List[List[int]] = []
         for start, end, n in sorted(marks):
             if spans and start <= spans[-1][1]:
@@ -86,6 +120,8 @@ class Masker:
         return value
 
     def unmark(self, value: str) -> str:
+        if not self.forms:
+            return value
         return re.sub("\0(\\d+)\0", lambda match: "<SECRET:{}>".format(self.names[int(match.group(1))]), value)
 
 
@@ -94,15 +130,15 @@ def report_dir() -> Optional[Path]:
     return Path(value) if value.strip() else None
 
 
-def redact(value: Any, masker: Masker) -> Any:
+def redact(value: Any, masker: Masker, free: bool = False) -> Any:
     """automation's util.redact, after the run's secret cells are masked (<SECRET:column>)."""
     if isinstance(value, Mapping):
         return {str(k): ("<REDACTED>" if v not in (None, "") and not isinstance(v, (bool, int, float)) else v) if SECRET_HEADER.search(str(k))
-                else redact(v, masker) for k, v in value.items()}
+                else redact(v, masker, free or str(k) in FREE_TEXT) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [redact(item, masker) for item in value]
+        return [redact(item, masker, free) for item in value]
     if isinstance(value, str):
-        return masker.unmark(_SECRET_TEXT.sub(lambda match: match.group(1) + "=<REDACTED>", masker.text(value)))
+        return masker.unmark(_SECRET_TEXT.sub(lambda match: match.group(1) + "=<REDACTED>", masker.text(value, free)))
     return value
 
 

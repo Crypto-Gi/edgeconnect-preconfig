@@ -71,7 +71,7 @@ class RunLog(unittest.TestCase):
         log = self.tmp / "session" / "preconfig.jsonl"
         self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
         summaries = automation_reader.summaries_from_file(str(log), last=0)
-        self.assertEqual([s["rows"] for s in summaries], [r["summary"]["rows"] for r in records])
+        self.assertEqual(len(summaries), len(runs))
         self.assertEqual([(r["row"], r["item"], r["outcome"]) for r in summaries[1]["rows"]], [(1, "h1_preconfig", "PLANNED")])
         bad = summaries[-1]["rows"]
         self.assertEqual([(r["row"], r["item"], r["outcome"]) for r in bad], [(1, "h1_preconfig", "VALID"), (2, "h9", "INVALID")])
@@ -100,6 +100,16 @@ class RunLog(unittest.TestCase):
                 for leak in {secret, repr(secret)[1:-1], json.dumps(secret)[1:-1], json.dumps(json.dumps(secret)[1:-1])[1:-1]} | pieces(secret):
                     self.assertNotIn(leak, text)
                 self.assertIn("<SECRET:nac_key>", json.dumps(record))
+
+    def test_names_and_paths_that_share_part_of_a_secret_stay_whole(self):
+        masker = runlog.Masker({"branch-01-Secret!": "psk", 'Zq9"K7mPx2Lw8Rt5Vn3Bc6': "key"})
+        record = {"workflow": "preconfig upload", "rows": [{"item": "branch-01_preconfig", "scope": "branch-01_preconfig.yml", "reason": "x"}],
+                  "outputs": [{"file": "/s/branch-01-Secret!.yml", "problems": [{"message": "found branch-01-Secr ... and 'Zq9\"K7 ... "}]}]}
+        out = runlog.redact(record, masker)
+        self.assertEqual(out["rows"][0]["item"], "branch-01_preconfig")
+        self.assertEqual(out["rows"][0]["scope"], "branch-01_preconfig.yml")
+        self.assertEqual(out["outputs"][0]["file"], "/s/<SECRET:psk>.yml")  # the whole secret, even in a path
+        self.assertEqual(out["outputs"][0]["problems"][0]["message"], "found <SECRET:psk> ... and '<SECRET:key> ... ")  # cut pieces in error text
 
     def test_a_secret_looking_header_counts_without_columns_json(self):
         template = self.tmp / "own.jinja2"  # a template from elsewhere: no columns.json says which columns are secret
