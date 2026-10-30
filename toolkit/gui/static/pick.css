@@ -15,6 +15,8 @@
 .pick-section > summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: .3rem 1rem; justify-content: space-between; font: 700 1.05rem/1.2 var(--f-display); }
 .pick-section > summary .muted { font: 500 .8rem/1.2 var(--f-mono); }
 .pick-section.locked { border-color: var(--gate); }
+.pick-compare > summary { cursor: pointer; font-weight: 700; }
+.pick-compare[open] { display: grid; gap: .6rem; margin-bottom: .8rem; }
 .rows { list-style: none; margin: 0; padding: 0; display: grid; gap: .1rem; }
 .rows .rows { margin: .2rem 0 0 1.6rem; padding-left: .6rem; border-left: 1px dashed var(--line); }
 .row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 8rem) 5.6rem; gap: .1rem .8rem; align-items: baseline; padding: .35rem .4rem; border-radius: 8px; }

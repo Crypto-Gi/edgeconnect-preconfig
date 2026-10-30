@@ -1,16 +1,18 @@
-// "Choose what changes per site" (docs/gui/BUILD_PLAN.md step 8, D11 to D14). The check boxes are the picker rows the CLI's own
-// `variables FOLDER --pick P --set ... --fix ... --dry-run` records; after each flip the page runs that command again and draws
+// "Choose what changes per site" and "Compare with other sites" (docs/gui/BUILD_PLAN.md step 8 and 8b, D11 to D14). The check boxes
+// are the picker rows the CLI's own `variables FOLDER --pick P --set ... --fix ... --dry-run` (or `compare FOLDER SITE... --set ...
+// --fix ... --captures ... --dry-run`) records; after each flip the page runs that command again and draws
 // what it returns. The browser only keeps which boxes the person flipped; every tick, column name, line and refusal comes from
 // Python. Every value is written with textContent. Loaded after app.js, which owns el, api, post and the views.
 "use strict";
 
-// Where a pick starts. Each start is re-applied with the person's own ticks (--set) and unticks (--fix) on top.
-// Hook for compare (R6): push { id: "compare", label: "Different between your sites", request: (pick) => ({ ...a compare dry run }),
-// save: (pick, name) => ({ ...the same with --name N --yes }) } here; the buttons, flips and Save use it as they use these.
+// Where a pick starts. Each start is re-applied with the person's own ticks (--set) and unticks (--fix) on top. compare reads the
+// sites once; every later run names that run (captures_from) so the server passes its sample captures back with --captures.
 const PICK_STARTS = [
   { id: "top10", label: "Top 10" },
   { id: "top20", label: "Top 20" },
   { id: "all", label: "All" },
+  { id: "compare", label: "Different between your sites", available: () => pick.sites.length > 0,
+    request: () => ({ action: "compare", build: pick.build, sites: pick.sites, captures_from: pick.captures }) },
 ];
 const FINAL_STATES = new Set(["done", "failed", "rejected", "expired", "cancelled"]);
 
@@ -43,7 +45,9 @@ const pick = {
   build: "", key: "", start: "top10", extras: new Set(), unticks: new Set(), good: null,
   rows: [], columns: [], ref: null, siteType: "", tab: "sections", query: "", onlyOn: false, closed: new Set(),
   pending: new Map(), notes: new Map(), busy: false, dirty: false, timer: 0, opened: 0, message: "", lineEls: [],
+  sites: [], captures: null, orchestrator: "", finding: 0,
 };
+const GONE = /the earlier read is gone/;  // the server's refusal of a captures_from whose folders were cleared
 
 function pickRequest(extra) {
   const start = PICK_STARTS.find((item) => item.id === pick.start) || PICK_STARTS[0];
@@ -81,7 +85,19 @@ const P = {};
     el("section", { class: "panel pick-right", "aria-labelledby": "pick-yaml-title" },
       el("div", { class: "panel-head" }, el("h2", { id: "pick-yaml-title", text: "reference.yaml" }), el("span", { class: "muted", text: "ticked values carry their column" })),
       P.yamlBox));
+  P.siteSearch = el("input", { type: "search", "aria-label": "Other sites: hostname, nePk, model or site contains", placeholder: "Other sites: hostname, nePk, model or site" });
+  P.siteFind = el("button", { class: "btn", type: "submit", text: "Find sites" });
+  P.siteList = el("tbody");
+  P.siteText = el("p", { class: "muted", role: "status" });
+  P.compareGo = el("button", { class: "btn primary", type: "button", text: "Compare with the ticked sites" });
+  P.compare = el("details", { class: "pick-compare" },
+    el("summary", { text: "Compare with other sites (1 to 4, GET only)" }),
+    el("form", { class: "toolbar" }, P.siteSearch, P.siteFind), P.siteText,
+    el("div", { class: "table-wrap" }, el("table", null, el("caption", { class: "sr-only", text: "Other sites on the build's Orchestrator" }),
+      el("thead", null, el("tr", null, ...["Compare", "Hostname", "nePk", "Model", "Site"].map((name) => el("th", { scope: "col", text: name })))), P.siteList)),
+    el("div", { class: "toolbar" }, P.compareGo));
   P.tools = el("div", { class: "panel" },
+    P.compare,
     el("div", { class: "toolbar" }, el("span", { class: "muted", text: "Start from" }), P.starts),
     el("div", { class: "toolbar" }, P.search, el("label", { class: "check", for: "pick-only" }, P.only, "Show only ticked"), P.save),
     P.status);
@@ -111,6 +127,8 @@ const P = {};
     });
   }
   P.save.addEventListener("click", openSave);
+  P.siteFind.closest("form").addEventListener("submit", (event) => { event.preventDefault(); findSites(); });
+  P.compareGo.addEventListener("click", startCompare);
   P.saveCancel.addEventListener("click", () => P.dialog.close());
   P.dialog.querySelector("form").addEventListener("submit", (event) => { event.preventDefault(); save(); });
 })();
@@ -126,8 +144,10 @@ function setTab(tab) {
 }
 
 /* opening a build */
-async function openPick(encoded) {
+async function openPick(encoded, comparing) {
   const build = decodeURIComponent(encoded);
+  pick.route = comparing ? "compare" : "variables";
+  P.compare.open = comparing;
   const orch = current();
   P.eyebrow.textContent = orch ? nameOf(orch) : "";
   P.chooser.hidden = !!build;
@@ -135,7 +155,9 @@ async function openPick(encoded) {
   if (!build) return listBuildsToPick();
   if (build === pick.build) return pick.rows.length ? draw() : undefined;  // open already, or still loading
   Object.assign(pick, { build, key: encodeURIComponent(build), start: "top10", extras: new Set(), unticks: new Set(), good: null, rows: [], columns: [],
-    ref: null, pending: new Map(), notes: new Map(), message: "", siteType: "" });
+    ref: null, pending: new Map(), notes: new Map(), message: "", siteType: "", sites: [], captures: null, orchestrator: "" });
+  P.siteList.replaceChildren();
+  P.siteText.textContent = "Find the other sites of this design on the build's Orchestrator, tick up to 4, then compare.";
   const opened = ++pick.opened;
   P.lede.textContent = "Build " + build + ". Tick the settings that differ from site to site: each becomes a column of the CSV. The rest stay as this appliance has them.";
   P.status.textContent = "Loading the settings…";
@@ -148,6 +170,7 @@ async function openPick(encoded) {
     pick.ref = ref;
     const found = builds.builds.find((item) => item.appliance === build);
     pick.siteType = found ? found.site_type : "";
+    pick.orchestrator = found ? found.orchestrator : "";
     drawYaml();
   } catch (error) {
     P.status.textContent = "Could not open " + build + ": " + error.message;
@@ -162,7 +185,7 @@ async function listBuildsToPick() {
   try {
     const data = await api("/api/builds");
     P.choose.replaceChildren(...(data.builds.length ? data.builds.map((build) => el("li", null,
-      el("a", { href: "#/variables/" + encodeURIComponent(build.appliance), text: build.appliance }),
+      el("a", { href: "#/" + pick.route + "/" + encodeURIComponent(build.appliance), text: build.appliance }),
       el("span", { class: "muted", text: " · " + build.orchestrator + " · " + String(build.built || "").replace("T", " ") })))
       : [el("li", null, el("a", { href: "#/build", text: "No builds yet: build a template from an appliance" }))]));
   } catch (error) {
@@ -171,7 +194,7 @@ async function listBuildsToPick() {
 }
 
 function drawStarts() {
-  P.starts.replaceChildren(...PICK_STARTS.map((start) => {
+  P.starts.replaceChildren(...PICK_STARTS.filter((start) => !start.available || start.available()).map((start) => {
     const button = el("button", { class: "btn", type: "button", "aria-pressed": String(start.id === pick.start), text: start.label });
     button.addEventListener("click", () => { pick.start = start.id; drawStarts(); preview(); });
     return button;
@@ -198,15 +221,23 @@ async function preview() {
   if (pick.busy) { pick.dirty = true; return; }
   pick.busy = true;
   const opened = pick.opened;
-  const sent = { start: pick.start, extras: new Set(pick.extras), unticks: new Set(pick.unticks) };
+  const sent = { start: pick.start, extras: new Set(pick.extras), unticks: new Set(pick.unticks), sites: pick.sites, captures: pick.captures };
   P.status.textContent = "Working out the columns…";
   let ran = null;
-  try {
-    ran = await runTask(pickRequest());
+  try {  // the first compare reads every site (minutes): its "reading ..." lines say where it is
+    ran = await runTask(pickRequest(), (event) => { if (event.line && event.line.startsWith("reading ")) P.status.textContent = event.line; });
   } catch (error) {
     pick.message = "Could not run the preview: " + error.message;
+    if (GONE.test(error.message) && sent.captures === pick.captures) {
+      Object.assign(pick, { captures: null, dirty: true });  // read the sites afresh, once: a run without captures_from is never refused so
+      P.siteText.textContent = "The earlier read is gone; reading the sites again.";
+    }
   }
   pick.busy = false;
+  // only a run that read the sites itself: one sent with --captures records them even when they are gone
+  if (ran && sent.start === "compare" && !sent.captures && sent.sites === pick.sites && ran.result.outputs.some((item) => item.kind === "capture")) {
+    pick.captures = ran.task.id;  // also from a refused run: the sites were read before the flips were checked
+  }
   if (pick.dirty) { pick.dirty = false; return preview(); }  // more flips (or another build) came in: only the newest state is drawn
   if (opened !== pick.opened) return;
   const result = ran && ran.result;
@@ -329,9 +360,7 @@ function drawYaml() {
   P.yaml.replaceChildren(...pick.lineEls);
 }
 
-// shortcut: the dry run records a line range only for ticked rows, so hovering another row marks nothing; it will once the
-// CLI records every row's range.
-function linesOf(row) { return row.lines || null; }
+function linesOf(row) { return row.lines || null; }  // every row has its range from the dry run (R9a)
 
 function drawYamlMarks() {
   for (const li of pick.lineEls) { li.classList.remove("on"); const tag = li.querySelector(".tag"); if (tag) tag.remove(); }
@@ -364,8 +393,9 @@ function scrollYaml(row, onlyIfHidden) {
 /* Save: the same command with --name N --yes; then the two files the person keeps are downloaded */
 function openSave() {
   P.saveName.value = pick.siteType || pick.build.toLowerCase();
-  P.saveText.textContent = "Writes site-<name>/ in " + pick.build + ", only if Orchestrator /validate accepts this appliance's own row. Then " +
-    "your browser downloads <name>.jinja2 and sites.csv; they also stay in the site folder.";
+  P.saveText.textContent = "Writes site-<name>/ in " + pick.build + (pick.start === "compare"
+    ? ", with a row per compared site, then Orchestrator /validate checks every row. Then "
+    : ", only if Orchestrator /validate accepts this appliance's own row. Then ") + "your browser downloads <name>.jinja2 and sites.csv; they also stay in the site folder.";
   P.saveLog.replaceChildren();
   P.dialog.showModal();
   P.saveName.focus();
@@ -374,8 +404,7 @@ function openSave() {
 
 async function save() {
   const name = P.saveName.value.trim();
-  const start = PICK_STARTS.find((item) => item.id === pick.start) || PICK_STARTS[0];
-  const request = start.save ? start.save(pick, name) : pickRequest({ save: true, name: name || null });
+  const request = pickRequest({ save: true, name: name || null });
   P.saveLog.replaceChildren();
   P.saveText.textContent = "Saving: building the template and validating the example row…";
   let ran;
@@ -383,15 +412,19 @@ async function save() {
     ran = await runTask(request, (event) => { if (event.line != null) P.saveLog.append(el("li", { text: event.line })); });
   } catch (error) {
     P.saveText.textContent = "Not saved: " + error.message;
+    if (GONE.test(error.message)) pick.captures = null;  // the next preview reads the sites again
     return;
   }
-  const picked = ran.result.outputs.find((item) => item.kind === "picker" && item.folder);
-  if (ran.result.status !== "done" || !picked) {
+  const picked = ran.result.outputs.find((item) => item.kind === "picker" && item.folder);  // recorded once the site folder is written
+  if (!picked) {
     P.saveText.textContent = "Not saved: " + errorLine(ran.result.text);
     return;
   }
   const site = picked.folder.split(/[\\/]/).pop().replace(/^site-/, "");
-  P.saveText.textContent = "Saved site-" + site + " in " + pick.build + ". Downloading " + site + ".jinja2 and sites.csv.";
+  const saved = ran.result.outputs.find((item) => item.kind === "saved");  // compare also validates every site's row
+  const stopped = ran.result.exit_code === 2;  // render STOPPED (validator refused, network): the rows after it were not checked
+  P.saveText.textContent = "Saved site-" + site + " in " + pick.build + ". Downloading " + site + ".jinja2 and sites.csv." +
+    (saved && !saved.validated ? (stopped ? " Validation stopped, so not every row was checked: " : " Not every row passed validation: ") + errorLine(ran.result.text) : "");
   const at = encodeURIComponent(site);
   for (const href of ["/api/builds/" + pick.key + "/" + at + "/template", "/api/builds/" + pick.key + "/" + at + "/csv"]) {
     const link = el("a", { href, download: "" });
@@ -402,4 +435,36 @@ async function save() {
   if (typeof loadBuilds === "function") loadBuilds();
 }
 
-SCREENS.push({ hash: /^#\/variables(?:\/(.+))?$/, view: "view-pick", render: (match) => openPick(match[1] || "") });
+/* compare: the other sites come from `list` on the build's Orchestrator */
+async function findSites() {
+  if (!pick.orchestrator) { P.siteText.textContent = "This build names no Orchestrator."; return; }
+  P.siteText.textContent = "Listing the appliances on " + pick.orchestrator + "…";
+  const asked = ++pick.finding, opened = pick.opened;
+  let ran;
+  try {
+    ran = await runTask({ action: "list", orchestrator: pick.orchestrator, search: P.siteSearch.value.trim() || null });
+  } catch (error) {
+    if (asked === pick.finding && opened === pick.opened) P.siteText.textContent = "Could not list them: " + error.message;
+    return;
+  }
+  if (asked !== pick.finding || opened !== pick.opened) return;  // a newer Find, or another build: this answer is not for this screen
+  const found = ran.result.outputs.filter((item) => item.kind === "appliance");
+  P.siteText.textContent = ran.result.status !== "done" ? "Could not list them: " + errorLine(ran.result.text)
+    : found.length + " appliance" + (found.length === 1 ? "" : "s") + ". Tick up to 4 of the same design; not " + pick.build + " itself.";
+  P.siteList.replaceChildren(...found.map((item) => {
+    const box = el("input", { type: "checkbox", "aria-label": "Compare with " + (item.hostname || item.nepk) });
+    box.site = { hostname: item.hostname, nepk: item.nepk };
+    return el("tr", null, el("td", null, box), ...["hostname", "nepk", "model", "site"].map((key) => el("td", { class: key === "nepk" ? "mono" : "", text: item[key] })));
+  }));
+}
+
+function startCompare() {
+  const chosen = [...P.siteList.querySelectorAll("input:checked")].map((box) => box.site);
+  if (!chosen.length) { P.siteText.textContent = "Tick at least one other site first."; return; }
+  Object.assign(pick, { sites: chosen, captures: null, start: "compare" });  // a new set of sites is read afresh
+  P.siteText.textContent = "Comparing with " + chosen.map((site) => site.hostname || site.nepk).join(", ") + ".";
+  drawStarts();
+  preview();
+}
+
+SCREENS.push({ hash: /^#\/(variables|compare)(?:\/(.+))?$/, view: "view-pick", render: (match) => openPick(match[2] || "", match[1] === "compare") });

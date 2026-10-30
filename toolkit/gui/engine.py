@@ -114,7 +114,7 @@ def _refusal(argv: Sequence[str], approver: Optional[Callable[..., Any]]) -> Opt
     except _LineError as error:
         return "the GUI could not read this command line ({})".format(error)
     if line is None or not _built_here(argv, line):  # every other verb or stage reads inputs the secret scrub does not know
-        return ("the GUI runs only the command lines it builds (list, preconfigs [--show], build, variables, validate FOLDER --csv, upload FOLDER --csv, "
+        return ("the GUI runs only the command lines it builds (list, preconfigs [--show], build, variables, compare, validate FOLDER --csv, upload FOLDER --csv, "
                 "upload --template --csv, render --template --csv, upload or render --site-dir --csv --out, validate --yaml, upload --yaml); for existing YAML files use "
                 "validate --yaml or upload --yaml, which parse each file first")
     if argv[0] != "upload":
@@ -135,10 +135,12 @@ def uploads_off(orchestrator: str, env: Mapping[str, str]) -> Optional[str]:
 
 
 def _built_here(argv: Sequence[str], line: argparse.Namespace) -> bool:
-    """An allowlist: the shapes of the helpers below. compare joins it with its helper (R6)."""
+    """An allowlist: the shapes of the helpers below."""
     verb, stage = argv[0], len(argv) > 1 and argv[1].startswith("-")  # cli.main: validate/upload with an option first run the stage
     if verb in ("list", "build", "variables"):
         return True
+    if verb == "compare":
+        return _compare_shape(argv[1:])
     if verb == "preconfigs":  # exactly what preconfigs() builds: GET only, and the CLI redacts what it prints
         return argv[1:2] == ["--orchestrator"] and (len(argv) == 3 or (len(argv) == 5 and argv[3] == "--show"))
     # a saved site folder with --out: what it writes goes to the run's own folder, never into the build folder
@@ -150,6 +152,25 @@ def _built_here(argv: Sequence[str], line: argparse.Namespace) -> bool:
     if verb in ("validate", "upload"):  # the stage only with --yaml (validate's own file arguments go out unparsed) or upload --template/--site-dir --csv
         return line.yaml is not None or (verb == "upload" and (line.template is not None or site_out) and line.csv is not None)
     return False
+
+
+def _compare_shape(rest: Sequence[str]) -> bool:
+    """Exactly what compare() builds: FOLDER SITE{1,4} [--name N] [--set S] [--fix F] [--captures DIR per site] and --dry-run or
+    --yes, so it never asks (a site never starts with -; argparse would also take --cap or --set=... as these flags)."""
+    first = next((i for i, item in enumerate(rest) if item.startswith("-")), len(rest))
+    sites, tail = len(rest[:first]) - 1, list(rest[first:])
+    if not 1 <= sites <= 4:
+        return False
+    for flag in ("--name", "--set", "--fix"):
+        if tail[:1] == [flag]:
+            if len(tail) < 2 or tail[1].startswith("-"):
+                return False
+            tail = tail[2:]
+    if tail[:1] == ["--captures"]:
+        if len(tail) < 1 + sites or any(item.startswith("-") for item in tail[1:1 + sites]):
+            return False
+        tail = tail[1 + sites:]
+    return tail in (["--dry-run"], ["--yes"])
 
 
 def _refuse(fingerprint: str) -> None:
@@ -492,5 +513,10 @@ def render_site(site_dir: Any, csv_path: Any, out: Any, validate_on: Optional[st
                + (["--substitute"] if substitute else []), **context)
 
 
-# shortcut: compare gets its helper, and its place in _built_here, with its CLI addition (R6: compare --dry-run/--set/--fix/--captures);
-# until then run() refuses it.
+def compare(folder: Any, sites: Sequence[str], name: Optional[str] = None, settings: Sequence[str] = (), fixed: Sequence[str] = (),
+            captures: Sequence[Any] = (), dry_run: bool = False, **context: Any) -> Result:
+    """Other sites of the same design (GET only) pick the per-site settings. captures: the sample captures an earlier compare of the
+    same sites recorded, in site order, so no site is read again; dry_run is the preview, else it saves with --yes (no question)."""
+    return run(["compare", _abs(folder)] + list(sites) + _opt("--name", name) + _opt("--set", ",".join(settings) or None)
+               + _opt("--fix", ",".join(fixed) or None) + (["--captures"] + [_abs(c) for c in captures] if captures else [])
+               + (["--dry-run"] if dry_run else ["--yes"]), **context)
