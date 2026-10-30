@@ -1,17 +1,19 @@
-# Runs the offline unit tests on every pull request and push to main, on the oldest and newest supported Python.
+# Runs the offline unit tests on every pull request and push to main or gui, on the oldest and newest supported Python, on Linux and macOS.
 name: test
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, gui]
 permissions:
   contents: read
 jobs:
   test:
     # ubuntu-latest (26.04) has no Python 3.9 build for setup-python; 24.04 still does.
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-24.04, macos-latest]
         python: ["3.9", "3.13"]
     steps:
       - uses: actions/checkout@v4

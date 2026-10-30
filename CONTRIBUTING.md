@@ -12,7 +12,7 @@ Issues and pull requests are welcome. Report a security problem privately: the *
 
 ## Running the tests
 
-Offline, no Orchestrator needed; CI runs them on Python 3.9 and 3.13:
+Offline, no Orchestrator needed; CI runs them on Python 3.9 and 3.13, on Linux and macOS:
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
@@ -28,7 +28,7 @@ The lab harnesses in `tests/harnesses/` need a lab Orchestrator and are run by m
 edgeconnect-preconfig/
 ├── README.md                                 # Overview, quick start and links
 ├── CONTRIBUTING.md                           # This file
-├── .github/workflows/test.yml                # CI: the offline tests on Python 3.9 and 3.13
+├── .github/workflows/test.yml                # CI: the offline tests on Python 3.9 and 3.13, Linux and macOS
 ├── LICENSE                                   # Apache License 2.0
 ├── NOTICE                                    # Copyright, trademarks, bundled templates
 ├── requirements.txt                          # Jinja2>=3.1.0, PyYAML>=6.0
@@ -40,6 +40,7 @@ edgeconnect-preconfig/
 │   ├── AGENT_SKILLS.md                       # installing the skill in each AI agent
 │   ├── TESTING_AND_VERIFICATION.md           # Verification report: unit tests, captures, live applies
 │   ├── assets/demo.gif                       # README demo (a lab run, names and addresses replaced)
+│   ├── gui/BUILD_PLAN.md                     # the GUI's decisions and build steps (built on the gui branch)
 │   └── decisions/                            # Decision records
 ├── toolkit/                                  # <-- the code: edit here; runs without any agent
 │   ├── VERSION                               # toolkit version
