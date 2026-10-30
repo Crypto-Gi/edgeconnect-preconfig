@@ -11,6 +11,19 @@
 - **A base URL with a user name or password is refused** (`https://user:pass@host`): `client_for` now stops with one line that names the `.env` key and never echoes the URL. Before, the URL reached `http.client`, whose `InvalidURL` traceback printed the password. Any other `http.client` error (`BadStatusLine`, ...) is now a one-line transport error naming only its type, instead of a traceback, and so are a malformed `[host]` in the base URL and an error answer whose body is cut off.
 - **Golden outputs**: `tests/test_golden.py` pins what each command prints and writes (except `compare`); `EDGECONNECT_UPDATE_GOLDEN=1` regenerates them.
 
+## 1.3.4 (2026-10-30)
+
+`compare` no longer writes a partner row with silently wrong values.
+
+- **A differing zone, interface label, segment or firewall mode is a column** (`docs/decisions/0018`, owner: "let the user decide"): when the compared sites differ on one of these, compare lists it with the other differing settings, ticked as a column; `--yes` keeps it. Untick it in the tick list (`edit`) to give every site the base's value; compare then prints a `Warning:` line. When the sites agree it stays fixed, as decision 0006 says. Before, the partner silently got the base's value.
+- **A site whose settings differ in shape gets no row**: a partner with settings the base lacks (an extra route, BGP neighbor, DNS server or WAN port, BGP or OSPF on only there, whole sections), or without non-blank settings the base has, gets no `sites.csv` row and a `Note:` naming the site, the first differing paths, and what to do (that site as the base, or a separate template). Before, its own extras were dropped and the base's were copied into its row, and the row passed `/validate`.
+- **DHCP relay against server is named**: the Note starts `<site> uses DHCP relay on <interface>, <base> uses server`.
+- **One-line errors for a partner that cannot be read**: a capture without `capture-index.json` or with a corrupt file, or with no appliance or deployment data, stops compare with one line naming the site as typed (exit 2), not a traceback or the capture folder. The appliance the build was read from is refused as its own partner.
+- **Fewer extra columns for identical sites**: an address inside the site's subnets outside the Deployment page (a VRRP address, a route next hop, a BGP peer) that is the same at every compared site stays fixed.
+- **Golden outputs** for the GUI: `tests/fixtures/compare/` holds synthetic captures and the expected exit code, columns, rows and notes for nine scenarios (`tests/test_compare_golden.py`).
+
+Single-site `build` output is unchanged.
+
 ## 1.3.3 (2026-10-30)
 
 - **The stage form ends in one error line**: `validate --yaml`, `upload --yaml` and the other stage commands (`validate --orchestrator ...`, `render`, `upload --site-dir ...`) now print a refused validator or a network error as one line and exit 2, as the verbs do. A non-validator Orchestrator used to print a Python traceback before the message, because the stage ran as `__main__` and its `Stop` was not the class the caller caught.
