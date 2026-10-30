@@ -203,6 +203,11 @@ class FleetTests(unittest.TestCase):
         self.assertNotIn(KEY, shown)
         self.assertNotIn("pa55word", shown)
 
+    def test_the_key_is_masked_in_free_text_only_never_in_a_fixed_field(self):
+        result = self.check(dotenv("lab").replace("lab_api_key={}".format(KEY), "lab_api_key=green") + "spare_base_url=https://spare.invalid\n",
+                            {"lab": {"/gmsserver/info": {"serialNumber": "green"}}})
+        self.assertEqual((result["lab"].status, result["lab"].id, result["lab"].reason), ("green", "green", "connected (release 9.5.1)"))
+
     def test_a_profile_without_an_orch_line_is_not_listed_and_the_result_says_so(self):
         result = self.check(dotenv("lab") + "spare_base_url=https://spare.invalid\nspare_api_key={}\n".format(KEY))
         self.assertEqual((list(result), self.fleet.not_listed), (["lab"], ["spare"]))

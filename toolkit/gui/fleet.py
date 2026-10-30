@@ -85,16 +85,21 @@ def check_all(
         except Exception:  # one profile never takes the panel down; the error's text may hold a secret, so it is not shown
             status = Status(name, _origin(env.get("{}_base_url".format(name), "")), RED,
                             "the check stopped on an unexpected error; nothing is known about this Orchestrator", validator=name in context.validators)
-        key = env.get("{}_api_key".format(name))
-        if not key:
-            return status
-        return dataclasses.replace(status, **{field: value.replace(key, "<API_KEY>") for field, value in dataclasses.asdict(status).items() if isinstance(value, str)})
+        return dataclasses.replace(status, reason=_mask(status.reason, [env.get("{}_api_key".format(name), "")]))
 
-    warnings = automation_refusals(raw, os.environ)
+    keys = [value for key, value in env.items() if key.endswith("_api_key")]
+    note, warnings = _mask(note, keys), [_mask(warning, keys) for warning in automation_refusals(raw, os.environ)]
     if not names:
         return Fleet([], unlisted, note, warnings)
     with ThreadPoolExecutor(max_workers=len(names)) as pool:
         return Fleet(list(pool.map(check, names)), unlisted, note, warnings)
+
+
+def _mask(text: str, keys: List[str]) -> str:
+    """Free text with every API key replaced; the fixed fields (status, url, id...) are never rewritten."""
+    for key in keys:
+        text = text.replace(key, "<API_KEY>") if key else text
+    return text
 
 
 def _not_listed_note(unlisted: List[str], file_keys: Set[str]) -> str:
