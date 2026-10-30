@@ -489,6 +489,10 @@ class CompareShape(unittest.TestCase):
             del o["deploymentInfo"]["deploymentInterfaces"][2]["ipAddressMask"]  # blank (None) at the base: nothing would be copied
         self.assertEqual(self.rows_and_notes(renamed(change=blank_wan)), (["br-2"], []))
 
+        def blank_extra(o):
+            o["bgpSystemConfig"]["holdTime"] = None  # blank and only at br-2: nothing would be lost
+        self.assertEqual(self.rows_and_notes(renamed(change=blank_extra)), (["br-2"], []))
+
     def test_a_value_that_differs_is_a_column_even_when_another_site_lacks_it(self):
         def hop(o):
             o["localRoutes"]["staticRoutes"][0]["nextHop"] = "203.0.113.2"

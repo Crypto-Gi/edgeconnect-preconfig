@@ -1,7 +1,7 @@
 {
  "exit": 0,
  "notes": [
-  "Note: branch-b has 9 setting(s) branch-a lacks: localRoutes.routes[2].advertise, localRoutes.routes[2].advertiseToBgp, localRoutes.routes[2].advertiseToOspf .... sites.csv gets no row for branch-b: the template holds branch-a's settings only. Run compare with branch-b as the base (build it first), or build a separate template for that design."
+  "Note: branch-b has 7 setting(s) branch-a lacks: localRoutes.routes[2].advertise, localRoutes.routes[2].advertiseToBgp, localRoutes.routes[2].advertiseToOspf .... sites.csv gets no row for branch-b: the template holds branch-a's settings only. Run compare with branch-b as the base (build it first), or build a separate template for that design."
  ],
  "columns": [
   "hostname",

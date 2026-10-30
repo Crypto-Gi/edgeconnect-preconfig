@@ -134,8 +134,8 @@ def sheet_items(reference: Dict[str, Any]) -> List[Tuple[str, Any]]:
 
 
 def only_at(mine: Dict[str, Any], theirs: Dict[str, Any]) -> Tuple[List[str], List[str]]:
-    """Sheet paths (sheet_items of each site) only the other site has, and non-blank ones only this site has."""
-    return sorted(set(theirs) - set(mine)), sorted(p for p in set(mine) - set(theirs) if mine[p] not in (None, ""))
+    """Non-blank sheet paths (sheet_items of each site) only the other site has, and those only this site has."""
+    return sorted(p for p in set(theirs) - set(mine) if theirs[p] not in (None, "")), sorted(p for p in set(mine) - set(theirs) if mine[p] not in (None, ""))
 
 
 def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Optional[Set[str]] = None,
