@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stage 9: send rendered preconfig YAML to POST /gms/appliance/preconfiguration/validate on a validator Orchestrator.
 
-Non-saving. Refuses any Orchestrator not in VALIDATORS before connecting. Never calls create, update, delete,
+Non-saving. Refuses any Orchestrator not in EC_VALIDATORS before connecting. Never calls create, update, delete,
 apply or findMatch. Writes validation.json next to the files (or to --out).
 """
 import argparse
@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import VALIDATORS, client_for, normalize_serial, parse_yaml, utc_stamp, write_json  # noqa: E402
+from common import client_for, normalize_serial, parse_yaml, utc_stamp, validators, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 
 PATH = "/gms/appliance/preconfiguration/validate"
 
@@ -23,9 +23,9 @@ class Stop(Exception):
 
 
 def validator(nickname: str) -> Any:
-    if nickname.lower() not in VALIDATORS:  # VALIDATORS holds lower-case names, as the verbs' check_validator compares
+    if nickname.lower() not in validators():  # validators() holds lower-case names, as the verbs' check_validator compares
         raise Stop("{} is not a validator Orchestrator (allowed: {}). To allow it, add it to EC_VALIDATORS in .env "
-                   "(comma-separated nicknames).".format(nickname, ", ".join(sorted(VALIDATORS)) or "none"))
+                   "(comma-separated nicknames).".format(nickname, ", ".join(sorted(validators())) or "none"))
     client = client_for(nickname)
     if "read_only" not in inspect.signature(client.request).parameters:
         raise Stop("ApiClient.request has no read_only flag, so /validate cannot be sent as a read; reinstall the toolkit (setup.sh)")

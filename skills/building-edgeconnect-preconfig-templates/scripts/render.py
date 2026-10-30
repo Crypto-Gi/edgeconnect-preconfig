@@ -96,7 +96,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 def _main(argv: Optional[List[str]] = None) -> int:
-    from common import normalize_serial, parse_yaml, resolve_output_filename
+    from common import normalize_serial, output_root, parse_yaml, resolve_output_filename
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site-dir", type=Path, help="site folder from translate.py: finds the template and columns.json, writes rendered/ there")
     parser.add_argument("--template", type=Path, help="template path (not needed with --site-dir)")
@@ -113,7 +113,7 @@ def _main(argv: Optional[List[str]] = None) -> int:
         args.out = args.out or args.site_dir / "rendered"
     elif not args.template:
         parser.error("provide --site-dir or --template")
-    out_dir = args.out or (Path.cwd() / "preconfig-output" / args.template.stem / "rendered")
+    out_dir = args.out or (output_root() / args.template.stem / "rendered")
     out_dir.mkdir(parents=True, exist_ok=True)
     meta = json.loads(args.columns.read_text()) if args.columns else {}
     columns = meta.get("columns")

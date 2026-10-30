@@ -31,11 +31,11 @@ class ValidatorAllowList(unittest.TestCase):
         self.assertEqual(allowed(PROFILES), set())
 
     def test_a_refusal_says_how_to_allow_the_nickname(self):
-        with mock.patch.object(validate, "VALIDATORS", set()):
+        with mock.patch("common.VALIDATORS", set()):
             with self.assertRaises(validate.Stop) as stop:
                 validate.validator("prod_testbed")
         self.assertIn("EC_VALIDATORS in .env", str(stop.exception))
-        with mock.patch.object(cli, "VALIDATORS", set()):
+        with mock.patch("common.VALIDATORS", set()):
             with self.assertRaises(cli.Fail) as fail:
                 cli.check_validator("prod_testbed")
         self.assertIn("(now: none)", str(fail.exception))
@@ -45,7 +45,7 @@ class ValidatorAllowList(unittest.TestCase):
         self.assertEqual(allowed(PROFILES + "orch_validators=lab\n"), set())
 
     def test_the_stage_form_matches_the_nickname_in_any_case(self):
-        with mock.patch.object(validate, "VALIDATORS", {"lab"}), mock.patch.object(validate, "client_for", return_value=mock.Mock(request=lambda *a, read_only=False, **k: None)) as client_for:
+        with mock.patch("common.VALIDATORS", {"lab"}), mock.patch.object(validate, "client_for", return_value=mock.Mock(request=lambda *a, read_only=False, **k: None)) as client_for:
             validate.validator("LAB")
         client_for.assert_called_once_with("LAB")  # client_for normalises the case itself
 
@@ -54,7 +54,7 @@ class StageErrors(unittest.TestCase):
     """The stage form (validate --yaml ..., upload --yaml ...) ends in one error line, like the verbs."""
 
     def run_cli(self, argv):
-        with tempfile.TemporaryDirectory() as directory, mock.patch.object(validate, "VALIDATORS", {"lab"}):
+        with tempfile.TemporaryDirectory() as directory, mock.patch("common.VALIDATORS", {"lab"}):
             path = Path(directory) / "t.yml"
             path.write_text('applianceInfo:\n  hostname: "t"\n', encoding="utf-8")
             with mock.patch("sys.stderr", new_callable=io.StringIO) as err, mock.patch("sys.stdout", new_callable=io.StringIO):

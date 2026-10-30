@@ -83,13 +83,13 @@ class Golden(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = Path(tempfile.mkdtemp())
-        cls.orch, cls.hashed = Orchestrator(), {}  # hashed: file hashes by (path, mtime, size)
+        cls.orch, cls.hashed, cls.toolkit = Orchestrator(), {}, common.toolkit_version()  # hashed: file hashes by (path, mtime, size)
         cls.cap = write_capture(cls.tmp / "cap")
         cls.out = cls.tmp / "out"
         cls.cwd = os.getcwd()
         os.chdir(str(cls.tmp))  # stage defaults (./preconfig-output) land in the temp folder
         cls.capture = mock.patch("capture.capture", return_value=cls.cap)
-        cls.patches = [mock.patch.object(cli, "VALIDATORS", {"lab"}), mock.patch.object(validate, "VALIDATORS", {"lab"}),
+        cls.patches = [mock.patch("common.VALIDATORS", {"lab"}), mock.patch("common.VALIDATORS", {"lab"}),
                        mock.patch.object(cli, "client_for", return_value=cls.orch), mock.patch.object(validate, "client_for", return_value=cls.orch),
                        mock.patch.object(upload, "client_for", return_value=cls.orch), cls.capture]
         cls.read = [p.start() for p in cls.patches][-1]
@@ -131,7 +131,7 @@ class Golden(unittest.TestCase):
         for path in sorted({str(self.tmp), str(self.tmp.resolve())}, key=len, reverse=True):  # macOS: /var is /private/var
             text = text.replace(path, "<tmp>")
         text = re.sub(r"\d{8}T\d{6}Z", "<stamp>", text)
-        return text.replace(common.toolkit_version(), "<toolkit>")
+        return text.replace(self.toolkit, "<toolkit>")
 
     def check(self, name, argv, answers=None, code=0):
         got, out, err = self.run_cli(argv, answers)
