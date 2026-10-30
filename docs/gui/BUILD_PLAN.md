@@ -260,6 +260,18 @@ by its address. An upload refuses if the identity changed since its rows were ch
 `<nickname>_gui_label`, `<nickname>_gui_color` (the same keys the automation GUI reads, so an Orchestrator looks the same in both)
 and `<nickname>_gui_preconfig_uploads` (off by default).
 Done when: fixture tests cover each status and the identity refusal, and a read-only check of the lab Orchestrators passes.
+Built as: `toolkit/gui/fleet.py`, `check_all(dotenv_path)` -> `Fleet(orchestrators, not_listed, note, warnings)`, each a `Status` with
+automation's fields (`name`, `url`, `status`, `reason`, `release`, `id`, `label`, `color`, `writes`, `seconds`) plus `validator`; `writes`
+is `<nickname>_gui_preconfig_uploads`, read with the values automation accepts for `_gui_writes`. It runs `common.client_for` with a
+5 s timeout inside a run context holding the given `.env`, reads `GET /gms/versions`, and takes the identity from
+`upload.orchestrator_identity`, the same read the approval fingerprint uses. `.env.example` has the three keys and the table of
+reading differences; `tests/test_gui_fleet.py` checks the fixture `.env` against a recorded automation reading, and against
+automation's own reader when its checkout is found (`EDGECONNECT_AUTOMATION_SRC`, else skipped). The `.env`-key test also scans
+`toolkit/gui/`. An upload to an Orchestrator whose identity changed is already refused by step 2 (the batch fingerprint holds the
+identity read in the upload run). `Fleet.warnings` names, by key only and never its value, each `.env` key that makes every
+edgeconnect-auto command stop: an unnumbered `orch_` key, an unclosed quote, a nickname with `-` or another character outside
+letters, digits and `_`, a reserved nickname (default, ec, edgeconnect, orchestrator), and a nickname used by two `orch_N` lines.
+Not yet: the read-only lab check, which needs the owner's machine.
 
 ## Step 5: GUI server and tasks
 `gui_server.py` copied from automation (security unchanged) and `gui_tasks.py` over `engine.py`. Reads (list, build,
