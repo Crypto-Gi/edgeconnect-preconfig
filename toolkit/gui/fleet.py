@@ -8,6 +8,8 @@ Red: not usable as configured (bad settings, no answer, certificate, DNS, refuse
 Import it after putting toolkit/scripts and toolkit/gui on sys.path.
 """
 import dataclasses
+import os
+from pathlib import Path
 import re
 import socket
 import ssl
@@ -71,9 +73,10 @@ def check_all(
     # A thread starts without the caller's run context, so each worker runs inside one holding this .env.
     context = common.RunContext(dotenv=dotenv_path or common.run_dotenv(), env=env, validators=common.validators_in(env))
     names = profiles(env)
+    path = dotenv_path or common.run_dotenv() or common._find_dotenv()  # no public way to name the .env the CLI would find
+    raw = _raw_dotenv(path)
     unlisted = sorted({key[:-len("_base_url")] for key in env if key.endswith("_base_url")} - set(names))
-    note = "{} {} settings in .env but no orch_N line, so {} not listed; add an orch_<N>=<nickname> line to list one".format(
-        ", ".join(unlisted), "has" if len(unlisted) == 1 else "have", "it is" if len(unlisted) == 1 else "they are") if unlisted else ""
+    note = _not_listed_note(unlisted, {key.lower().replace("-", "_") for key in raw})
 
     def check(name: str) -> Status:
         try:
@@ -87,27 +90,58 @@ def check_all(
             return status
         return dataclasses.replace(status, **{field: value.replace(key, "<API_KEY>") for field, value in dataclasses.asdict(status).items() if isinstance(value, str)})
 
-    warnings = automation_refusals(dotenv_path or common.run_dotenv() or common._find_dotenv())
+    warnings = automation_refusals(raw, os.environ)
     if not names:
         return Fleet([], unlisted, note, warnings)
     with ThreadPoolExecutor(max_workers=len(names)) as pool:
         return Fleet(list(pool.map(check, names)), unlisted, note, warnings)
 
 
-def automation_refusals(dotenv_path: str) -> List[str]:
-    """The keys of this .env that make every edgeconnect-auto command stop (its config.py), named by key, never by value.
+def _not_listed_note(unlisted: List[str], file_keys: Set[str]) -> str:
+    """Why these nicknames are not listed and how to list them; automation's single-Orchestrator names are reserved as nicknames."""
+    def where(group: List[str]) -> str:
+        return ".env" if all(name + "_base_url" in file_keys for name in group) else ".env or the environment"
+    plain, reserved = [n for n in unlisted if n not in _RESERVED], [n for n in unlisted if n in _RESERVED]
+    notes = []
+    if plain:
+        notes.append("{} {} settings in {} but no orch_N line, so {} not listed; add an orch_<N>=<nickname> line to list one".format(
+            ", ".join(plain), "has" if len(plain) == 1 else "have", where(plain), "it is" if len(plain) == 1 else "they are"))
+    if reserved:
+        notes.append("{}: single-Orchestrator settings in {}, not listed, and their names are reserved; copy them to a nickname of your own, "
+                     "for example orch_<N>=main with main_base_url and main_api_key".format(", ".join(reserved), where(reserved)))
+    return ". ".join(notes)
 
-    In file order: unnumbered orch_ keys and unclosed quotes; then, in slot order, nicknames it refuses or sees twice.
+
+def _raw_dotenv(path: str) -> Dict[str, str]:
+    """Each key of the .env with its value as written, quotes kept, split into lines as both toolkits' parse_dotenv split them."""
+    found: Dict[str, str] = {}
+    if not Path(path).is_file():
+        return found
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        line = line[7:].lstrip() if line.startswith("export ") else line
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            found[key.strip()] = value.strip()
+    return found
+
+
+def automation_refusals(raw: Mapping[str, str], environ: Mapping[str, str]) -> List[str]:
+    """The keys of the .env (_raw_dotenv) and the environment that make every edgeconnect-auto command stop (its config.py), named
+    by key, never by value: unnumbered orch_ keys, then unclosed quotes in .env, then in slot order nicknames it refuses or sees twice.
     """
-    raw = common.parse_dotenv(dotenv_path)  # values as written: preconfig keeps an unclosed quote, automation stops at it
+    quoted = {"'", '"'}
+    merged = {key.lower(): (key, value[1:-1] if len(value) >= 2 and value[0] in quoted and value[-1] == value[0] else value) for key, value in raw.items()}
+    merged.update({key.lower(): (key + " (in the environment)", value) for key, value in sorted(environ.items())})  # automation: the environment wins
     found = []
-    for key, value in raw.items():
-        if key.lower().startswith("orch_") and key.lower() != "orch_default" and not _SLOT.match(key.lower()):
+    for lower, (key, _) in merged.items():
+        if lower.startswith("orch_") and lower != "orch_default" and not _SLOT.match(lower):
             found.append(key + ": " + _REFUSE + "an orch_ key must be numbered (orch_<N>), or be orch_default")
-        if value[:1] in {"'", '"'} and (len(value) < 2 or value[-1] != value[0]):
+    for key, value in raw.items():
+        if value[:1] in quoted and (len(value) < 2 or value[-1] != value[0]):
             found.append(key + ": " + _REFUSE + "its quote is not closed")
     owners: Dict[str, str] = {}
-    slots = sorted((int(match.group(1)), key, value.strip().lower()) for key, value in raw.items() for match in [_SLOT.match(key.lower())] if match and value.strip())
+    slots = sorted((int(match.group(1)), key, value.strip().lower()) for lower, (key, value) in merged.items() for match in [_SLOT.match(lower)] if match and value.strip())
     for _, key, name in slots:
         if not _NICKNAME.match(name) or name in _RESERVED:
             found.append(key + ": " + _REFUSE + "a nickname uses letters, digits or _ only, and is not default, ec, edgeconnect or orchestrator")

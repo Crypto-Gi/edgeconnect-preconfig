@@ -228,6 +228,32 @@ class FleetTests(unittest.TestCase):
         self.check(dotenv("lab", "edge_b"))
         self.assertEqual(self.fleet.warnings, [])
 
+    def test_a_quote_inside_matched_quotes_is_no_warning(self):
+        self.check(dotenv("lab") + "lab_gui_label=\"'Lab\"\nlab_note='\"'\n")
+        self.assertEqual(self.fleet.warnings, [])
+
+    def test_orch_keys_in_the_process_environment_are_checked_as_automation_reads_them(self):
+        with mock.patch.dict(os.environ, {"ORCH_VALIDATORS": "lab", "ORCH_9": "Edge-B", "ORCH_7": "lab"}):
+            self.check(dotenv("lab"))
+        refuse = "the automation tools (edgeconnect-auto) stop at this key: "
+        self.assertEqual(self.fleet.warnings, [
+            "ORCH_VALIDATORS (in the environment): " + refuse + "an orch_ key must be numbered (orch_<N>), or be orch_default",
+            "ORCH_7 (in the environment): " + refuse + "this nickname is already used by orch_1",
+            "ORCH_9 (in the environment): " + refuse + "a nickname uses letters, digits or _ only, and is not default, ec, edgeconnect or orchestrator",
+        ])
+
+    def test_single_orchestrator_keys_get_a_nickname_that_is_not_reserved(self):
+        with mock.patch.dict(os.environ, {"EC_BASE_URL": "https://one.invalid", "EC_API_KEY": KEY}):
+            self.check(dotenv("lab") + "orchestrator_base_url=https://two.invalid\norchestrator_api_key={}\n".format(KEY))
+        self.assertEqual(self.fleet.not_listed, ["ec", "orchestrator"])
+        self.assertEqual(self.fleet.note, "ec, orchestrator: single-Orchestrator settings in .env or the environment, not listed, and their "
+                                          "names are reserved; copy them to a nickname of your own, for example orch_<N>=main with main_base_url "
+                                          "and main_api_key")
+        with mock.patch.dict(os.environ, {"SPARE_BASE_URL": "https://spare.invalid"}):
+            self.check(dotenv("lab"))
+        self.assertEqual(self.fleet.note, "spare has settings in .env or the environment but no orch_N line, so it is not listed; add an "
+                                          "orch_<N>=<nickname> line to list one")
+
     def test_the_given_env_is_used_inside_another_run_context(self):
         other = os.path.join(os.path.dirname(self.path), "other.env")
         Path(other).write_text(dotenv("elsewhere"), encoding="utf-8")
