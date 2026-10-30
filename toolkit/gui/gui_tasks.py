@@ -38,7 +38,6 @@ UPLOADS = {"upload", "upload_yaml"}
 # compare and preconfigs join READS with their engine helpers (R6 pending; preconfigs is step 10).
 FINAL = {"done", "failed", "rejected", "expired", "cancelled"}
 _OPEN = {"queued", "running", "awaiting_approval"}
-_NEPK = re.compile(r"^\d+\.NE$", re.I)
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")  # a build or site type folder name as the GUI lists it: no path in it
 
 
@@ -263,11 +262,15 @@ class TaskManager:
         if action == "list":
             return self._read(task, [], lambda: engine.list_appliances(orch, opt("search"), **context))
         if action == "build":
-            appliance = self._text(request, "appliance").strip()
-            if _NEPK.match(appliance):  # the lock below is the build folder's name, which comes from the hostname
-                raise TaskError("build takes the appliance's hostname as the appliance list shows it, not its nePk {}".format(appliance))
+            # The card sends both fields from `list`; the CLI is given `hostname or nepk`, and names the folder `hostName or nePk`.
+            # One box sent once by hostname and once by nePk queues on either identifier; the folder lock keeps its site runs out.
+            hostname, nepk = ((request.get(key) if isinstance(request.get(key), str) else "").strip() for key in ("hostname", "nepk"))
+            appliance = hostname or nepk
+            if not appliance:
+                raise TaskError("hostname or nepk is required")
+            keys = ["appliance:{}:{}:{}".format(orch, kind, value.lower()) for kind, value in (("host", hostname), ("ne", nepk)) if value]
             validate_on = self._orchestrator(opt("validate_on"), required=False) or None
-            return self._read(task, ["appliance:" + cli.safe_name(appliance).lower()], lambda: engine.build(
+            return self._read(task, keys + ["appliance:" + cli.safe_name(appliance).lower()], lambda: engine.build(
                 orch, appliance, out=self.out_root, validate_on=validate_on, target_release=opt("target_release"), target_ecos=opt("target_ecos"), **context))
         if action == "variables":
             build = self._build(request)
@@ -337,16 +340,22 @@ class TaskManager:
             finally:
                 for lock in reversed(held):
                     lock.release()
-                if task.folder:  # what the CLI wrote there (rendered YAML) is kept 0600 too; the folder is 0700 meanwhile
-                    for path in task.folder.rglob("*"):
-                        if path.is_file():
-                            os.chmod(str(path), 0o600)
         return work
+
+    @staticmethod
+    def _sealed(task: Task, result: engine.Result) -> engine.Result:
+        """What the CLI wrote in the task's folder (rendered YAML) made 0600 too, before the browser hears the run ended; the
+        folder is 0700 meanwhile."""
+        if task.folder:
+            for path in task.folder.rglob("*"):
+                if path.is_file():
+                    os.chmod(str(path), 0o600)
+        return result
 
     def _read(self, task: Task, keys: Sequence[str], call: Callable[[], engine.Result]) -> Callable[[], None]:
         def body() -> None:
             task.set("running")
-            result = call()
+            result = self._sealed(task, call())
             if task.cancelled:  # it could not be stopped midway; it is not offered as finished
                 return task.set("cancelled", "cancelled; what it wrote is kept", result)
             task.set(result.status, _summary(result), result)
@@ -354,12 +363,12 @@ class TaskManager:
 
     def _upload_yaml(self, task: Task, call: Callable[[], engine.Result]) -> None:
         task.set("uploading")
-        result = call()
+        result = self._sealed(task, call())
         task.set(result.status, _summary(result), result)
 
     def _upload(self, task: Task, call: Callable[[Optional[Callable[[str], Any]]], engine.Result]) -> None:
         task.set("running", "checking the rows; nothing is uploaded yet")
-        check = call(None)
+        check = self._sealed(task, call(None))
         if task.cancelled:
             return task.set("cancelled", "cancelled; nothing was uploaded", check)
         if check.approval is None:  # refused, or no row ready to upload: the check is the outcome
@@ -381,7 +390,7 @@ class TaskManager:
         except ApprovalError as error:
             return task.set("rejected", "{}; nothing was uploaded".format(error))
         task.set("uploading")
-        result = call(approver)
+        result = self._sealed(task, call(approver))
         task.set(result.status, _summary(result), result)
 
 

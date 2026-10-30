@@ -170,26 +170,62 @@ class TaskTests(Fixture):
         self.wait(task, "awaiting_approval", "failed", "rejected")
         self.assertEqual(task.view()["result"]["approval"]["counts"], {"ready": 1, "invalid": 1, "conflict": 1, "rows": 3})
 
-    def test_a_second_build_of_the_same_hostname_queues_and_a_nepk_is_refused(self):
-        release = threading.Event()
-
-        def slow(*args, **kwargs):
-            release.wait(10)
-            return write_capture(common.work_dir() / "cap-{}".format(threading.get_ident()))
-        elsewhere = Path(tempfile.mkdtemp(dir=str(self.tmp)))  # a rebuild of h1 here would move the shared build aside
+    def builds(self, host_names, gate):
+        """A TaskManager on a fresh output folder whose capture waits on gate, then reads the box named on the command line
+        (--appliance) with the hostName host_names gives it ("" for a box without one)."""
+        def slow(orchestrator, appliance, *args, **kwargs):
+            gate.wait()
+            folder = write_capture(common.work_dir() / "cap-{}".format(threading.get_ident()))
+            run = json.loads((folder / "run.json").read_text(encoding="utf-8"))
+            run["appliance"]["hostName"] = {k.lower(): v for k, v in host_names.items()}[appliance.lower()]
+            (folder / "run.json").write_text(json.dumps(run), encoding="utf-8")
+            return folder
+        patch = mock.patch.object(capture, "capture", side_effect=slow)
+        patch.start()
+        self.addCleanup(patch.stop)
+        elsewhere = Path(tempfile.mkdtemp(dir=str(self.tmp)))  # a rebuild of h1 in the shared folder would move the shared build aside
         tasks = TaskManager(str(self.on), str(elsewhere), str(elsewhere / "work"))
         self.managers.append(tasks)
-        with mock.patch.object(capture, "capture", side_effect=slow):
-            first = self.wait(tasks.create({"action": "build", "orchestrator": "lab", "appliance": "h1", "validate_on": "lab"}), "running")
-            second = tasks.create({"action": "build", "orchestrator": "lab", "appliance": "H1"})
-            listing = self.wait(tasks.create({"action": "list", "orchestrator": "lab"}), "done", "failed")
-            time.sleep(0.3)
-            self.assertEqual((first.state, second.state, listing.state), ("running", "queued", "done"))
-            release.set()
-            self.assertEqual([self.wait(t, "done", "failed").state for t in (first, second)], ["done", "done"], second.result and second.result.text)
-        for nepk in ("9.NE", " 12.ne "):
-            with self.assertRaisesRegex(TaskError, "build takes the appliance's hostname as the appliance list shows it, not its nePk"):
-                tasks.create({"action": "build", "orchestrator": "lab", "appliance": nepk})
+        return tasks
+
+    def build_task(self, tasks, hostname, nepk):
+        return tasks.create({"action": "build", "orchestrator": "lab", "hostname": hostname, "nepk": nepk})
+
+    def second_queues(self, tasks, release, first, second):
+        self.wait(first, "running")
+        listing = self.wait(tasks.create({"action": "list", "orchestrator": "lab"}), "done", "failed")
+        time.sleep(0.3)
+        self.assertEqual((first.state, second.state, listing.state), ("running", "queued", "done"))
+        release.set()
+        self.assertEqual([self.wait(t, "done", "failed").state for t in (first, second)], ["done", "done"], second.result and second.result.text)
+
+    @staticmethod
+    def folder(task):
+        return [Path(r["folder"]).name for r in task.result.outputs if r["kind"] == "build"]
+
+    def test_one_box_sent_by_hostname_and_by_nepk_queues(self):
+        release = threading.Event()
+        tasks = self.builds({"h1": "h1", "9.NE": "h1"}, release)
+        first, second = self.build_task(tasks, "h1", "9.NE"), self.build_task(tasks, "", "9.NE")
+        self.second_queues(tasks, release, first, second)
+        self.assertEqual((self.folder(first), self.folder(second)), (["h1"], ["h1"]))
+        self.assertIn("reading 9.NE from lab", second.result.text)  # the CLI is given hostname or nepk, as the card sent them
+
+    def test_a_box_without_a_hostname_builds_and_locks_on_its_nepk(self):
+        release = threading.Event()
+        tasks = self.builds({"9.NE": ""}, release)
+        first, second = self.build_task(tasks, "", "9.NE"), self.build_task(tasks, " ", "9.ne")
+        self.second_queues(tasks, release, first, second)
+        self.assertEqual(self.folder(second), ["9_NE"])  # the CLI names the folder after the nePk
+        self.assertIn("reading 9.NE from lab", first.result.text)
+        with self.assertRaisesRegex(TaskError, "hostname or nepk is required"):
+            tasks.create({"action": "build", "orchestrator": "lab", "hostname": " ", "nepk": None})
+
+    def test_two_different_boxes_build_in_parallel(self):
+        tasks = self.builds({"h1": "h1", "h2": "h2"}, threading.Barrier(2, timeout=10))  # each capture waits until both are in it
+        both = [self.build_task(tasks, "h1", "9.NE"), self.build_task(tasks, "h2", "10.NE")]
+        self.assertEqual([self.wait(t, "done", "failed").state for t in both], ["done", "done"], [t.result.text for t in both if t.result])
+        self.assertEqual([self.folder(t) for t in both], [["h1"], ["h2"]])
 
     # ------------------------------------------------------------ the approval gates, through the task layer
 
@@ -270,7 +306,7 @@ class TaskTests(Fixture):
             ({"action": "validate", "build": "h1", "site": "t"}, "csv_text is required"),
             ({"action": "upload", "orchestrator": "lab", "template_text": "x"}, "csv_text is required"),
             ({"action": "validate_yaml", "orchestrator": "lab", "files": "x"}, "files must list"),
-            ({"action": "build", "orchestrator": "lab", "appliance": "h1", "validate_on": "nope"}, "unknown Orchestrator 'nope'"),
+            ({"action": "build", "orchestrator": "lab", "hostname": "h1", "nepk": "9.NE", "validate_on": "nope"}, "unknown Orchestrator 'nope'"),
         ]:
             with self.assertRaisesRegex(TaskError, message):
                 tasks.create(request)
