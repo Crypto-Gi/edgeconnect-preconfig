@@ -1,0 +1,95 @@
+$ edgeconnect-preconfig variables <tmp>/out/h1
+> typed: 1
+> typed: l
+> typed: 1
+> typed: (Enter)
+> typed: gask
+> typed: y
+exit 0
+--- stdout
+Hostname, serial number and secrets are always per site.
+How do you want to pick the rest?
+  1) Top 10 - the settings most often different between sites (start here)
+  2) Top 20
+  3) All settings, by section
+>   Always per site, no questions: hostname, 0 secret(s) and 49 Deployment-page and appliance-info values (type l to list them)
+     #  Setting                                              Value now                       Diff  Choice
+  -- Top 10: most often different between sites ------------------
+   20  dhcpInfo[lan0].gatewayIpAddress                      ""                              100%  VARIABLE
+  -- 25 more settings: type a to see all, by section
+Type numbers to flip (e.g. 4 12), s1.. to open a section, a for all sections, t for the Top list, l for the locked ones, a word to search, Enter when done, q to quit.
+>   -- Always per site (locked) ------------------------------------
+    -  applianceInfo.hostname                               h1                                    VARIABLE
+    -  applianceInfo.group                                  Net                              90%  VARIABLE
+    -  applianceInfo.site                                   S1                               93%  VARIABLE
+    -  applianceInfo.clusterProfile                         P1                               33%  VARIABLE
+    -  applianceInfo.networkRole                            non-hub                           0%  VARIABLE
+    -  applianceInfo.region                                 East                             85%  VARIABLE
+    -  applianceInfo.location.address                       1 Example Road                   56%  VARIABLE
+    -  applianceInfo.contact.name                           ops                              48%  VARIABLE
+    -  serverPerSegment                                     False                            28%  VARIABLE
+    -  totalOutboundBandwidth                               100000                           91%  VARIABLE
+    -  totalInboundBandwidth                                100000                           90%  VARIABLE
+    -  ipsecUdpPort                                         12000                            93%  VARIABLE
+    -  passThroughShapedTraffic.outboundMaxBandwidth        5000                                  VARIABLE
+    -  deploymentInterfaces[lan0].ipAddressMask             10.0.0.1/24                     100%  VARIABLE
+    -  deploymentInterfaces[lan0.90].ipAddressMask          2001:db8:1::1/64                      VARIABLE
+    -  deploymentInterfaces[wan0].addressingMode            static                           37%  VARIABLE
+    -  deploymentInterfaces[wan0].ipAddressMask             198.51.100.10/24                 52%  VARIABLE
+    -  deploymentInterfaces[wan0].nextHop                   198.51.100.1                     51%  VARIABLE
+    -  deploymentInterfaces[wan0].inboundMaxBandwidth       50000                            83%  VARIABLE
+    -  deploymentInterfaces[wan0].outboundMaxBandwidth      50000                            85%  VARIABLE
+    -  deploymentInterfaces[wan0].behindNat                 none                             45%  VARIABLE
+    -  haConfig.haPeerSerial                                001122                                VARIABLE
+    -  haConfig.haPeerHostname                              h2                                    VARIABLE
+    -  haConfig.haIpPool                                    169.254.1.0/24                        VARIABLE
+    -  haConfig.haSubnetMask                                30                                    VARIABLE
+    -  haConfig.hav6IpPool                                  fd00::a9fe:0000/112                   VARIABLE
+    -  haConfig.hav6SubnetMask                              126                                   VARIABLE
+    -  haConfig.haVlanStart                                 4000                                  VARIABLE
+    -  haConfig.haInterfaceOrder                            INET                                  VARIABLE
+    -  haConfig.haPeerInterfaceInfo[0].outbound             50000                                 VARIABLE
+    -  haConfig.haPeerInterfaceInfo[0].inbound              50000                                 VARIABLE
+    -  haConfig.haPeerInterfaceInfo[0].ipVersion            4                                     VARIABLE
+    -  dhcpInfo[lan0].dhcpType                              server                           21%  VARIABLE
+    -  dhcpInfo[lan0].dhcpAddressMask                       10.0.0.0/24                     100%  VARIABLE
+    -  dhcpInfo[lan0].startIpAddress                        10.0.0.10                       100%  VARIABLE
+    -  dhcpInfo[lan0].endIpAddress                          10.0.0.200                      100%  VARIABLE
+    -  dhcpInfo[lan0].netbiosNodeType                       B                                 0%  VARIABLE
+    -  dhcpInfo[lan0].maximumLease                          86400                            54%  VARIABLE
+    -  dhcpInfo[lan0].defaultLease                          3600                             45%  VARIABLE
+    -  raInfo[lan0.90].hoplimit                             64                                    VARIABLE
+    -  raInfo[lan0.90].linkmtu                              1500                                  VARIABLE
+    -  raInfo[lan0.90].managedflag                          False                                 VARIABLE
+    -  raInfo[lan0.90].maxinterval                          600                                   VARIABLE
+    -  raInfo[lan0.90].mininterval                          200                                   VARIABLE
+    -  raInfo[lan0.90].otherconfigflag                      True                                  VARIABLE
+    -  raInfo[lan0.90].reachabletime                        30000                                 VARIABLE
+    -  raInfo[lan0.90].retranstimer                         1000                                  VARIABLE
+    -  raInfo[lan0.90].routerdeflifetime                    1800                                  VARIABLE
+    -  raInfo[lan0.90].routerpreference                     high                                  VARIABLE
+    -  raInfo[lan0.90].sendadv                              True                                  VARIABLE
+>     1  businessIntentOverlays.overlays                      Mesh                             26%  VARIABLE
+> 
+52 columns: hostname, group, site, cluster_profile, network_role, region, address, contact_name, server_per_segment, total_outbound_bandwidth, total_inbound_bandwidth, ipsec_udp_port, pass_through_shaped_traffic_bw_out, lan0_ip, lan0_90_ip, wan0_addressing_mode, wan0_ip, wan0_next_hop, wan0_bw_in, wan0_bw_out, wan0_behind_nat, ha_config_ha_peer_serial, ha_config_ha_peer_hostname, ha_config_ha_ip_pool, ha_config_ha_subnet_mask, ha_config_hav6_ip_pool, ha_config_hav6_subnet_mask, ha_config_ha_vlan_start, ha_config_ha_interface_order, ha_config_ha_peer_interface_info_0_outbound, ha_config_ha_peer_interface_info_0_inbound, ha_config_ha_peer_interface_info_0_ip_version, lan0_dhcp_type, lan0_dhcp_address_mask, lan0_start, lan0_end, lan0_netbios_node_type, lan0_maximum_lease, lan0_default_lease, lan0_90_hoplimit, lan0_90_linkmtu, lan0_90_managedflag, lan0_90_maxinterval, lan0_90_mininterval, lan0_90_otherconfigflag, lan0_90_reachabletime, lan0_90_retranstimer, lan0_90_routerdeflifetime, lan0_90_routerpreference, lan0_90_sendadv, lan0_gateway, overlays
+Site type name [h1]: Build site-gask? [Y/n] 
+Saved <tmp>/out/h1/site-gask  (example row validated on lab)
+  gask.jinja2          the template
+  sites.csv            fill one row per site (the first row is h1's own values)
+
+Next:
+  edgeconnect-preconfig validate <tmp>/out/h1/site-gask --csv <tmp>/out/h1/site-gask/sites.csv
+--- stderr
+--- files
+771e9efe4974d1fa  <tmp>/out/h1/site-gask/checks.json
+e1bbbf514dd38b64  <tmp>/out/h1/site-gask/columns.json
+b2ee08ac5200f338  <tmp>/out/h1/site-gask/columns.md
+705c91e410b94ebe  <tmp>/out/h1/site-gask/example.csv
+48a5f1faf2b4bea1  <tmp>/out/h1/site-gask/gask.csv
+2bf5a4ad61967f2f  <tmp>/out/h1/site-gask/gask.jinja2
+e8bd59d9a8cf47e1  <tmp>/out/h1/site-gask/ledger.json
+661e2288c3a9e474  <tmp>/out/h1/site-gask/reference.yaml
+457b990271caa566  <tmp>/out/h1/site-gask/rendered/h1_preconfig.yml
+705c91e410b94ebe  <tmp>/out/h1/site-gask/sites.csv
+1c0681d5e84c8cae  <tmp>/out/h1/site-gask/summary.md
+3de5c4900e9bc98f  <tmp>/out/h1/site-gask/variables.csv

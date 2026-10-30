@@ -42,9 +42,9 @@ Copy `.env.example` to `.env` in your working directory, or set `EC_DOTENV=/path
 
 ```dotenv
 # Read-only reference Orchestrator profile
-orch_1=prod
-prod_base_url=https://orchestrator.example.com
-prod_api_key=YOUR_READ_ONLY_API_KEY
+orch_1=main
+main_base_url=https://orchestrator.example.com
+main_api_key=YOUR_READ_ONLY_API_KEY
 
 # Lab / staging Orchestrator profile (used for /validate and optional upload)
 orch_2=lab

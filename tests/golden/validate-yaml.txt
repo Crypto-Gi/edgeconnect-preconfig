@@ -1,0 +1,11 @@
+$ edgeconnect-preconfig validate --yaml <tmp>/yaml --orchestrator lab
+exit 1
+--- stdout
+
+passed                         good.yml                 good: not uploaded (validate only)
+validate failed                rejected.yml             rejected: HTTP 400: applianceInfo.site: invalid value
+skipped: name conflict         taken.yml                taken: 'taken' already exists on Orchestrator or earlier in this batch
+
+3 file(s): 1 passed
+--- stderr
+--- files

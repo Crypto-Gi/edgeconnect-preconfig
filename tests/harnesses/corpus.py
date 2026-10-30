@@ -35,7 +35,7 @@ def latest(folder: Path) -> Optional[Path]:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--validator", default="lab")
-    parser.add_argument("--only", nargs="*", help="orchestrator/nePk keys, e.g. prod/0.NE")
+    parser.add_argument("--only", nargs="*", help="orchestrator/nePk keys, e.g. lab/0.NE")
     args = parser.parse_args(argv)
     captures = []
     for role in ("reference", "samples"):

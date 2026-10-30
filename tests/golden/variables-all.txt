@@ -1,0 +1,26 @@
+$ edgeconnect-preconfig variables <tmp>/out/h1 --pick all --yes --name gall
+exit 0
+--- stdout
+
+76 columns: hostname, group, site, cluster_profile, network_role, region, address, contact_name, server_per_segment, total_outbound_bandwidth, total_inbound_bandwidth, ipsec_udp_port, pass_through_shaped_traffic_bw_out, lan0_ip, lan0_90_ip, wan0_addressing_mode, wan0_ip, wan0_next_hop, wan0_bw_in, wan0_bw_out, wan0_behind_nat, ha_config_ha_peer_serial, ha_config_ha_peer_hostname, ha_config_ha_ip_pool, ha_config_ha_subnet_mask, ha_config_hav6_ip_pool, ha_config_hav6_subnet_mask, ha_config_ha_vlan_start, ha_config_ha_interface_order, ha_config_ha_peer_interface_info_0_outbound, ha_config_ha_peer_interface_info_0_inbound, ha_config_ha_peer_interface_info_0_ip_version, lan0_dhcp_type, lan0_dhcp_address_mask, lan0_start, lan0_end, lan0_netbios_node_type, lan0_maximum_lease, lan0_default_lease, lan0_90_hoplimit, lan0_90_linkmtu, lan0_90_managedflag, lan0_90_maxinterval, lan0_90_mininterval, lan0_90_otherconfigflag, lan0_90_reachabletime, lan0_90_retranstimer, lan0_90_routerdeflifetime, lan0_90_routerpreference, lan0_90_sendadv, deployment_mode, lan0_interface_name, lan0_interface_label, lan0_interface_type, lan0_segment, lan0_zone, lan0_90_interface_name, lan0_90_interface_label, lan0_90_interface_type, lan0_90_segment, lan0_90_zone, wan0_interface_name, wan0_interface_label, wan0_interface_type, wan0_firewall_mode, wan0_segment, wan0_zone, ha_config_ha_interface, ha_config_ha_peer_interface_info_0_interface_label, ha_config_ha_peer_interface_info_0_segment, ha_config_ha_peer_interface_info_0_zone, lan0_dhcp_interface_name, lan0_gateway, lan0_90_ra_interface_name, template_groups, overlays
+
+Saved <tmp>/out/h1/site-gall  (example row validated on lab)
+  gall.jinja2          the template
+  sites.csv            fill one row per site (the first row is h1's own values)
+
+Next:
+  edgeconnect-preconfig validate <tmp>/out/h1/site-gall --csv <tmp>/out/h1/site-gall/sites.csv
+--- stderr
+--- files
+3d8d6440f371bdb6  <tmp>/out/h1/site-gall/checks.json
+98337fcdfb4344fe  <tmp>/out/h1/site-gall/columns.json
+28c6bf9678743a27  <tmp>/out/h1/site-gall/columns.md
+02d4f692225cc446  <tmp>/out/h1/site-gall/example.csv
+71f17549dd50dfcb  <tmp>/out/h1/site-gall/gall.csv
+f3372b967cb6fe62  <tmp>/out/h1/site-gall/gall.jinja2
+e8bd59d9a8cf47e1  <tmp>/out/h1/site-gall/ledger.json
+661e2288c3a9e474  <tmp>/out/h1/site-gall/reference.yaml
+fb1c5e105ce89e1e  <tmp>/out/h1/site-gall/rendered/h1_preconfig.yml
+02d4f692225cc446  <tmp>/out/h1/site-gall/sites.csv
+1c0681d5e84c8cae  <tmp>/out/h1/site-gall/summary.md
+2ef7a0e61d16a282  <tmp>/out/h1/site-gall/variables.csv

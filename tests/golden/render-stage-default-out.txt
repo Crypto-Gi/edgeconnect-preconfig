@@ -1,0 +1,7 @@
+$ edgeconnect-preconfig render --template <tmp>/out/h1/site-t10/t10.jinja2 --csv <tmp>/out/h1/site-t10/sites.csv
+exit 0
+--- stdout
+ok   h1_preconfig -> <tmp>/preconfig-output/t10/rendered/h1_preconfig.yml
+--- stderr
+--- files
+457b990271caa566  <tmp>/preconfig-output/t10/rendered/h1_preconfig.yml

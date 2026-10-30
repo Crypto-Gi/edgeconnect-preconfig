@@ -286,9 +286,9 @@ lab_base_url=https://<ORCHESTRATOR_FQDN_OR_IP>
 lab_api_key=<API_KEY>
 
 # More Orchestrators:
-# orch_2=prod
-# prod_base_url=https://<ORCHESTRATOR_FQDN_OR_IP>
-# prod_api_key=<API_KEY>
+# orch_2=main
+# main_base_url=https://<ORCHESTRATOR_FQDN_OR_IP>
+# main_api_key=<API_KEY>
 
 # Format: one KEY=value per line, no inline comments ("value # note" is all value), base URLs https:// only.
 # Nicknames: letters, digits and _ (not "orch" or orch_...). Pick the default with orch_default=<nickname>.

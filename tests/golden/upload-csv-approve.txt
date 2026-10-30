@@ -1,0 +1,12 @@
+$ edgeconnect-preconfig upload <tmp>/out/h1/site-up --csv <tmp>/out/h1/site-up/sites.csv --approve
+exit 0
+--- stdout
+uploading sites.csv on lab ...
+ROW  1 | VALID    | h1_preconfig             | .yml written immediately -> <tmp>/out/h1/site-up/rendered/h1_preconfig.yml
+UPLOADED | h1_preconfig             | serial=- | id=2
+
+Summary: total=1 | valid_yaml_written=1 | invalid_skipped=0 | conflict_skipped=0 | uploaded=1 | upload_failed=0
+--- stderr
+--- files
+457b990271caa566  <tmp>/out/h1/site-up/rendered/h1_preconfig.yml
+dba3d47a71fd5d7b  <tmp>/out/h1/site-up/upload-report.json

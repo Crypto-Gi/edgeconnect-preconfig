@@ -51,7 +51,7 @@ mkdir -p .github/skills && cp -R skills/building-edgeconnect-preconfig-templates
 ## Conversational example (With Any Supported AI Agent)
 
 1. **Capture & propose:**
-   > *"Read appliance `branch-nyc-01` (or `2.NE`) from Orchestrator `prod` and build a preconfig Jinja2 and CSV template named `retail-branch`."*
+   > *"Read appliance `branch-nyc-01` (or `2.NE`) from Orchestrator `main` and build a preconfig Jinja2 and CSV template named `retail-branch`."*
 2. **Review the variables:**
    The agent presents `variables.csv`: every field with the proposed decision (`variable` or `fixed`) and the reason; variables come first, then the rows marked `(check)` that need an owner decision. Reply in plain English:
    > *"Make the DNS servers per site, keep the region fixed, and use `core_ip` as the name of the LAN address."*

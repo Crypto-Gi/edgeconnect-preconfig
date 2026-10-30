@@ -230,7 +230,7 @@ class ApplyGuardrailAndDiff(unittest.TestCase):
         valid = {"deploymentInfo": {"deploymentInterfaces": [{"interfaceName": "wan0.4000", "addressingMode": "dhcpv4", "inboundMaxBandwidth": 100000, "outboundMaxBandwidth": 100000}]}}
         check_guardrails("vlab", valid)
         with self.assertRaises(GuardrailError):
-            check_guardrails("prod", valid)
+            check_guardrails("field", valid)
         with self.assertRaises(GuardrailError):
             check_guardrails("vlab", {"managementIp": {"ipAddress": "192.0.2.1"}})
         with self.assertRaises(GuardrailError):

@@ -1,0 +1,6 @@
+$ edgeconnect-preconfig build --orchestrator fieldref --appliance h1 --out <tmp>/out
+exit 2
+--- stdout
+--- stderr
+error: fieldref is not a validator Orchestrator: /validate runs only on the ones listed in EC_VALIDATORS in .env (now: lab). Add it there (comma-separated nicknames) if /validate may run on it, or pass --validate-on <lab profile>.
+--- files

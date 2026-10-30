@@ -1,0 +1,27 @@
+$ edgeconnect-preconfig 
+exit 2
+--- stdout
+edgeconnect-preconfig: build preconfig templates from a working appliance, without an AI.
+
+  list       --orchestrator NICK [--search TEXT]       test the Orchestrator profile, list its appliances
+  build      --orchestrator NICK --appliance NAME       read one appliance, write a validated YAML, template and CSV
+             [--out DIR] [--validate-on NICK]
+  variables  FOLDER [--pick top10|top20] [--set C,..]  choose the per-site settings: Top 10, Top 20 or all, by section
+             [--name NAME] [--yes]
+  compare    FOLDER SITE [SITE ...] [--name NAME]       other sites of the same design pick the per-site settings;
+             [--yes]                                    the CSV gets a row for each site
+  validate   FOLDER --csv FILE [--orchestrator NICK]    render and /validate every CSV row
+  upload     FOLDER --csv FILE [--orchestrator NICK]    show what would be uploaded; uploads only with --approve
+             [--approve]
+  validate   --yaml FILE|DIR ... --orchestrator NICK    check existing preconfig YAML files; never writes
+  upload     --yaml FILE|DIR ... --orchestrator NICK    same checks, then upload every file that passes (no --approve)
+             [--name NAME] [--serial SERIAL]
+
+FOLDER is what build wrote (or a site-<name> folder inside it). Validation runs on the Orchestrator the appliance was read
+from, unless --validate-on names another; either way it must be listed in EC_VALIDATORS. Every Orchestrator read is a GET.
+The pipeline stages still run by name: capture, cache-check, translate, generate, render, check, options,
+validate and upload with their own options (edgeconnect-preconfig STAGE --help).
+
+stages: cache-check, capture, check, generate, options, render, translate, upload, validate
+--- stderr
+--- files

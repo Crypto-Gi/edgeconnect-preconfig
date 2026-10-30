@@ -1,0 +1,45 @@
+$ edgeconnect-preconfig build --orchestrator lab --appliance h1 --out <tmp>/out
+exit 0
+--- stdout
+reading h1 from lab (GET only) ...
+converting for Orchestrator release 9.7.1.42046 ...
+checking and validating on lab ...
+earlier h1 kept as h1.previous-<stamp>
+
+Saved <tmp>/out/h1  (/validate on lab: accepted)
+  reference.yaml      the appliance as preconfig YAML
+  h1.jinja2           the template
+  h1.csv              empty sheet (headers only) for new sites
+  example.csv         this appliance's own values, secrets blank - copy it to start your sites.csv
+  summary.md          what was carried and what was not; verdict: Complete for preconfig; 2 item(s) to check by hand.
+
+Next: choose the per-site settings
+  edgeconnect-preconfig variables <tmp>/out/h1
+or let other sites of the same design choose them
+  edgeconnect-preconfig compare <tmp>/out/h1 <site> <site>
+--- stderr
+--- files
+fd41a8936a8dd685  <tmp>/out/h1/build.json
+1b7a19da56d0045d  <tmp>/out/h1/checks.json
+9ef9fb53f98a6fce  <tmp>/out/h1/columns.json
+684f14c42703a28f  <tmp>/out/h1/columns.md
+72c3ba05347703bf  <tmp>/out/h1/example.csv
+125a7c407a6bb1a0  <tmp>/out/h1/h1.csv
+ffcf2f83c9bbf394  <tmp>/out/h1/h1.jinja2
+e8bd59d9a8cf47e1  <tmp>/out/h1/ledger.json
+661e2288c3a9e474  <tmp>/out/h1/reference.yaml
+60517ab804af9673  <tmp>/out/h1/rendered/h1_preconfig.yml
+1c0681d5e84c8cae  <tmp>/out/h1/summary.md
+4efc989e4f7e84df  <tmp>/out/h1/variables.csv
+fd41a8936a8dd685  <tmp>/out/h1.previous-<stamp>/build.json
+1b7a19da56d0045d  <tmp>/out/h1.previous-<stamp>/checks.json
+9ef9fb53f98a6fce  <tmp>/out/h1.previous-<stamp>/columns.json
+684f14c42703a28f  <tmp>/out/h1.previous-<stamp>/columns.md
+72c3ba05347703bf  <tmp>/out/h1.previous-<stamp>/example.csv
+125a7c407a6bb1a0  <tmp>/out/h1.previous-<stamp>/h1.csv
+ffcf2f83c9bbf394  <tmp>/out/h1.previous-<stamp>/h1.jinja2
+e8bd59d9a8cf47e1  <tmp>/out/h1.previous-<stamp>/ledger.json
+661e2288c3a9e474  <tmp>/out/h1.previous-<stamp>/reference.yaml
+60517ab804af9673  <tmp>/out/h1.previous-<stamp>/rendered/h1_preconfig.yml
+1c0681d5e84c8cae  <tmp>/out/h1.previous-<stamp>/summary.md
+4efc989e4f7e84df  <tmp>/out/h1.previous-<stamp>/variables.csv

@@ -1,0 +1,13 @@
+$ edgeconnect-preconfig list --orchestrator lab
+exit 0
+--- stdout
+Orchestrator lab: https://orch.example.com/gms/rest | release 9.7.1.42046 | login OK | /validate allowed: yes
++----------+------+-------+---------+------+-----------+
+| Hostname | nePk | Model | ECOS    | Site | Reachable |
++----------+------+-------+---------+------+-----------+
+| h1       | 9.NE | EC-V  | 9.7.1.0 | S1   | yes       |
+| h2       | 8.NE | EC-XS | 9.6.2.1 | S1   | NO        |
++----------+------+-------+---------+------+-----------+
+2 appliance(s), 1 reachable
+--- stderr
+--- files
