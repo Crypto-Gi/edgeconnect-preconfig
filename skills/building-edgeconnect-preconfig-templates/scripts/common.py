@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import hmac
-from http.client import HTTPSConnection
+from http.client import HTTPException, HTTPSConnection
 import json
 import os
 from pathlib import Path
@@ -230,12 +230,17 @@ class ApiClient:
                 raw = resp.read()
         except HTTPError as err:
             status = err.code
-            raw = err.read() if hasattr(err, "read") else b""
+            try:
+                raw = err.read() if hasattr(err, "read") else b""
+            except (HTTPException, OSError):  # a cut-off error body (IncompleteRead, reset): the status still says what failed
+                raw = b""
             msg = self._extract_error_message(raw, status)
             if status not in expected_status:
                 self._raise_http(status, msg, verb, path)
         except (URLError, ssl.SSLError, OSError) as err:
             raise TransportError("transport error on {} {}: {}".format(verb, path, err), method=verb, path=path) from err
+        except HTTPException as err:  # InvalidURL, BadStatusLine...: their text may quote the URL or the answer, so only the type
+            raise TransportError("transport error on {} {}: {}".format(verb, path, type(err).__name__), method=verb, path=path) from None
 
         if status not in expected_status:
             self._raise_http(status, self._extract_error_message(raw, status), verb, path)
@@ -521,7 +526,12 @@ def client_for(nickname: str, dotenv_path: Optional[str] = None) -> ApiClient:
     if not base_url or not api_key:
         profiles = sorted(v for k, v in env.items() if re.match(r"^orch_\d+$", k) and v)
         raise ConfigurationError("unknown or incomplete Orchestrator profile {!r} (configured: {})".format(nickname, ", ".join(profiles) or "none"))
-    parsed = urlsplit(base_url)
+    try:
+        parsed = urlsplit(base_url)
+    except ValueError:  # a malformed [host]; its text may quote the URL
+        raise ConfigurationError("base URL for {!r} must be an https:// URL".format(nickname)) from None
+    if "@" in parsed.netloc:  # user:password@ would reach http.client, whose error prints it; never echo the URL
+        raise ConfigurationError("base URL for {!r} must not hold a user name or password: the key goes in {}_api_key".format(nickname, norm))
     if parsed.scheme != "https" or not parsed.netloc:
         raise ConfigurationError("base URL for {!r} must be an https:// URL".format(nickname))
     path = parsed.path.rstrip("/") or "/gms/rest"
