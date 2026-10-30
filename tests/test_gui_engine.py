@@ -381,6 +381,29 @@ class EngineTests(unittest.TestCase):
                 self.assertIn("refused, nothing sent: the GUI runs only the command lines it builds", result.text)
                 self.assertFalse((self.site / "rendered" / "site-z.yml").exists())
 
+    def test_a_site_folder_with_out_writes_only_there_with_its_checks_scrub_and_gate(self):
+        site = self.build / "site-out"
+        shutil.rmtree(str(site), ignore_errors=True)
+        shutil.copytree(str(self.site), str(site))
+        meta = json.loads((site / "columns.json").read_text(encoding="utf-8"))
+        meta["columns"]["contact_name"]["secret"] = True
+        (site / "columns.json").write_text(json.dumps(meta), encoding="utf-8")
+        shutil.rmtree(str(site / "rendered"), ignore_errors=True)
+        sheet = self.sheet("out.csv", [self.row("o-1", contact_name="Hunter'2 Out", site="REJECT"), self.row("o-2", lan0_ip="bad"), self.row("o-3")])
+        checked = engine.render_site(site, sheet, self.tmp / "run-out" / "rendered", "lab", **self.context(self.on))
+        self.assertEqual((checked.counts, checked.files), ({"INVALID": 2, "VALID": 1}, [str(self.tmp / "run-out" / "rendered" / "o-3.yml")]))
+        self.assertEqual([i["column"] for i in checked.issues if i["row"] == 2], ["lan0_ip"])  # the cell checks of columns.json ran
+        self.assertIn("<SECRET:contact_name>", checked.text)
+        self.assertNotIn("Hunter", shown(checked))
+        result = engine.run(["upload", "--site-dir", str(site), "--csv", str(sheet), "--orchestrator", "lab", "--out", str(self.tmp / "run-out"), "--approve"],
+                            **self.context(self.on))
+        self.assertEqual((result.status, self.orch.posts()), ("rejected", []))
+        self.assertIn("refused, nothing sent: an upload with --approve needs the GUI's approval", result.text)
+        upload_check = engine.upload(sheet, "lab", site_dir=site, out=self.tmp / "run-out", **self.context(self.on))
+        self.assertEqual((upload_check.counts, upload_check.approval["orchestrator"]), ({"INVALID": 2, "PLANNED": 1}, "lab"))
+        self.assertNotIn("Hunter", shown(upload_check))
+        self.assertFalse((site / "rendered").exists())  # nothing written into the site folder
+
     def test_files_named_without_yaml_are_scanned_too(self):
         other = self.tmp / "other.yml"
         other.write_text("applianceInfo:\n  site: S1\n", encoding="utf-8")
@@ -414,6 +437,59 @@ class EngineTests(unittest.TestCase):
         refused = engine.render(self.site / "t.jinja2", runs["a"][0], runs["a"][1], validate_on="lab_b", **runs["a"][2])
         self.assertEqual(refused.exit_code, 2)
         self.assertIn("lab_b is not a validator Orchestrator (allowed: lab-a, lab_a)", refused.text)
+
+    # ------------------------------------------------------------ printed lines as they come
+
+    def streamed(self, call):
+        """The lines on_line got, and how many Orchestrator calls had been made when the first one came."""
+        lines, calls_then = [], []
+
+        def on_line(text):
+            calls_then.append(len(self.orch.calls))
+            lines.append(text)
+        return call(on_line), lines, calls_then
+
+    def test_printed_lines_stream_as_they_come_scrubbed_as_the_text(self):
+        site = self.build / "site-stream"
+        shutil.rmtree(str(site), ignore_errors=True)
+        shutil.copytree(str(self.site), str(site))
+        meta = json.loads((site / "columns.json").read_text(encoding="utf-8"))
+        meta["columns"]["contact_name"]["secret"] = True
+        (site / "columns.json").write_text(json.dumps(meta), encoding="utf-8")
+        sheet = self.sheet("stream.csv", [self.row("site-s", contact_name='Hunter"2 Secret', site="REJECT"), self.row("site-t")])
+        result, lines, calls_then = self.streamed(lambda on_line: engine.validate(site, sheet, "lab", on_line=on_line, **self.context(self.on)))
+        self.assertEqual("\n".join(lines) + "\n", result.text)
+        self.assertIn("<SECRET:contact_name>", result.text)
+        self.assertNotIn("Hunter", "\n".join(lines))
+        self.assertLess(calls_then[0], len(self.orch.calls))  # the first line came before the run had made its calls
+
+    def test_a_streamed_yaml_snippet_is_withheld_as_in_the_text(self):
+        secret = 'abcdefghijklmnopqrstuvwxyz0123456789"ABCDEFGHIJ'
+        template = self.tmp / "quoted-stream.jinja2"
+        template.write_text("applianceInfo:\n  hostname: {{ data['hostname'] }}\n  contact: \"{{ data['admin_password'] }}\"\n", encoding="utf-8")
+        sheet = self.sheet("long-stream.csv", [{"hostname": "q-3", "admin_password": secret, "preconfig_name": "q-3"}], ["hostname", "admin_password", "preconfig_name"])
+        result, lines, _ = self.streamed(lambda on_line: engine.render(template, sheet, self.tmp / "run-long-stream", on_line=on_line, **self.context(self.on)))
+        self.assertEqual("\n".join(lines) + "\n", result.text)
+        self.assertIn("(the source snippet is withheld: it may hold a secret)", result.text)
+        for part in ("0123456789", "ABCDEFGHIJ"):
+            self.assertNotIn(part, "\n".join(lines))
+
+    def test_yaml_file_runs_hand_their_lines_over_at_the_end(self):
+        broken = self.tmp / "stream-broken.yml"
+        broken.write_text('applianceInfo:\n  hostname: "a"b-very-secret-tail\n', encoding="utf-8")
+        result, lines, calls_then = self.streamed(lambda on_line: engine.validate_yaml([broken], "lab", on_line=on_line, **self.context(self.on)))
+        self.assertEqual(lines, result.text.splitlines())
+        self.assertIn("the parser's message is not shown", result.text)
+        self.assertNotIn("very-secret", "\n".join(lines))
+        self.assertEqual(calls_then[0], len(self.orch.calls))
+
+    def test_the_variables_preview_writes_nothing_and_passes_fix(self):
+        before = sorted(p.name for p in self.build.iterdir())
+        preview = engine.variables(self.build, "top10", dry_run=True, **self.context(self.on))
+        self.assertEqual((preview.status, [r["kind"] for r in preview.outputs], sorted(p.name for p in self.build.iterdir())),
+                         ("done", ["dry-run", "picker"], before))
+        locked = engine.variables(self.build, "top10", fixed=["hostname"], dry_run=True, **self.context(self.on))
+        self.assertIn("error: --fix: hostname cannot be fixed: always per site", locked.text)
 
     def test_a_prompt_reads_end_of_file_and_never_the_process_stdin(self):
         result = in_threads(lambda: engine.run(["variables", str(self.build)], **self.context(self.on)))[0]

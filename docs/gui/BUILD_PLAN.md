@@ -293,6 +293,12 @@ rejected, expired, cancelled; automation's `applying` is named `uploading` here,
 imports arrive in the request body.
 Done when: security tests cover a rebinding Host, a missing cookie, a cross-origin POST, a non-JSON POST and keys never appearing
 in a response, and the page loads on macOS, Linux and WSL.
+Built as: `toolkit/gui/gui_server.py` (automation's server, security unchanged; `python3 -m toolkit.gui [--port P] [--no-browser]`
+prints the absolute `.env`, output, work and run-log folders and fixes `EDGECONNECT_REPORT_DIR` once at launch), `toolkit/gui/gui_tasks.py`
+(actions list, build, variables preview/save, validate, render, validate_yaml, upload, upload_yaml; an appliance lock for a build folder
+and its site folders, an Orchestrator lock per upload; imports saved 0600 in `preconfig-output/runs/<run_id>/`), `engine.run(on_line=...)`
+for the streamed lines, `GET /api/builds` for the earlier builds, and a placeholder `static/index.html` until step 6. Tested in
+`tests/test_gui_tasks.py` and `tests/test_gui_server.py`. Not yet: compare and preconfigs tasks (R6, step 10), the page on macOS and WSL.
 
 ## Step 6: Design and shell
 The exact copy of the automation `static/` design (fonts, `app.css`, favicon style), the top bar with the Orchestrator switcher,
