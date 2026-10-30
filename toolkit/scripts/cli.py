@@ -477,7 +477,7 @@ class Picker:
         """Every row as the picker held it, the chosen columns and the folder written, for the run's recorder.
 
         A dry run writes no folder (None) and gives lines: each row then also has the lines of its value in reference.yaml.
-        compare gives sites, (hostname, sheet items) as typed: each row then has site_values, None where a site lacks it, <SECRET:path> on a secret row (cli-requests R10)."""
+        compare gives sites, (hostname read from the capture, sheet items) in the order given: each row then has site_values, None where a site lacks it, <SECRET:path> on a secret row (cli-requests R10)."""
         rows = []
         for r, sheet_row in zip(self.rows, self.sheet(reference)):
             secret = r["reason"].startswith("secret")

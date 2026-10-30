@@ -176,7 +176,7 @@ Then ask in plain words, for example *"Read appliance `2.NE` from Orchestrator `
 
 - **Read-only capture.** Appliances are read with `GET` only, and secrets are redacted before anything touches disk.
 - **Nothing applies.** The only writes are `upload --approve` and `upload --yaml` (also when the GUI runs them), to the Orchestrator you name, always with `autoApply` off. Applying a preconfig is done by a person in Orchestrator; no script here can do it ([decision 0008](docs/decisions/0008-the-toolkit-cannot-apply.md)).
-- **Validators are named.** `/validate` runs only on Orchestrators listed exactly in `EC_VALIDATORS`.
+- **Validators are named.** `/validate` runs only on Orchestrators listed exactly in `EC_VALIDATORS`, except the re-check `upload` makes on the Orchestrator it uploads to.
 - It never writes a `.yml` for a row that fails, never overwrites an existing preconfig name or serial, and never changes Template Groups or Business Intent Overlays.
 
 ## The EdgeConnect toolkit
@@ -192,7 +192,7 @@ Three repositories, one `setup.sh`:
 ## Tests and contributing
 
 ```bash
-python3 -m unittest discover -s tests
+EC_DOTENV=/nonexistent/.env python3 -m unittest discover -s tests
 ```
 
 The offline tests run in CI on Python 3.9 and 3.13, on Linux and macOS; a second job runs the GUI in Chromium (a smoke test and an accessibility check). What was verified on real appliances, and the apply-time behaviours `/validate` does not catch: [docs/TESTING_AND_VERIFICATION.md](docs/TESTING_AND_VERIFICATION.md). Ground rules, the repository layout and how to rebuild `dist/`: [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -30,7 +30,7 @@ npm install --prefix /tmp/axe axe-core@4.10.3
 EDGECONNECT_BROWSER_TESTS=1 AXE_CORE_JS=/tmp/axe/node_modules/axe-core/axe.min.js python3 -m unittest discover -s tests -p test_browser.py
 ```
 
-`EDGECONNECT_BROWSER_PATH` names a Chromium binary to use instead of Playwright's own. `python3 tests/e2e/gui_launcher.py` starts the GUI over the same fake Orchestrator and prints its link, for a look by hand.
+`EDGECONNECT_BROWSER_PATH` names a Chromium binary to use instead of Playwright's own, and `AXE_REPORT=FILE` writes the axe-core results to that file. One fleet test in `tests/test_gui_fleet.py` also compares with an `edgeconnect-orchestrator-automation` checkout: it looks for one beside this repository, or at `EDGECONNECT_AUTOMATION_SRC` (that checkout's `src/` folder), and is skipped when there is none. `python3 tests/e2e/gui_launcher.py` starts the GUI over the same fake Orchestrator and prints its link, for a look by hand.
 
 The lab harnesses in `tests/harnesses/` need a lab Orchestrator and are run by maintainers; [docs/TESTING_AND_VERIFICATION.md](docs/TESTING_AND_VERIFICATION.md) records what they proved.
 
@@ -66,7 +66,7 @@ edgeconnect-preconfig/
 ├── tools/build_skill.py                      # copies toolkit/ into the skill and rebuilds dist/; --check reports drift
 ├── tests/                                    # offline unit tests & maintainer lab harnesses
 │   ├── test_*.py                             # one file per script or area (capture, cells, cli, mappers, translate_robust, upload_yaml, ...)
-│   ├── test_gui_*.py                         # the GUI: approval, engine, fleet, server, tasks, tables, pick, compare, make, inventory, design
+│   ├── test_gui_*.py                         # the GUI: approval, engine, fleet, server, shell, tasks, tables, pick, compare, make, inventory, design
 │   ├── test_golden.py                        # what each command prints and writes, against golden/ (EDGECONNECT_UPDATE_GOLDEN=1 regenerates)
 │   ├── test_no_apply.py                      # fails if any script or test calls the apply API or sets autoApply true
 │   ├── test_validators.py                    # /validate runs only on nicknames listed exactly in EC_VALIDATORS
