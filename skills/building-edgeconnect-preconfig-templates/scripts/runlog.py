@@ -39,6 +39,7 @@ NEXT_STEP = {
     "ERROR": "Read the error above and rerun the same command.",
 }
 _SECRET_TEXT = re.compile(r"(?i)(authorization|x-auth-token|api[-_]?key|password|secret|cookie)\s*[:=]\s*([^\s,;]+)")
+_BEARER = re.compile(r"(?i)\b(bearer)\s+[^\s,;]+")  # `Authorization: Bearer <token>`: _SECRET_TEXT alone would take "Bearer" for the value
 GRAM = 8  # a run of this many characters of a secret anywhere in the text is masked, as the whole secret is
 
 
@@ -138,7 +139,8 @@ def redact(value: Any, masker: Masker, free: bool = False) -> Any:
     if isinstance(value, (list, tuple)):
         return [redact(item, masker, free) for item in value]
     if isinstance(value, str):
-        return masker.unmark(_SECRET_TEXT.sub(lambda match: match.group(1) + "=<REDACTED>", masker.text(value, free)))
+        text = _BEARER.sub(lambda match: match.group(1) + " <REDACTED>", masker.text(value, free))
+        return masker.unmark(_SECRET_TEXT.sub(lambda match: match.group(1) + "=<REDACTED>", text))
     return value
 
 

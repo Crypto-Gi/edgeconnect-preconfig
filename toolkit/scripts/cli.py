@@ -390,15 +390,22 @@ class Picker:
         return [self.line(r) for r in hits[:40]] + (["  ... {} more".format(len(hits) - 40)] if len(hits) > 40 else []) or ["  nothing matches {!r}".format(word)]
 
     def set_by_name(self, names: List[str]) -> List[str]:
-        """--set: column names or paths made VARIABLE; returns the names that match nothing."""
-        unknown = []
+        """--set: column names or paths made VARIABLE; returns why each name it could not set was refused."""
+        problems, unknown = [], []
         for name in names:
             hit = [r for r in self.free if name in (r["path"], r["column"], r["label"])]
-            if not hit:
-                unknown.append(name)
             for r in hit:
                 self.on[r["path"]] = True
-        return unknown
+            if hit:
+                continue
+            other = next((r for r in self.rows if name in (r["path"], r["column"], r["label"])), None)
+            if other is not None and other["follows"] is not None:
+                problems.append("{} follows {}; set {} instead".format(name, other["follows"]["column"], other["follows"]["column"]))
+            elif other is not None and other["locked"]:
+                problems.append("{} is always per site already ({})".format(name, self.locked_why(other)))
+            else:
+                unknown.append(name)
+        return problems + (["no setting named {}".format(", ".join(unknown))] if unknown else [])
 
     def fix_by_name(self, names: List[str], reference: Dict[str, Any]) -> List[str]:
         """--fix: column names or paths made FIXED (the opposite of --set); returns the reason for each name it refused."""
@@ -451,7 +458,7 @@ class Picker:
     def record(self, reference: Dict[str, Any], folder: Optional[Path], lines: Optional[Dict[str, List[int]]] = None) -> None:
         """Every row as the picker held it, the chosen columns and the folder written, for the run's recorder.
 
-        A dry run writes no folder (None) and gives lines: each ticked row then also has the lines of its value in reference.yaml."""
+        A dry run writes no folder (None) and gives lines: each row then also has the lines of its value in reference.yaml."""
         rows = []
         for r, sheet_row in zip(self.rows, self.sheet(reference)):
             secret = r["reason"].startswith("secret")
@@ -459,8 +466,8 @@ class Picker:
                          "pct": r["pct"], "support": r["support"], "locked": r["locked"], "locked_why": self.locked_why(r) if r["locked"] else None,
                          "follows": r["follows"]["path"] if r["follows"] is not None else None, "on": sheet_row["decision"] == "variable",
                          "column": sheet_row["column"] if sheet_row["decision"] == "variable" else ""})
-            if lines is not None:
-                rows[-1]["lines"] = lines.get(r["path"]) if rows[-1]["on"] else None
+            if lines is not None:  # every row, ticked or not: the GUI highlights a row's lines on hover
+                rows[-1]["lines"] = lines.get(r["path"])
         record("picker", rows=rows, columns=self.columns(reference), folder=str(folder) if folder else None)
 
     def columns(self, reference: Dict[str, Any]) -> List[str]:
@@ -689,9 +696,9 @@ def cmd_variables(argv: List[str], read: Callable[[str], str] = input) -> int:
     else:
         picker.start_top(20 if mode == "top20" else 10)
     if a.set:
-        unknown = picker.set_by_name([s.strip() for s in a.set.split(",") if s.strip()])
-        if unknown:
-            raise Fail("--set: no setting named {}".format(", ".join(unknown)))
+        refused = picker.set_by_name([s.strip() for s in a.set.split(",") if s.strip()])
+        if refused:
+            raise Fail("--set: " + "; ".join(refused))
     if a.fix:
         refused = picker.fix_by_name([s.strip() for s in a.fix.split(",") if s.strip()], reference)
         if refused:

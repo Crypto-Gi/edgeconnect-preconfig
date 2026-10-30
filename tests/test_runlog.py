@@ -101,6 +101,15 @@ class RunLog(unittest.TestCase):
                     self.assertNotIn(leak, text)
                 self.assertIn("<SECRET:nac_key>", json.dumps(record))
 
+    def test_a_bearer_token_in_text_is_redacted(self):
+        masker = runlog.Masker({})
+        got = runlog.redact({"message": "GET failed: Authorization: Bearer eyJhbGciOi.payload.sig, retry", "detail": ["sent bearer abc123def456ghi"],
+                             "name": "site Bearer-less"}, masker)
+        self.assertNotIn("eyJhbGciOi", json.dumps(got))
+        self.assertNotIn("abc123def456ghi", json.dumps(got))
+        self.assertEqual(got["name"], "site Bearer-less")  # the word alone, with no token after it, stays
+        self.assertIn("<REDACTED>", got["message"])
+
     def test_names_and_paths_that_share_part_of_a_secret_stay_whole(self):
         masker = runlog.Masker({"branch-01-Secret!": "psk", 'Zq9"K7mPx2Lw8Rt5Vn3Bc6': "key"})
         record = {"workflow": "preconfig upload", "rows": [{"item": "branch-01_preconfig", "scope": "branch-01_preconfig.yml", "reason": "x"}],

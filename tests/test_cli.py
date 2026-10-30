@@ -112,7 +112,7 @@ class PickerChoice(unittest.TestCase):
     def test_sheet_builds_a_template_with_the_chosen_columns(self):
         p = self.picker()
         p.start_top(10)
-        self.assertEqual(p.set_by_name(["bgpSystemConfig.asn", "nonsense"]), ["nonsense"])
+        self.assertEqual(p.set_by_name(["bgpSystemConfig.asn", "nonsense"]), ["no setting named nonsense"])
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "variables.csv"
             write_sheet(p.sheet(REFERENCE), path)
@@ -244,6 +244,13 @@ class FixAndDryRun(unittest.TestCase):
                 self.assertEqual((code, out, picker), (2, "", None))
                 self.assertEqual(err, "error: --fix: {} cannot be fixed: always per site, {}\n".format(name, why))
 
+    def test_set_on_a_follower_or_a_locked_row_names_why(self):
+        code, _, err, _ = self.run_cli("--pick", "top10", "--set", "bgpSystemConfig.neighbors[0].peerIpAddress,no_such", "--dry-run")
+        self.assertEqual((code, err), (2, "error: --set: bgpSystemConfig.neighbors[0].peerIpAddress follows local_routes_static_routes_1_next_hop; "
+                                          "set local_routes_static_routes_1_next_hop instead; no setting named no_such\n"))
+        code, _, err, _ = self.run_cli("--pick", "top10", "--set", "hostname", "--dry-run")
+        self.assertEqual((code, err), (2, "error: --set: hostname is always per site already (hostname)\n"))
+
     def test_a_follower_is_refused_naming_the_row_it_follows(self):
         code, _, err, _ = self.run_cli("--pick", "top10", "--fix", "bgpSystemConfig.neighbors[0].peerIpAddress,no_such", "--dry-run")
         self.assertEqual(code, 2)
@@ -275,10 +282,7 @@ class FixAndDryRun(unittest.TestCase):
         lines = (self.folder / "reference.yaml").read_text().splitlines()
         for row in picker["rows"]:
             with self.subTest(path=row["path"]):
-                if not row["on"]:
-                    self.assertIsNone(row["lines"])
-                    continue
-                first, last = row["lines"]
+                first, last = row["lines"]  # every row, ticked or not: the GUI highlights a row's lines on hover (R9a)
                 self.assertLessEqual(first, last)
                 held = "\n".join(lines[first - 1:last])
                 if row["value"] not in ("<SECRET>", ""):
