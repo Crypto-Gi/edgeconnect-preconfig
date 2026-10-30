@@ -1,0 +1,12 @@
+$ edgeconnect-preconfig variables <tmp>/out/h1
+exit 1
+--- stdout
+Hostname, serial number and secrets are always per site.
+How do you want to pick the rest?
+  1) Top 10 - the settings most often different between sites (start here)
+  2) Top 20
+  3) All settings, by section
+> 
+nothing written
+--- stderr
+--- files

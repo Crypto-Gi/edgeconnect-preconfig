@@ -96,7 +96,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 def _main(argv: Optional[List[str]] = None) -> int:
-    from common import normalize_serial, output_root, parse_yaml, resolve_output_filename
+    from common import normalize_serial, output_root, parse_yaml, problem_data, record, resolve_output_filename
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site-dir", type=Path, help="site folder from translate.py: finds the template and columns.json, writes rendered/ there")
     parser.add_argument("--template", type=Path, help="template path (not needed with --site-dir)")
@@ -174,9 +174,11 @@ def _main(argv: Optional[List[str]] = None) -> int:
             if fname and (out_dir / fname).exists() and seen_files.get(fname) == idx:
                 (out_dir / fname).unlink()
             print("FAIL {}{}".format(pcfg_name, "".join("\n     " + p for p in problems[:5])), flush=True)
+            record("row", index=idx, preconfig_name=pcfg_name, status="failed", file=None, problems=[problem_data(idx, p) for p in problems])
             continue
         (out_dir / fname).write_text(text, encoding="utf-8")
         print("ok   {} -> {}".format(pcfg_name, out_dir / fname), flush=True)
+        record("row", index=idx, preconfig_name=pcfg_name, status="ok", file=str(out_dir / fname), problems=[])
     return 1 if failed else 0
 
 

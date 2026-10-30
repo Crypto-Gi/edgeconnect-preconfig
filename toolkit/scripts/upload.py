@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cells import cell_problems, interface_addresses, option_limits, subnet_problems  # noqa: E402
-from common import EdgeConnectError, client_for, normalize_serial, output_root, parse_yaml, resolve_output_filename, utc_stamp, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
+from common import EdgeConnectError, client_for, normalize_serial, output_root, parse_yaml, problem_data, record, resolve_output_filename, utc_stamp, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 from render import flow_through, read_rows, render_row  # noqa: E402
 from validate import Stop, validate_text  # noqa: E402
 
@@ -111,6 +111,7 @@ def run_batch(
     seen_serials: Dict[str, int] = {}
     row_results: List[Dict[str, Any]] = []
     ready_to_upload: List[Dict[str, Any]] = []
+    problems_of: Dict[int, List[str]] = {}  # for the run's recorder: the entries keep only the joined detail
 
     for idx, row in enumerate(read_rows(csv_path), 1):
         problems: List[str] = []
@@ -170,6 +171,7 @@ def run_batch(
                 "detail": "; ".join(problems),
             }
             row_results.append(entry)
+            problems_of[idx] = problems
             print("ROW {:2d} | INVALID  | {:<24} | skipped (no .yml written): {}".format(idx, pcfg_name, entry["detail"]), flush=True)
             continue
 
@@ -195,6 +197,7 @@ def run_batch(
                 "detail": "; ".join(conflicts),
             }
             row_results.append(entry)
+            problems_of[idx] = conflicts
             print("ROW {:2d} | CONFLICT | {:<24} | .yml written ({}), upload skipped: {}".format(idx, pcfg_name, yml_path.name, entry["detail"]), flush=True)
             continue
 
@@ -213,6 +216,9 @@ def run_batch(
         print("ROW {:2d} | VALID    | {:<24} | .yml written immediately -> {}".format(idx, pcfg_name, yml_path), flush=True)
 
     uploaded_count = upload_ready(client, ready_to_upload) if approve and ready_to_upload else 0
+    for entry in row_results:
+        record("row", index=entry["row"], preconfig_name=entry["preconfig_name"], status=entry["status"], file=entry["yaml_file"],
+               problems=[problem_data(entry["row"], p) for p in problems_of.get(entry["row"], [])])
 
     report = {
         "timestamp": utc_stamp(),
@@ -336,6 +342,7 @@ def yaml_main(parser: argparse.ArgumentParser, paths: List[Path], nick: str, nam
     print("", flush=True)
     for r in results:
         print("{:<30} {:<24} {}{}".format(r["status"], Path(r["file"]).name, r["preconfig_name"], ": " + r["detail"] if r["detail"] else ""), flush=True)
+        record("file", status=r["status"], name=r["preconfig_name"], file=r["file"], detail=r["detail"])
     print("\n{} file(s): {} {}".format(len(results), sum(1 for r in results if r["status"] in ("uploaded", "passed")), "uploaded" if send else "passed"), flush=True)
     return 0 if all(r["status"] in ("uploaded", "passed") or r["status"].startswith("skipped") for r in results) else 1
 

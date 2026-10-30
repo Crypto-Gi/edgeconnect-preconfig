@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import find_default_template  # noqa: E402  guard-ok: imported after the sys.path insert
+from common import Problem, find_default_template  # noqa: E402  guard-ok: imported after the sys.path insert
 from options import extract  # noqa: E402
 
 
@@ -80,19 +80,19 @@ def cell_problems(columns: Dict[str, Dict[str, Any]], row: Dict[str, str], limit
             continue
         if meta.get("secret"):
             if cell == "" and REQUIRED_SECRET.match(meta.get("path", "")):
-                problems.append("secret column {} is empty: fill it in the CSV (the toolkit never stores secrets)".format(name))
+                problems.append(Problem("secret column {} is empty: fill it in the CSV (the toolkit never stores secrets)".format(name), name, "<SECRET>"))
             continue
         fmt = meta.get("format")
         mode = (row.get(meta["mode_column"]) or "") if meta.get("mode_column") else meta.get("mode")
         if mode is not None and mode.strip().lower() not in ("", "static"):  # dhcpv4, dhcpv6, slaac: the default template says leave it empty
             if cell.strip():
-                problems.append("{}: {!r} must be blank when the interface's addressingMode is {}".format(name, cell, mode.strip()))
+                problems.append(Problem("{}: {!r} must be blank when the interface's addressingMode is {}".format(name, cell, mode.strip()), name, cell))
             continue
         if cell != cell.strip():
-            problems.append("{}: {!r} has leading or trailing spaces".format(name, cell))
+            problems.append(Problem("{}: {!r} has leading or trailing spaces".format(name, cell), name, cell))
         elif cell == "":
             if (fmt or meta["type"] in ("int", "float", "bool")) and (not meta["optional"] or (mode or "").strip().lower() == "static"):
-                problems.append("{}: blank, expected {}".format(name, describe(meta, limits)))
+                problems.append(Problem("{}: blank, expected {}".format(name, describe(meta, limits)), name, cell))
         elif fmt and cell.lower() in _words(meta):
             continue
         elif fmt:
@@ -101,20 +101,20 @@ def cell_problems(columns: Dict[str, Dict[str, Any]], row: Dict[str, str], limit
                 if (fmt == "ip/prefix") != ("/" in cell):
                     raise ValueError
             except ValueError:
-                problems.append("{}: {!r} is not {} ({})".format(name, cell, "an address with prefix length" if fmt == "ip/prefix" else "an address without prefix length", describe(meta, limits)))
+                problems.append(Problem("{}: {!r} is not {} ({})".format(name, cell, "an address with prefix length" if fmt == "ip/prefix" else "an address without prefix length", describe(meta, limits)), name, cell))
         elif meta["type"] == "bool":
             if cell.lower() not in ("true", "false"):
-                problems.append("{}: {!r} must be true or false".format(name, cell))
+                problems.append(Problem("{}: {!r} must be true or false".format(name, cell), name, cell))
         elif meta["type"] in ("int", "float") and not re.fullmatch(r"-?\d+" if meta["type"] == "int" else r"-?\d+(\.\d+)?", cell):
-            problems.append("{}: {!r} must be a {}".format(name, cell, "whole number" if meta["type"] == "int" else "number"))
+            problems.append(Problem("{}: {!r} must be a {}".format(name, cell, "whole number" if meta["type"] == "int" else "number"), name, cell))
         elif cell == str(meta["example"]):
             continue  # the reference appliance runs with this value (e.g. maxBandwidth 0 with auto bandwidth), whatever the template comment says
         else:
             limit = _limit(meta, limits)
             if limit and limit.get("range") and meta["type"] == "int" and re.fullmatch(r"-?\d+", cell) and not limit["range"][0] <= int(cell) <= limit["range"][1]:
-                problems.append("{}: {} is outside {} to {}".format(name, cell, *limit["range"]))
+                problems.append(Problem("{}: {} is outside {} to {}".format(name, cell, *limit["range"]), name, cell))
             elif limit and limit.get("enum") and cell.lower() not in [str(v).lower() for v in limit["enum"]]:
-                problems.append("{}: {!r} must be {}".format(name, cell, describe(meta, limits)))
+                problems.append(Problem("{}: {!r} must be {}".format(name, cell, describe(meta, limits)), name, cell))
     return problems
 
 

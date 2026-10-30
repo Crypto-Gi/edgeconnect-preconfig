@@ -13,7 +13,8 @@ import re
 import ssl
 import subprocess
 import sys
-from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Set, Tuple
+import threading
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Set, TextIO, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
@@ -399,6 +400,80 @@ def output_root() -> Path:
     """The default output parent: preconfig-output/ in the current folder, or in the run's out_dir."""
     context = _RUN.get()
     return (context.out_dir if context and context.out_dir else Path.cwd()) / "preconfig-output"
+
+
+class Recorder:
+    """A run's structured results, in the order they were made, next to its printed text (cli-requests R1)."""
+
+    def __init__(self) -> None:
+        self.results: List[Dict[str, Any]] = []
+
+    def add(self, kind: str, **data: Any) -> None:
+        self.results.append(dict(data, kind=kind))
+
+
+def record(kind: str, **data: Any) -> None:
+    """Keep a result for the run's recorder; without a context or a recorder nothing is kept."""
+    context = _RUN.get()
+    if context is not None and context.recorder is not None:
+        context.recorder.add(kind, **data)
+
+
+class Problem(str):
+    """A problem message that also says what it is about (cli-requests R3); it prints exactly as the message."""
+    column: Optional[str]
+    value: Any
+
+    def __new__(cls, message: str, column: Optional[str] = None, value: Any = None) -> "Problem":
+        made = str.__new__(cls, message)
+        made.column, made.value = column, value
+        return made
+
+
+def problem_data(row: Optional[int], problem: str) -> Dict[str, Any]:
+    """A problem as data: row, column and value when the message carries them, and the message."""
+    return {"row": row, "column": getattr(problem, "column", None), "value": getattr(problem, "value", None), "message": str(problem)}
+
+
+_OUTPUT: "contextvars.ContextVar[Optional[Tuple[TextIO, TextIO]]]" = contextvars.ContextVar("edgeconnect_preconfig_output", default=None)
+_ROUTING = threading.Lock()
+
+
+class RoutedStream:
+    """Stands in for sys.stdout or sys.stderr: a write goes to the run's capture (captured_output) when it has one, else to the
+    stream it replaced, so runs in other threads keep printing where they did."""
+
+    def __init__(self, stream: TextIO, index: int) -> None:
+        self.stream, self.index = stream, index
+
+    def target(self) -> TextIO:
+        capture = _OUTPUT.get()
+        return capture[self.index] if capture is not None else self.stream
+
+    def write(self, text: str) -> int:
+        return self.target().write(text)
+
+    def flush(self) -> None:
+        self.target().flush()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.stream, name)
+
+
+@contextlib.contextmanager
+def captured_output(out: TextIO, err: Optional[TextIO] = None) -> Iterator[TextIO]:
+    """Send this run's stdout (and stderr, to err or to out) writes there; other threads and runs are not affected.
+
+    contextlib.redirect_stdout swaps the stream for the whole process, so a parallel run's lines would land in this capture."""
+    with _ROUTING:
+        for index, name in enumerate(("stdout", "stderr")):
+            if not isinstance(getattr(sys, name), RoutedStream):
+                setattr(sys, name, RoutedStream(getattr(sys, name), index))
+    token = _OUTPUT.set((out, err or out))
+    try:
+        yield out
+    finally:
+        _OUTPUT.reset(token)
 
 
 def client_for(nickname: str, dotenv_path: Optional[str] = None) -> ApiClient:

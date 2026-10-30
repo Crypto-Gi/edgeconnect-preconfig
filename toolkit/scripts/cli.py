@@ -21,7 +21,6 @@ The pipeline stages still run by name: capture, cache-check, translate, generate
 validate and upload with their own options (edgeconnect-preconfig STAGE --help).
 """
 import argparse
-import contextlib
 import csv
 import io
 import json
@@ -35,7 +34,7 @@ from typing import Any, Callable, Dict, List, Optional
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT  # noqa: E402
-from common import DEFAULT_TEMPLATES_DIR, EdgeConnectError, PermissionDeniedError, client_for, load_yaml, output_root, toolkit_version, utc_stamp, validators, work_dir, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
+from common import DEFAULT_TEMPLATES_DIR, EdgeConnectError, PermissionDeniedError, captured_output, client_for, load_yaml, output_root, record, toolkit_version, utc_stamp, validators, work_dir, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 
 PROG = "edgeconnect-preconfig"
 STATES = {1: "yes", 2: "NO", 3: "unsupported version", 4: "yes (out of sync)", 5: "yes (syncing)"}  # /appliance `state`
@@ -90,9 +89,9 @@ def keep_previous(folder: Path) -> None:
 
 
 def quiet(fn: Callable[..., Any], *args: Any) -> Any:
-    """Run a stage function with its stdout and stderr captured; returns (result, text)."""
+    """Run a stage function with this run's stdout and stderr captured (not a parallel run's); returns (result, text)."""
     buffer = io.StringIO()
-    with contextlib.redirect_stdout(buffer), contextlib.redirect_stderr(buffer):
+    with captured_output(buffer):
         result = fn(*args)
     return result, buffer.getvalue()
 
@@ -198,6 +197,7 @@ def cmd_build(argv: List[str]) -> int:
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     verdict = next((l.split(":", 1)[1].strip() for l in text.splitlines() if l.startswith("verdict:")), "")
+    record("build", folder=str(folder), verdict=verdict, summary=str(folder / "summary.md"), validator=validator, release=release)
     print("\nSaved {}  (/validate on {}: accepted)".format(folder, validator))
     print("  reference.yaml      the appliance as preconfig YAML")
     print("  {:<19} the template".format(site + ".jinja2"))
@@ -359,6 +359,19 @@ class Picker:
                     row["column"] = name
             out.append(row)
         return out
+
+    def record(self, reference: Dict[str, Any], folder: Path) -> None:
+        """Every row as the picker held it, the chosen columns and the folder written, for the run's recorder."""
+        why = {r["path"]: "hostname" if r["path"] == "applianceInfo.hostname" else "secret" if r["reason"].startswith("secret")
+               else "deployment-page value (docs/decisions/0006)" for r in self.rows if r["locked"]}
+        rows = []
+        for r, sheet_row in zip(self.rows, self.sheet(reference)):
+            secret = r["reason"].startswith("secret")
+            rows.append({"n": r.get("n"), "path": r["path"], "section": r["section"], "label": r["label"], "value": "<SECRET>" if secret else r["value"],
+                         "pct": r["pct"], "support": r["support"], "locked": r["locked"], "locked_why": why.get(r["path"]),
+                         "follows": r["follows"]["path"] if r["follows"] is not None else None, "on": sheet_row["decision"] == "variable",
+                         "column": sheet_row["column"] if sheet_row["decision"] == "variable" else ""})
+        record("picker", rows=rows, columns=self.columns(reference), folder=str(folder))
 
     def columns(self, reference: Dict[str, Any]) -> List[str]:
         names: List[str] = []
@@ -532,6 +545,7 @@ def cmd_variables(argv: List[str], read: Callable[[str], str] = input) -> int:
         return 1
     target = build_site(a.folder, info, name, picker.sheet(reference))
     ensure_sites_csv(target)
+    picker.record(reference, target)
     return 0
 
 
@@ -600,7 +614,8 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         return 1
     rows_for = [{"hostname": n, "items": s} for n, s in zip(names, seen) if not misfits[n]]
     target = build_site(a.folder, info, name, picker.sheet(reference), rows_for)
-    ensure_sites_csv(target)  # every other site may have been left out: sites.csv still holds this site's row
+    ensure_sites_csv(target)
+    picker.record(reference, target)  # every other site may have been left out: sites.csv still holds this site's row
     return validate_rows(target, target / "sites.csv", info, None)
 
 
@@ -694,6 +709,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     except EdgeConnectError as error:
         print("error: {} ({})".format(error, type(error).__name__), file=sys.stderr)
         return 2
+    except EOFError:  # a prompt read the end of stdin (a GUI run has an empty one): ends as a quit at the prompt does
+        print("\nnothing written")
+        return 1
     except KeyboardInterrupt:
         print("\nstopped; nothing more written", file=sys.stderr)
         return 130
