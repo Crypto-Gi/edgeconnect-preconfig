@@ -173,6 +173,28 @@ class FleetTests(unittest.TestCase):
         self.assertEqual((result["baduploads"].status, result["baduploads"].reason), ("red", "fix the settings: baduploads_gui_preconfig_uploads must be on or off"))
         self.assertEqual([call[0] for call in self.opener.calls if call[0].startswith("bad")], [])  # bad settings send nothing
 
+    def test_a_base_url_with_a_user_name_or_password_is_red_and_sends_nothing(self):
+        Path(self.path).write_text(dotenv("creds").replace("https://", "https://user:pa55word@"), encoding="utf-8")
+        with mock.patch.object(socket, "create_connection", side_effect=AssertionError("no connection may be opened")):
+            result = fleet.check_all(self.path)  # the real ApiClient, opener and URL parsing
+        self.assertEqual([(s.name, s.url, s.status, s.reason) for s in result.orchestrators],
+                         [("creds", "https://creds.invalid", "red", "fix the settings: the base URL must not hold a user name or password")])
+        self.assertNotIn("pa55word", json.dumps(dataclasses.asdict(result)))
+
+    def test_an_unexpected_error_in_one_check_is_red_for_that_one_only_and_its_text_is_not_shown(self):
+        def factory(name):
+            if name == "odd":
+                raise RuntimeError("odd failure holding {}".format(KEY))
+            return common.client_for(name)
+        Path(self.path).write_text(dotenv("lab", "odd"), encoding="utf-8")
+        self.opener = Opener({}, self.clock)
+        with mock.patch.object(common, "build_opener", lambda *handlers: self.opener):
+            result = fleet.check_all(self.path, client_factory=factory, clock=self.clock)
+        self.assertEqual([(s.name, s.url, s.status, s.reason) for s in result.orchestrators], [
+            ("lab", "https://lab.invalid", "green", "connected (release 9.5.1)"),
+            ("odd", "https://odd.invalid", "red", "the check stopped on an unexpected error; nothing is known about this Orchestrator"),
+        ])
+
     def test_no_key_or_url_password_in_the_result(self):
         text = dotenv("echo", "creds").replace("creds_base_url=https://", "creds_base_url=https://user:pa55word@")
         result = self.check(text, {"echo": {"/gms/versions": "bad token {}".format(KEY)}})

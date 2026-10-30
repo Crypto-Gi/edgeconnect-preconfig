@@ -76,8 +76,12 @@ def check_all(
         ", ".join(unlisted), "has" if len(unlisted) == 1 else "have", "it is" if len(unlisted) == 1 else "they are") if unlisted else ""
 
     def check(name: str) -> Status:
-        with common.running(context):
-            status = _check(name, env, context.validators, timeout, client_factory, clock)
+        try:
+            with common.running(context):
+                status = _check(name, env, context.validators, timeout, client_factory, clock)
+        except Exception:  # one profile never takes the panel down; the error's text may hold a secret, so it is not shown
+            status = Status(name, _origin(env.get("{}_base_url".format(name), "")), RED,
+                            "the check stopped on an unexpected error; nothing is known about this Orchestrator", validator=name in context.validators)
         key = env.get("{}_api_key".format(name))
         if not key:
             return status
@@ -118,6 +122,8 @@ def _check(name: str, env: Mapping[str, str], validators: Set[str], timeout: flo
     url = _origin(env.get("{}_base_url".format(name), ""))
     validator = name in validators
     try:
+        if "@" in urlsplit(env.get("{}_base_url".format(name), "").strip()).netloc:  # client_for keeps it, and urllib then fails naming it
+            raise ConfigurationError("the base URL must not hold a user name or password")
         gui = _gui_settings(name, env)
         client = client_factory(name)
     except ConfigurationError as error:
