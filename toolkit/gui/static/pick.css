@@ -31,6 +31,11 @@
 .lock { color: var(--gate); }
 .why { font-weight: 500; }
 #pick-table tr.on td:last-child { color: var(--signal); }
+#pick-table .site { white-space: nowrap; max-width: 9rem; overflow: hidden; text-overflow: ellipsis; }
+#pick-table td.setting { min-width: 11rem; overflow-wrap: anywhere; }
+#pick-table th.site small { display: block; color: var(--gate); font-weight: 500; }
+#pick-table td.differs { color: var(--gate); font-weight: 600; }
+.pick-norow { margin: 0; overflow-wrap: anywhere; font-size: .85rem; }
 .tabs [role="tab"] { cursor: pointer; }
 [aria-pressed="true"].btn { background: var(--signal); color: var(--on-signal); border-color: var(--signal); }
 

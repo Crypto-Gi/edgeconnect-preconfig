@@ -348,9 +348,11 @@ folder and every site it reads by hostname and nePk on the build's Orchestrator.
 the build's Orchestrator, takes up to 4 ticked sites, and adds the start "Different between your sites"; the first preview reads the
 sites (GET only) and every later run, Save too, names that task (`captures_from`) so the server passes its recorded captures back
 with `--captures`; the browser never sends a folder. Save is `compare --name N --yes`, which validates on the build's validator and
-says when a row did not pass. Every row's `lines` lights the YAML on hover. Tested in `tests/test_gui_compare.py`. Not yet: the
-per-site value columns (the `picker` record carries no other site's values; the CLI prints them only in its table), progress
-from the reads' request logs (the status shows the "reading ..." lines), and the lab compare.
+says when a row did not pass. Every row's `lines` lights the YAML on hover. Since R10 the Table tab has a column per compared site
+(`sites`, `site_values`) beside the base value: a dash where the site lacks the setting, a mark where it differs, a secret as
+its placeholder, and a site in `no_row` says "no row" with its Note above the table; the table scrolls, never the page. Tested in
+`tests/test_gui_compare.py`. Not yet: progress from the reads' request logs (the status shows the "reading ..." lines), and the
+lab compare.
 
 ## Step 9: Make the preconfig files, upload, existing YAML
 Upload the template and the CSV, the three choices (create; create and validate; create, validate and upload), the matching of
