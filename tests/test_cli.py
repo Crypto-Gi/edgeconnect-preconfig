@@ -578,6 +578,18 @@ class CompareForTheGui(unittest.TestCase):
         self.assertEqual([r for r in results if r["kind"] == "saved"][0]["validated"], True)
 
 
+
+class ValidateRowsAdvice(unittest.TestCase):
+    def test_a_stopped_validation_gives_no_fail_rows_advice(self):
+        import render
+        for code, advice in ((0, "rows that passed are in"), (1, "fix the FAIL rows in"), (2, None)):
+            with self.subTest(code=code), mock.patch.object(cli, "check_validator"), mock.patch.object(render, "main", return_value=code), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertEqual(cli.validate_rows(Path("site"), Path("site/sites.csv"), {"validator": "lab", "orchestrator": "lab"}, None), code)
+            for text in ("rows that passed are in", "fix the FAIL rows in"):
+                self.assertEqual(text in out.getvalue(), text == advice, out.getvalue())
+
+
 def renamed(host="br-2", change=None):
     other = copy.deepcopy(REFERENCE)
     other["applianceInfo"]["hostname"] = host

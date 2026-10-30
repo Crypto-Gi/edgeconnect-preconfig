@@ -879,7 +879,8 @@ def validate_rows(folder: Path, csv_path: Path, info: Dict[str, Any], orchestrat
     print("\nvalidating every row of {} on {} ...".format(csv_path.name, nick), flush=True)
     args = ["--site-dir", str(folder), "--csv", str(csv_path), "--validate", nick] + (["--substitute"] if nick != info["orchestrator"] else [])
     code = render.main(args)
-    print("rows that passed are in {}".format(folder / "rendered") if code == 0 else "fix the FAIL rows in {} and run validate again; the rows that passed are in {}".format(csv_path, folder / "rendered"))
+    if code in (0, 1):  # 2: render STOPPED before any row was validated, and said why
+        print("rows that passed are in {}".format(folder / "rendered") if code == 0 else "fix the FAIL rows in {} and run validate again; the rows that passed are in {}".format(csv_path, folder / "rendered"))
     return code
 
 
