@@ -573,6 +573,26 @@ class CompareForTheGui(unittest.TestCase):
         self.assertIn({"kind": "capture", "site": "br-2", "folder": "br-2"}, results)
         self.assertIn({"kind": "dry-run"}, results)
 
+    def test_the_picker_carries_each_sites_own_value_and_the_sites_without_a_row(self):
+        """cli-requests R10: the GUI shows each site's value next to the base's, without parsing the "| site" columns."""
+        br2 = zoned("Guest", "br-2")
+        br2["radius"]["server"][0]["key"] = "real-secret-at-br-2"
+        br3 = zoned("LAN", "br-3")
+        br3["localRoutes"]["staticRoutes"].append({"routeIpSubnet": "198.51.100.0/25", "nextHop": "192.0.2.253"})  # a route only br-3 has: no row
+        for argv in (["--dry-run"], ["--yes", "--name", "br"]):
+            with self.subTest(argv=argv):
+                code, out, _, results, _ = self.compare([br2, br3], argv)
+                self.assertEqual(code, 0, out)
+                picker = self.picked(results)
+                self.assertEqual(picker["sites"], ["br-2", "br-3"])  # as typed
+                self.assertEqual(list(picker["no_row"]), ["br-3"])
+                self.assertIn("sites.csv gets no row for br-3", picker["no_row"]["br-3"])
+                rows = by_path(picker["rows"])
+                self.assertEqual(rows["deploymentInfo.deploymentInterfaces[0].zone"]["site_values"], {"br-2": "Guest", "br-3": "LAN"})
+                self.assertEqual(rows["radius.server[0].key"]["site_values"], {"br-2": "<SECRET>", "br-3": "<SECRET>"})  # as value is
+                self.assertNotIn("real-secret-at-br-2", json.dumps(results))
+                self.assertEqual(rows["localRoutes.staticRoutes[1].nextHop"]["site_values"]["br-3"], "192.0.2.254")
+
     def test_a_dry_run_with_captures_reads_no_site_and_save_after_it_gives_the_same_columns(self):
         flags = ["--captures", "/work/samples/lab/2.NE/stamp", "--fix", "lan0_zone", "--set", "localRoutes.staticRoutes[1].nextHop"]
         runs = lambda c: sample_run("br-2")

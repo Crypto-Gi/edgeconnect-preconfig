@@ -33,7 +33,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -469,10 +469,12 @@ class Picker:
             out.append(row)
         return out
 
-    def record(self, reference: Dict[str, Any], folder: Optional[Path], lines: Optional[Dict[str, List[int]]] = None) -> None:
+    def record(self, reference: Dict[str, Any], folder: Optional[Path], lines: Optional[Dict[str, List[int]]] = None,
+               sites: Optional[List[Tuple[str, Dict[str, Any]]]] = None, no_row: Optional[Dict[str, str]] = None) -> None:
         """Every row as the picker held it, the chosen columns and the folder written, for the run's recorder.
 
-        A dry run writes no folder (None) and gives lines: each row then also has the lines of its value in reference.yaml."""
+        A dry run writes no folder (None) and gives lines: each row then also has the lines of its value in reference.yaml.
+        compare gives sites, (hostname, sheet items) as typed: each row then has site_values, None where a site lacks it (cli-requests R10)."""
         rows = []
         for r, sheet_row in zip(self.rows, self.sheet(reference)):
             secret = r["reason"].startswith("secret")
@@ -482,7 +484,10 @@ class Picker:
                          "column": sheet_row["column"] if sheet_row["decision"] == "variable" else ""})
             if lines is not None:  # every row, ticked or not: the GUI highlights a row's lines on hover
                 rows[-1]["lines"] = lines.get(r["path"])
-        record("picker", rows=rows, columns=self.columns(reference), folder=str(folder) if folder else None)
+            if sites is not None:
+                rows[-1]["site_values"] = {n: "<SECRET>" if secret else cell(s[r["path"]]) if r["path"] in s else None for n, s in sites}
+        more = {"sites": [n for n, _ in sites], "no_row": no_row or {}} if sites is not None else {}
+        record("picker", rows=rows, columns=self.columns(reference), folder=str(folder) if folder else None, **more)
 
     def columns(self, reference: Dict[str, Any]) -> List[str]:
         names: List[str] = []
@@ -817,6 +822,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
             notes[n] = ("Note: {}. sites.csv gets no row for {}: the template holds {}'s settings only. Run compare with {} as the base "
                         "(build it first), or build a separate template for that design.".format(why, n, base_host, n))
     kept = [(n, o, s) for n, o, s in zip(names, others, seen) if n not in notes]
+    compared, no_row = list(zip(names, seen)), {n: notes[n] for n in names if n in notes}  # the picker record's per-site values (R10)
     from generate import Builder
     probe = Builder()
     probe.find_secrets(reference)
@@ -872,7 +878,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
                                                                          base_host, cell(mine[r["path"]]) or '""'))
     if a.dry_run:  # the GUI's preview after each tick (cli-requests R6, as variables --dry-run)
         show_columns(picker, reference)
-        picker.record(reference, None, value_lines((base / "reference.yaml").read_text(encoding="utf-8")))
+        picker.record(reference, None, value_lines((base / "reference.yaml").read_text(encoding="utf-8")), compared, no_row)
         return 0
     name = finish(picker, reference, info["site_type"], a.name, a.yes, read)
     if not name:
@@ -880,7 +886,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     rows_for = [{"hostname": n, "items": s} for n, _, s in kept]
     target = build_site(a.folder, info, name, picker.sheet(reference), rows_for)
     ensure_sites_csv(target)  # every other site may have been left out: sites.csv still holds this site's row
-    picker.record(reference, target)
+    picker.record(reference, target, None, compared, no_row)
     code = validate_rows(target, target / "sites.csv", info, None)
     record("saved", folder=str(target), validated=code == 0)
     if code == 1:
