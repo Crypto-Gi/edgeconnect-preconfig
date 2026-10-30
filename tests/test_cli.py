@@ -250,6 +250,9 @@ class FixAndDryRun(unittest.TestCase):
                                           "set local_routes_static_routes_1_next_hop instead; no setting named no_such\n"))
         code, _, err, _ = self.run_cli("--pick", "top10", "--set", "hostname", "--dry-run")
         self.assertEqual((code, err), (2, "error: --set: hostname is always per site already (hostname)\n"))
+        gateway = "deploymentInfo.dhcpInfo[0].gatewayIpAddress"  # locked, and follows lan0_ip, which is locked too: say it is per site
+        code, _, err, _ = self.run_cli("--pick", "top10", "--set", gateway, "--dry-run")
+        self.assertEqual((code, err), (2, "error: --set: {} is always per site already (deployment-page value (docs/decisions/0006))\n".format(gateway)))
 
     def test_a_follower_is_refused_naming_the_row_it_follows(self):
         code, _, err, _ = self.run_cli("--pick", "top10", "--fix", "bgpSystemConfig.neighbors[0].peerIpAddress,no_such", "--dry-run")

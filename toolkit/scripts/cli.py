@@ -398,11 +398,12 @@ class Picker:
                 self.on[r["path"]] = True
             if hit:
                 continue
-            other = next((r for r in self.rows if name in (r["path"], r["column"], r["label"])), None)
-            if other is not None and other["follows"] is not None:
-                problems.append("{} follows {}; set {} instead".format(name, other["follows"]["column"], other["follows"]["column"]))
-            elif other is not None and other["locked"]:
+            other = [r for r in self.rows if name in (r["path"], r["column"], r["label"])]
+            other = next(iter([r for r in other if r["follows"] is None] or other), None)  # as fix_by_name: a shared column names the row followed
+            if other is not None and other["locked"]:  # before follows: a locked row may follow a locked row, which --set cannot take either
                 problems.append("{} is always per site already ({})".format(name, self.locked_why(other)))
+            elif other is not None and other["follows"] is not None:
+                problems.append("{} follows {}; set {} instead".format(name, other["follows"]["column"], other["follows"]["column"]))
             else:
                 unknown.append(name)
         return problems + (["no setting named {}".format(", ".join(unknown))] if unknown else [])
