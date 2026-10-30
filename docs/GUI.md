@@ -17,7 +17,7 @@ python3 -m toolkit.gui --port 8765 --no-browser # a fixed port; only prints the 
 - At start it prints the folders it uses, as absolute paths: the `.env`, `preconfig-output/`, the work folder (captures) and the run log folder. The `.env` is found as the command line finds it; set `EC_DOTENV=/path/to/.env` to name another.
 - Then it prints a sign-in link, `http://127.0.0.1:<port>/?token=...`. It works once: it signs this browser in and then stops working, so another account on the computer cannot reuse it. Do not share it. Opening the GUI in a second browser takes a restart.
 - Press Ctrl+C in the terminal to stop it. An upload that is sending finishes first.
-- On Windows through WSL it opens the Windows browser (`wslview`, else `explorer.exe`). Over SSH, forward the port (`ssh -L 8765:127.0.0.1:8765 ...`), start it with `--port 8765 --no-browser` and open the printed link on your own computer.
+- On Windows through WSL it opens the Windows browser (`wslview`, else `explorer.exe`). Over SSH, forward the port (`ssh -L 8765:127.0.0.1:8765 ...`), start it with `--port 8765 --no-browser` and open the printed link on your own computer. Use the same port number on both ends: through `ssh -L 9000:127.0.0.1:8765` the browser names `localhost:9000`, and the GUI refuses it ("this server only answers to 127.0.0.1, localhost or [::1] on its own port").
 
 It listens on 127.0.0.1 only and answers only to `127.0.0.1`, `localhost` or `[::1]` on its own port. API keys stay in the Python process: no page or response carries them.
 
