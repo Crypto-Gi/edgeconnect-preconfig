@@ -528,6 +528,7 @@ class CompareForTheGui(unittest.TestCase):
         zone = next(r for r in picker["rows"] if r["path"].endswith("[0].zone"))
         self.assertTrue(zone["on"])
         self.assertEqual(len(zone["lines"]), 2)  # its value's lines in reference.yaml
+        self.assertTrue(all(len(r["lines"]) == 2 for r in picker["rows"]))  # every row, ticked or not (R9a)
         self.assertIn({"kind": "capture", "site": "br-2", "folder": "br-2"}, results)
         self.assertIn({"kind": "dry-run"}, results)
 
@@ -549,6 +550,11 @@ class CompareForTheGui(unittest.TestCase):
         self.assertEqual(self.picked(saved)["columns"], columns)
         self.assertEqual(built["sheet"]["localRoutes.staticRoutes[1].nextHop"]["decision"], "variable")
         self.assertEqual(built["sheet"]["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "fixed")
+
+    def test_set_on_a_locked_row_says_why(self):
+        with self.assertRaises(cli.Fail) as refused:
+            self.compare([zoned("Guest", "br-2")], ["--dry-run", "--set", "hostname,nonsense"])
+        self.assertEqual(str(refused.exception), "--set: hostname is always per site already (hostname); no setting named nonsense")
 
     def test_a_capture_folder_that_does_not_stand_for_its_site_is_refused(self):
         cases = ((["/c/1", "/c/2"], None, "--captures takes one folder per site: 1 sites, 2 folders"),

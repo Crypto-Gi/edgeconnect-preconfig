@@ -812,9 +812,9 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     picker = Picker(reference, rows, {}, [s for _, _, s in kept])
     differ = [r for r in picker.free if picker.on[r["path"]]]
     if a.set:
-        unknown = picker.set_by_name([x.strip() for x in a.set.split(",") if x.strip()])
-        if unknown:
-            raise Fail("--set: no setting named {}".format(", ".join(unknown)))
+        refused = picker.set_by_name([x.strip() for x in a.set.split(",") if x.strip()])
+        if refused:
+            raise Fail("--set: " + "; ".join(refused))
     if a.fix:
         refused = picker.fix_by_name([x.strip() for x in a.fix.split(",") if x.strip()], reference)
         if refused:
