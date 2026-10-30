@@ -105,7 +105,7 @@ const P = {};
     P.status);
   P.saveName = el("input", { type: "text", id: "pick-save-name", autocomplete: "off", spellcheck: "false" });
   P.saveText = el("p", { class: "muted" });
-  P.saveLog = el("ol", { class: "log mono", "aria-label": "What the command printed" });
+  P.saveLog = el("ol", { class: "log mono", tabindex: "0", "aria-label": "What the command printed" });
   P.saveGo = el("button", { class: "btn primary", type: "submit", text: "Save" });
   P.saveCancel = el("button", { class: "btn", type: "button", text: "Close" });
   P.dialog = el("dialog", { "aria-labelledby": "pick-save-title" },

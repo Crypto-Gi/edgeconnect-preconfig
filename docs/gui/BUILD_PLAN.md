@@ -273,7 +273,7 @@ and `<nickname>_gui_preconfig_uploads` (off by default).
 Done when: fixture tests cover each status and the identity refusal, and a read-only check of the lab Orchestrators passes.
 Built as: `toolkit/gui/fleet.py`, `check_all(dotenv_path)` -> `Fleet(orchestrators, not_listed, note, warnings)`, each a `Status` with
 automation's fields (`name`, `url`, `status`, `reason`, `release`, `id`, `label`, `color`, `writes`, `seconds`) plus `validator`; `writes`
-is `<nickname>_gui_preconfig_uploads`, read with the values automation accepts for `_gui_writes`. It runs `common.client_for` with a
+is `<nickname>_gui_preconfig_uploads`, read through `engine.uploads_setting` as the upload gate reads it (step 11): `on` (any case) is on, `off` or blank is off, and anything else makes the Orchestrator red with "must be on or off". It runs `common.client_for` with a
 5 s timeout inside a run context holding the given `.env`, reads `GET /gms/versions`, and takes the identity from
 `upload.orchestrator_identity`, the same read the approval fingerprint uses. `.env.example` has the three keys and the table of
 reading differences; `tests/test_gui_fleet.py` checks the fixture `.env` against a recorded automation reading, and against
@@ -396,3 +396,20 @@ Accessibility pass (axe-core on every screen, both themes), a Playwright smoke t
 written YAML files), README and docs GUI sections, a WSL check by hand, version bump, release as a GitHub pre-release from `gui`
 (`main` and its Latest release untouched).
 Done when: CI is green, the WSL check has passed and the pre-release is published.
+Built as (without the version bump and release, which come last): `tests/e2e/gui_launcher.py` starts `GuiServer` in the test process over
+the engine tests' fake Orchestrator (fleet checked through it too, the golden synthetic capture for a build and, as h2 would read it, for a
+compared site, the golden preconfigs) and `tests/e2e/test_browser.py` drives it with Python Playwright: the smoke test goes from Find
+appliances to build, one more tick, Save (both files downloaded), and "Make the preconfig files" with those two files and "create", then
+downloads the written file from the row table and compares it with the run folder's. The axe check injects axe-core 4.10.3 (pinned, from
+npm) into every screen (home, build, pick with the compare panel open, its save dialog, the compare Table with h2's own values, make, yaml,
+inventory, runs, run) in both themes and fails on any serious or critical violation, and on any serious or critical result axe could not
+decide ("incomplete") unless `KNOWN_INCOMPLETE` names the element with its reason (translucent backgrounds, a decorative ≠). Both are
+skipped unless `EDGECONNECT_BROWSER_TESTS=1`; with it set, a playwright that does not import is an error and a missing `AXE_CORE_JS` a
+failure. The CI job `browser` (ubuntu-24.04, Python 3.13, playwright 1.64.1, 20 minutes) runs them. Fixed: the build log, `summary.md` and
+the save dialog's log scroll and are now tab stops (scrollable-region-focusable); `summary.md` and Inventory's YAML are `<pre>`s named with
+`role="region"` (aria-prohibited-attr); the YAML viewer's highlighted lines (number and tag) were under 4.5:1 in the light theme and now
+use `--text` and `--glow` (pick.css). `app.css` is unchanged. The user guide is `docs/GUI.md`, with a section in the README. The fleet panel
+used to show uploads on for `true`, `yes` and `1`, which the upload gate refused; the panel and the gate now read it only through
+`engine.uploads_setting`: on (only `on`, any case), off (`off` or blank) or bad (anything else, `true` and `yes` too), which the panel
+shows red with "must be on or off" and the gate refuses like off.
+Not yet: the WSL check by hand, the version bump and the pre-release.

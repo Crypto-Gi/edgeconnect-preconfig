@@ -198,7 +198,7 @@ function validatorOptions(select) {
 
 function uploadsText(orch, onText) {
   return !orch ? "" : orch.writes ? "Uploads are on for " + nameOf(orch) + ": " + onText
-    : "Uploads are off for " + nameOf(orch) + ": set " + orch.name + "_gui_preconfig_uploads=on in .env to allow them. Nothing at all is sent there until then.";
+    : "Uploads are off for " + nameOf(orch) + ": set " + orch.name + "_gui_preconfig_uploads=on in .env to allow them. Until then no upload goes there.";
 }
 
 /* the screen */

@@ -20,11 +20,11 @@ const B = { chosen: null, running: false };
   B.go = el("button", { class: "btn primary", type: "submit", text: "Build" });
   B.goText = el("p", { class: "muted", role: "status" });
   B.progress = el("p", { class: "mono", role: "status" });
-  B.log = el("ol", { class: "log mono", "aria-label": "What the build printed" });
+  B.log = el("ol", { class: "log mono", tabindex: "0", "aria-label": "What the build printed" });  // it scrolls: focusable, so a keyboard can scroll it
   B.run = el("section", { class: "panel", "aria-labelledby": "build-run-title", hidden: "" },
     el("h2", { id: "build-run-title", text: "Progress" }), B.progress, B.log);
   B.verdict = el("p", { class: "lede" });
-  B.summary = el("pre", { class: "summary mono" });
+  B.summary = el("pre", { class: "summary mono", tabindex: "0", role: "region", "aria-label": "summary.md" });  // a pre has no role: the region carries the name
   B.next = el("a", { class: "btn primary", href: "#/variables", text: "Choose what changes per site" });
   B.result = el("section", { class: "panel", "aria-labelledby": "build-result-title", hidden: "" },
     el("div", { class: "panel-head" }, el("h2", { id: "build-result-title", text: "Result" }), B.next), B.verdict, B.summary);
