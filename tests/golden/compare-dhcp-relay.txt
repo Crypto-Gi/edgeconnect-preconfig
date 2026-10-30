@@ -1,0 +1,39 @@
+$ edgeconnect-preconfig compare <tmp>/out/branch-a branch-b --name dhcp-relay --yes
+exit 0
+--- stdout
+reading branch-b from lab (GET only) ...
+
+25 settings are always per site (hostname, secrets, Deployment page, appliance info), and 1 more are per site at branch-a and no other site:
+     #  Setting                                              branch-a                              Choice   
+  -- Different between your sites (pre-ticked) -------------------
+   19  localRoutes.routes[lan0].nextHop                     192.0.2.126                           VARIABLE
+        localRoutes.routes[lan0].nextHop                     follows #19
+0 settings are the same at every site and stay fixed.
+Note: branch-b uses DHCP relay on lan0, branch-a uses server; branch-b has 10 setting(s) branch-a lacks: deploymentInfo.dhcpInfo[0].dhcpProxyServers[0], deploymentInfo.dhcpInfo[0].enableOptions82, deploymentInfo.dhcpInfo[0].option82SubOptions1 ...; branch-b lacks 8 setting(s) branch-a has: deploymentInfo.dhcpInfo[0].defaultLease, deploymentInfo.dhcpInfo[0].dhcpAddressMask, deploymentInfo.dhcpInfo[0].dnsServers[0] .... sites.csv gets no row for branch-b: the template holds branch-a's settings only. Run compare with branch-b as the base (build it first), or build a separate template for that design.
+
+25 columns: hostname, group, site, network_role, address, contact_name, server_per_segment, total_outbound_bandwidth, total_inbound_bandwidth, lan0_ip, wan0_addressing_mode, wan0_ip, wan0_next_hop, wan0_bw_in, wan0_bw_out, wan0_behind_nat, lan0_dhcp_type, lan0_dhcp_address_mask, lan0_start, lan0_end, lan0_dns_servers_0, lan0_netbios_node_type, lan0_maximum_lease, lan0_default_lease, local_routes_lan0_next_hop
+
+Saved <tmp>/out/branch-a/site-dhcp-relay  (example row validated on lab)
+  dhcp-relay.jinja2    the template
+  sites.csv            fill one row per site (the first row is branch-a's own values)
+
+Next:
+  edgeconnect-preconfig validate <tmp>/out/branch-a/site-dhcp-relay --csv <tmp>/out/branch-a/site-dhcp-relay/sites.csv
+
+validating every row of sites.csv on lab ...
+ok   branch-a_preconfig -> <tmp>/out/branch-a/site-dhcp-relay/rendered/branch-a_preconfig.yml
+rows that passed are in <tmp>/out/branch-a/site-dhcp-relay/rendered
+--- stderr
+--- files
+a6067ddbbe114fd0  <tmp>/out/branch-a/site-dhcp-relay/checks.json
+2a33134f2304505e  <tmp>/out/branch-a/site-dhcp-relay/columns.json
+a34942e8e0fdfe51  <tmp>/out/branch-a/site-dhcp-relay/columns.md
+6a8cbc31a75a17f3  <tmp>/out/branch-a/site-dhcp-relay/dhcp-relay.csv
+8b08f688a12f1443  <tmp>/out/branch-a/site-dhcp-relay/dhcp-relay.jinja2
+d75b1097e20fc26f  <tmp>/out/branch-a/site-dhcp-relay/example.csv
+d6af6260ab8bf77e  <tmp>/out/branch-a/site-dhcp-relay/ledger.json
+36a172cb18c56314  <tmp>/out/branch-a/site-dhcp-relay/reference.yaml
+1d95583f6638fb83  <tmp>/out/branch-a/site-dhcp-relay/rendered/branch-a_preconfig.yml
+d75b1097e20fc26f  <tmp>/out/branch-a/site-dhcp-relay/sites.csv
+2be4ea34c1c4c558  <tmp>/out/branch-a/site-dhcp-relay/summary.md
+5f4fedc99db7c7a6  <tmp>/out/branch-a/site-dhcp-relay/variables.csv

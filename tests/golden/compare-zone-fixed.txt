@@ -1,0 +1,53 @@
+$ edgeconnect-preconfig compare <tmp>/out/branch-a branch-b --name zone-fixed
+> typed: edit
+> typed: 6
+> typed: (Enter)
+> typed: y
+exit 0
+--- stdout
+reading branch-b from lab (GET only) ...
+
+25 settings are always per site (hostname, secrets, Deployment page, appliance info), and 1 more are per site at branch-a and branch-b:
+     #  Setting                                              branch-a                              Choice   | branch-b
+  -- Different between your sites (pre-ticked) -------------------
+    6  deploymentInterfaces[lan0].zone                      Trusted                               VARIABLE   | Guest
+18 settings are the same at every site and stay fixed.
+Build the template with these settings per site? [Y/n/edit]         Section                                  Settings Variable
+    s1  deploymentInfo                                  1        0
+    s2  deploymentInfo.deploymentInterfaces            11        1
+    s3  deploymentInfo.dhcpInfo                         1        0
+    s4  localRoutes                                    18        0
+Type numbers to flip (e.g. 4 12), s1.. to open a section, a for all sections, t for the Top list, l for the locked ones, a word to search, Enter when done, q to quit.
+>     6  deploymentInterfaces[lan0].zone                      Trusted                               fixed   | Guest
+> Warning: deploymentInterfaces[lan0].zone stays fixed: branch-b gets branch-a's value Trusted
+
+24 columns: hostname, group, site, network_role, address, contact_name, server_per_segment, total_outbound_bandwidth, total_inbound_bandwidth, lan0_ip, wan0_addressing_mode, wan0_ip, wan0_next_hop, wan0_bw_in, wan0_bw_out, wan0_behind_nat, lan0_dhcp_type, lan0_dhcp_address_mask, lan0_start, lan0_end, lan0_dns_servers_0, lan0_netbios_node_type, lan0_maximum_lease, lan0_default_lease
+Build site-zone-fixed? [Y/n] 
+Saved <tmp>/out/branch-a/site-zone-fixed  (example row validated on lab)
+  zone-fixed.jinja2    the template
+  sites.csv            fill one row per site (the first row is branch-a's own values)
+  sites.csv also has a row for branch-b
+
+Next:
+  edgeconnect-preconfig validate <tmp>/out/branch-a/site-zone-fixed --csv <tmp>/out/branch-a/site-zone-fixed/sites.csv
+
+validating every row of sites.csv on lab ...
+ok   branch-a_preconfig -> <tmp>/out/branch-a/site-zone-fixed/rendered/branch-a_preconfig.yml
+WARN branch-b_preconfig: interface address 192.0.2.1 is also used by row 1 (fine for private LANs, a mistake for WAN addresses)
+ok   branch-b_preconfig -> <tmp>/out/branch-a/site-zone-fixed/rendered/branch-b_preconfig.yml
+rows that passed are in <tmp>/out/branch-a/site-zone-fixed/rendered
+--- stderr
+--- files
+c3ef5b862497e9c9  <tmp>/out/branch-a/site-zone-fixed/checks.json
+77d1a6ab80c8accc  <tmp>/out/branch-a/site-zone-fixed/columns.json
+ff6922f095a64081  <tmp>/out/branch-a/site-zone-fixed/columns.md
+00cc919200c6ee5c  <tmp>/out/branch-a/site-zone-fixed/example.csv
+d6af6260ab8bf77e  <tmp>/out/branch-a/site-zone-fixed/ledger.json
+36a172cb18c56314  <tmp>/out/branch-a/site-zone-fixed/reference.yaml
+1d95583f6638fb83  <tmp>/out/branch-a/site-zone-fixed/rendered/branch-a_preconfig.yml
+ab457198bf6c3d59  <tmp>/out/branch-a/site-zone-fixed/rendered/branch-b_preconfig.yml
+78391ffe748379ea  <tmp>/out/branch-a/site-zone-fixed/sites.csv
+2be4ea34c1c4c558  <tmp>/out/branch-a/site-zone-fixed/summary.md
+a21a29a40aa113cb  <tmp>/out/branch-a/site-zone-fixed/variables.csv
+5b6174472619fdcf  <tmp>/out/branch-a/site-zone-fixed/zone-fixed.csv
+c9daf269e12f2a50  <tmp>/out/branch-a/site-zone-fixed/zone-fixed.jinja2

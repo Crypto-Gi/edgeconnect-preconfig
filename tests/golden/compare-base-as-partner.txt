@@ -1,0 +1,6 @@
+$ edgeconnect-preconfig compare <tmp>/out/branch-a branch-a --name base-as-partner --yes
+exit 2
+--- stdout
+--- stderr
+error: branch-a is the appliance this build was read from: give other sites of the same design
+--- files
