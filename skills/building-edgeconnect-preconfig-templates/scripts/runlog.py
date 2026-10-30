@@ -16,10 +16,10 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import Recorder, RunContext, collecting_secrets, run_context, running, toolkit_version  # noqa: E402  guard-ok: imported after the sys.path insert
+from common import SECRET_HEADER, Recorder, RunContext, collecting_secrets, run_context, running, toolkit_version  # noqa: E402  guard-ok: imported after the sys.path insert
 
 REPORT_DIR_ENV, DEFAULT_REPORT_DIR, LOG_NAME = "EDGECONNECT_REPORT_DIR", "reports", "preconfig.jsonl"
 
@@ -38,8 +38,55 @@ NEXT_STEP = {
     "INTERRUPTED": "The run was interrupted. If that happened during an upload, check Orchestrator's preconfigurations.",
     "ERROR": "Read the error above and rerun the same command.",
 }
-_SECRET_KEYS = re.compile(r"(?:api[-_]?key|authorization|cookie|csrf|password|passphrase|secret|token|psk|preshared|private[-_]?key|auth[-_]?key)", re.I)
 _SECRET_TEXT = re.compile(r"(?i)(authorization|x-auth-token|api[-_]?key|password|secret|cookie)\s*[:=]\s*([^\s,;]+)")
+GRAM = 8  # a run of this many characters of a secret anywhere in the text is masked, as the whole secret is
+
+
+class Masker:
+    """Masks the run's secret cells in text: each cell whole (raw, trimmed, repr- and JSON-escaped), any run of GRAM or more of
+    its characters (error text shortens and cuts lines: PyYAML's snippet, /validate text cut at 1000), and a text that ends in
+    the first 4 or more of them (cut there). Built once per log line, so a long CSV costs the length of the text, not rows x text."""
+
+    def __init__(self, cells: Mapping[str, str]) -> None:
+        self.names = sorted(set(cells.values()))
+        forms = {}
+        for cell, column in cells.items():
+            if cell.strip():
+                for form in {cell, cell.strip(), repr(cell)[1:-1], json.dumps(cell)[1:-1]} - {""}:
+                    forms.setdefault(form, self.names.index(column))
+        self.grams = {form[i:i + GRAM]: n for form, n in forms.items() for i in range(len(form) - GRAM + 1)}
+        self.heads = {form[:k]: n for form, n in forms.items() for k in range(4, len(form) + 1)}
+        self.longest = max(map(len, forms), default=0)
+        short = sorted((f for f in forms if len(f) < GRAM), key=len, reverse=True)
+        self.short = re.compile("|".join(map(re.escape, short))) if short else None
+        self.forms = forms
+
+    def text(self, value: str) -> str:
+        if not self.forms:
+            return value
+        marks: List[Tuple[int, int, int]] = []
+        for i in range(len(value) - GRAM + 1):
+            n = self.grams.get(value[i:i + GRAM])
+            if n is not None:
+                marks.append((i, i + GRAM, n))
+        for k in range(min(len(value), self.longest), 3, -1):
+            if value[-k:] in self.heads:
+                marks.append((len(value) - k, len(value), self.heads[value[-k:]]))
+                break
+        if self.short:
+            marks += [(m.start(), m.end(), self.forms[m.group(0)]) for m in self.short.finditer(value)]
+        spans: List[List[int]] = []
+        for start, end, n in sorted(marks):
+            if spans and start <= spans[-1][1]:
+                spans[-1][1] = max(spans[-1][1], end)
+            else:
+                spans.append([start, end, n])
+        for start, end, n in reversed(spans):  # first a mark the key=value pattern below cannot match
+            value = value[:start] + "\0{}\0".format(n) + value[end:]
+        return value
+
+    def unmark(self, value: str) -> str:
+        return re.sub("\0(\\d+)\0", lambda match: "<SECRET:{}>".format(self.names[int(match.group(1))]), value)
 
 
 def report_dir() -> Optional[Path]:
@@ -47,20 +94,15 @@ def report_dir() -> Optional[Path]:
     return Path(value) if value.strip() else None
 
 
-def redact(value: Any, cells: Mapping[str, str]) -> Any:
-    """automation's util.redact, after each secret cell (longest first, raw, trimmed, repr- and JSON-escaped) is <SECRET:column>."""
+def redact(value: Any, masker: Masker) -> Any:
+    """automation's util.redact, after the run's secret cells are masked (<SECRET:column>)."""
     if isinstance(value, Mapping):
-        return {str(k): ("<REDACTED>" if v not in (None, "") and not isinstance(v, (bool, int, float)) else v) if _SECRET_KEYS.search(str(k))
-                else redact(v, cells) for k, v in value.items()}
+        return {str(k): ("<REDACTED>" if v not in (None, "") and not isinstance(v, (bool, int, float)) else v) if SECRET_HEADER.search(str(k))
+                else redact(v, masker) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
-        return [redact(item, cells) for item in value]
+        return [redact(item, masker) for item in value]
     if isinstance(value, str):
-        names = sorted(set(cells.values()))
-        for cell in sorted(cells, key=len, reverse=True):  # first a mark the key=value pattern below cannot match
-            for form in sorted({cell, cell.strip(), repr(cell)[1:-1], json.dumps(cell)[1:-1]} - {""}, key=len, reverse=True):
-                value = value.replace(form, "\0{}\0".format(names.index(cells[cell])))
-        value = _SECRET_TEXT.sub(lambda match: match.group(1) + "=<REDACTED>", value)
-        return re.sub("\0(\\d+)\0", lambda match: "<SECRET:{}>".format(names[int(match.group(1))]), value)
+        return masker.unmark(_SECRET_TEXT.sub(lambda match: match.group(1) + "=<REDACTED>", masker.text(value)))
     return value
 
 
@@ -92,9 +134,18 @@ def status_of(code: int, outcomes: set, refused: bool) -> str:
         return "REFUSED"
     if code == 2:
         return "BLOCKED"
-    if code:
-        return "PARTIAL" if "CREATED" in outcomes else "INVALID" if outcomes & {"INVALID", "FAILED"} else "ERROR"
+    if code:  # a FAILED row was sent: as in automation, a failed write is PARTIAL, never INVALID (nothing sent)
+        return "PARTIAL" if outcomes & {"CREATED", "FAILED"} else "INVALID" if "INVALID" in outcomes else "ERROR"
     return "PLANNED" if "PLANNED" in outcomes else "VALID" if outcomes and outcomes <= {"VALID"} else "SUCCESS"
+
+
+def written(status: str, workflow: str, outcomes: set) -> str:
+    """automation's _written words: an upload that stopped or failed partway may have left preconfigs on Orchestrator."""
+    if status == "PARTIAL":
+        return "possibly; see the result details"
+    if status in ("INTERRUPTED", "ERROR") and workflow == "preconfig upload":
+        return "unknown; check Orchestrator"
+    return "yes" if "CREATED" in outcomes else "no"
 
 
 def entry(argv: Sequence[str], code: int, run_id: str, started: datetime.datetime, seconds: float, results: List[Dict[str, Any]], source: str,
@@ -128,7 +179,7 @@ def entry(argv: Sequence[str], code: int, run_id: str, started: datetime.datetim
         "dry_run": False,
         "csv": csv_info,
         "status": status,
-        "changes_written": "yes" if "CREATED" in outcomes else "no",
+        "changes_written": written(status, "preconfig " + (argv[0] if argv else ""), outcomes),
         "exit_code": code,
         "exit_meaning": EXIT_MEANING.get(code, "unknown"),
         "counts": ["{} {}".format(n, outcome) for outcome, n in sorted(totals.items())],
@@ -145,7 +196,7 @@ def entry(argv: Sequence[str], code: int, run_id: str, started: datetime.datetim
         summary["approval"] = approvals[-1]["record"]
     headline = {k: summary[k] for k in ("status", "exit_code", "changes_written", "timestamp", "run_id", "workflow", "orchestrator", "orchestrator_url", "source")}
     files = sorted({str(r["file"]) for r in results if r.get("file")} | {str(b["folder"]) for b in builds if b.get("folder")})
-    record = redact(dict(headline, summary=summary, outputs=results, files_written=files), cells)
+    record = redact(dict(headline, summary=summary, outputs=results, files_written=files), Masker(cells))
     record["report_fingerprint"] = "sha256:" + hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str).encode("utf-8")).hexdigest()
     return record
 
@@ -169,6 +220,9 @@ def logged(argv: Sequence[str]) -> Iterator[Dict[str, int]]:
             yield outcome
         except KeyboardInterrupt:
             outcome["code"] = 130
+            raise
+        except SystemExit as done:  # argparse: --help, or a usage error; the code the process exits with, as run_stage maps it
+            outcome["code"] = done.code if isinstance(done.code, int) else (0 if done.code is None else 1)
             raise
         finally:
             folder = report_dir()

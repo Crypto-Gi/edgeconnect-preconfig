@@ -444,10 +444,16 @@ def collecting_secrets() -> Iterator[Dict[str, str]]:
         _SECRET_CELLS.reset(token)
 
 
+# the automation tools' secret-looking keys (util._SECRET_KEYS)
+SECRET_HEADER = re.compile(r"(?:api[-_]?key|authorization|cookie|csrf|password|passphrase|secret|token|psk|preshared|private[-_]?key|auth[-_]?key)", re.I)
+
+
 def note_secrets(columns: Optional[Dict[str, Dict[str, Any]]], row: Dict[str, str]) -> None:
+    """The row's secret cells: columns.json's secret columns, or without one (a template from elsewhere) secret-looking headers."""
     cells = _SECRET_CELLS.get()
     if cells is not None:
-        cells.update((row[name], name) for name, meta in (columns or {}).items() if meta.get("secret") and row.get(name))
+        secret = [n for n, meta in columns.items() if meta.get("secret")] if columns else [n for n in row if n and SECRET_HEADER.search(n)]
+        cells.update((row[name], name) for name in secret if row.get(name))
 
 
 def problem_data(row: Optional[int], problem: str, secrets: Any = ()) -> Dict[str, Any]:
