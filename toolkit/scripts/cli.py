@@ -581,6 +581,18 @@ def layout_differences(reference: Dict[str, Any], other: Dict[str, Any]) -> List
     return out
 
 
+def reused_capture_problem(run: Dict[str, Any], site: str, orchestrator: str) -> str:
+    """Why a --captures folder's run.json cannot stand for `site` (as typed) on `orchestrator`, or '' when it can."""
+    if run.get("stage") != "capture" or run.get("role") != "sample" or run.get("only"):
+        return "is not a full sample capture: give the folders an earlier compare read"
+    if str(run.get("orchestrator") or "").lower() != orchestrator.lower():
+        return "was read from {}, not {}".format(run.get("orchestrator"), orchestrator)
+    appliance = run.get("appliance") or {}
+    if site.lower() not in {str(appliance.get(k) or "").lower() for k in ("hostName", "nePk")}:
+        return "holds {}, not {}: give the folders in the order of the sites".format(appliance.get("hostName") or appliance.get("nePk"), site)
+    return ""
+
+
 def shape_note(mine: Dict[str, Any], theirs: Dict[str, Any], site: str, base: str) -> str:
     """Why `site` cannot be a row of the base's template (sheet items of each), or '' when it fits.
 
@@ -708,9 +720,17 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     p.add_argument("sites", nargs="+", help="hostnames or nePks on the same Orchestrator (1 to 4; 2 recommended)")
     p.add_argument("--name", help="site type name (default: the appliance's)")
     p.add_argument("--yes", action="store_true", help="build without asking")
+    p.add_argument("--set", help="comma-separated column names or paths to make per site as well")
+    p.add_argument("--fix", help="comma-separated column names or paths to keep fixed, also ones that differ between the sites (applied after --set)")
+    p.add_argument("--captures", nargs="+", type=Path, metavar="DIR", help="sample captures an earlier compare read, one per site in the same order: no site is read again")
+    p.add_argument("--dry-run", action="store_true", help="print the columns this choice gives and write no template: no questions")
     a = p.parse_args(argv)
+    if a.dry_run:
+        record("dry-run")  # the run log skips this run: a preview writes no template (cli-requests R6)
     if len(a.sites) > 4:
         raise Fail("compare takes 1 to 4 other sites")
+    if a.captures and len(a.captures) != len(a.sites):
+        raise Fail("--captures takes one folder per site: {} sites, {} folders".format(len(a.sites), len(a.captures)))
     info = load_build(a.folder)
     me = info.get("appliance") or {}
     base_ne = me.get("nePk")
@@ -726,13 +746,15 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     from capture import Stop, capture
     from translate import Capture, NothingToConvert, allowed_paths, build, prune
     from variables import classify, only_at, sheet_items, write_sheet
-    caps = []
-    for site in a.sites:
+    caps = list(a.captures or [])
+    for site in a.sites[len(caps):]:
         print("reading {} from {} (GET only) ...".format(site, info["orchestrator"]), flush=True)
         try:
             caps.append(capture(info["orchestrator"], site, "sample", 0.2, work_dir() / "samples" / info["orchestrator"]))
         except Stop as stop:
             raise Fail(str(stop))
+    for site, c in zip(a.sites, caps):
+        record("capture", site=site, folder=str(c))  # what a later --captures gives back
     allowed = allowed_paths(info["target_release"])
     others = []
     read_ne = set()
@@ -747,6 +769,10 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
             raise Fail("{}: its capture could not be read ({}: {}); run compare again to read it afresh".format(site, type(error).__name__, detail))
         except Exception as error:  # anything else is a bug in the toolkit, not in the capture
             raise Fail("{}: toolkit error {}: {} (please report it)".format(site, type(error).__name__, str(error)[:200]))
+        if a.captures:
+            why = reused_capture_problem(cap.run, site, info["orchestrator"])
+            if why:
+                raise Fail("--captures: {} {}".format(c, why))
         ne = (cap.run.get("appliance") or {}).get("nePk")
         if base_ne and ne == base_ne:
             refuse_base(site)
@@ -776,6 +802,14 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     rows = [{k: cell(v) for k, v in r.items()} for r in classify(reference, probe.secret_paths, None, [o for _, o, _ in kept])]
     picker = Picker(reference, rows, {}, [s for _, _, s in kept])
     differ = [r for r in picker.free if picker.on[r["path"]]]
+    if a.set:
+        unknown = picker.set_by_name([x.strip() for x in a.set.split(",") if x.strip()])
+        if unknown:
+            raise Fail("--set: no setting named {}".format(", ".join(unknown)))
+    if a.fix:
+        refused = picker.fix_by_name([x.strip() for x in a.fix.split(",") if x.strip()], reference)
+        if refused:
+            raise Fail("--fix: " + "; ".join(refused))
     same = sum(1 for r in rows if r["reason"] == "same at every site you gave")
     only = sum(1 for r in rows if r["flag"] == "true" and r["reason"].startswith("only "))
     locked = sum(1 for r in picker.rows if r["locked"])
@@ -798,7 +832,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         if comments:
             print("Note: {}'s comment{} {} {} left out of its row: {} has none there.".format(
                 n, "s" if len(comments) > 1 else "", ", ".join(comments[:3]) + (" ..." if len(comments) > 3 else ""), "are" if len(comments) > 1 else "is", base_host))
-    if not a.yes:
+    if not a.yes and not a.dry_run:
         answer = read("Build the template with these settings per site? [Y/n/edit] ").strip().lower()
         if answer in ("n", "no"):
             print("nothing written")
@@ -812,6 +846,10 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         if differs:
             print("Warning: {} stays fixed: {} {} {}'s value {}".format(label[r["path"]], ", ".join(differs), "gets" if len(differs) == 1 else "get",
                                                                          base_host, cell(mine[r["path"]]) or '""'))
+    if a.dry_run:  # the GUI's preview after each tick (cli-requests R6, as variables --dry-run)
+        show_columns(picker, reference)
+        picker.record(reference, None, value_lines((base / "reference.yaml").read_text(encoding="utf-8")))
+        return 0
     name = finish(picker, reference, info["site_type"], a.name, a.yes, read)
     if not name:
         return 1
@@ -819,7 +857,11 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     target = build_site(a.folder, info, name, picker.sheet(reference), rows_for)
     ensure_sites_csv(target)  # every other site may have been left out: sites.csv still holds this site's row
     picker.record(reference, target)
-    return validate_rows(target, target / "sites.csv", info, None)
+    code = validate_rows(target, target / "sites.csv", info, None)
+    record("saved", folder=str(target), validated=code == 0)
+    if code:
+        print("{} is saved: only the rows that failed validation need fixing, in {} (nothing has to be compared again)".format(target, target / "sites.csv"))
+    return code
 
 
 # ---------------------------------------------------------------- validate, upload

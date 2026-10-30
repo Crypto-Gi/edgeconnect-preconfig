@@ -468,6 +468,105 @@ class CompareLayoutChoice(unittest.TestCase):
         self.assertIn("Warning: deploymentInterfaces[lan0].zone stays fixed: br-2 gets br-1's value LAN", out)
 
 
+
+def sample_run(site, orchestrator="lab", **change):
+    """run.json of a full sample capture of `site` (a hostname) on `orchestrator`, as capture.py writes it."""
+    run = {"stage": "capture", "role": "sample", "orchestrator": orchestrator, "only": None, "appliance": {"nePk": site + ".NE", "hostName": site}}
+    run.update(change)
+    return run
+
+
+class CompareForTheGui(unittest.TestCase):
+    """compare --dry-run, --set/--fix, --captures and the saved-with-failures outcome (cli-requests R6)."""
+
+    def compare(self, others, argv, validated=0, runs=None, read=None):
+        """cmd_compare on in-memory references, recorded: (exit code, output, build_site call or None, results, sites read)."""
+        import yaml
+        from common import Recorder, RunContext, running
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "build.json").write_text(json.dumps({"site_type": "br", "orchestrator": "lab", "validator": "lab", "capture": "c",
+                                                            "target_release": "9.7.1.42046", "appliance": {"hostName": "br-1", "nePk": "1.NE"}}))
+            (folder / "reference.yaml").write_text(yaml.safe_dump(zoned()))
+            built, reads, recorder = {}, [], Recorder()
+
+            def build_site(folder, info, name, sheet, rows_for=None):
+                built.update(sheet=by_path(sheet), rows_for=rows_for)
+                return folder / ("site-" + name)
+            names = [o["applianceInfo"]["hostname"] for o in others]
+            run_of = runs or (lambda c: sample_run(Path(c).name))
+            with mock.patch("capture.capture", side_effect=lambda nick, site, *a: reads.append(site) or Path(site)), \
+                    mock.patch("common.client_for", side_effect=AssertionError("no Orchestrator request")), \
+                    mock.patch("translate.Capture", side_effect=lambda c: mock.Mock(run=run_of(c))), \
+                    mock.patch("translate.build", side_effect=[copy.deepcopy(o) for o in others]), \
+                    mock.patch("translate.prune", side_effect=lambda value, allowed, ledger: value), \
+                    mock.patch.object(cli, "build_site", side_effect=build_site), mock.patch.object(cli, "ensure_sites_csv"), \
+                    mock.patch.object(cli, "validate_rows", return_value=validated), running(RunContext(recorder=recorder)), \
+                    contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(out):
+                code = cli.cmd_compare([tmp] + names + list(argv), read or scripted())
+            return code, out.getvalue(), built or None, recorder.results, reads
+
+    def picked(self, results):
+        return next(r for r in results if r["kind"] == "picker")
+
+    def test_a_dry_run_asks_nothing_writes_no_template_and_records_the_choice_and_the_captures(self):
+        code, out, built, results, reads = self.compare([zoned("Guest", "br-2")], ["--dry-run"])
+        self.assertEqual((code, built, reads), (0, None, ["br-2"]))  # no prompt (scripted() has no answer), no site folder
+        self.assertIn("lan0_zone", out)
+        picker = self.picked(results)
+        self.assertEqual(picker["folder"], None)
+        self.assertIn("lan0_zone", picker["columns"])
+        zone = next(r for r in picker["rows"] if r["path"].endswith("[0].zone"))
+        self.assertTrue(zone["on"])
+        self.assertEqual(len(zone["lines"]), 2)  # its value's lines in reference.yaml
+        self.assertIn({"kind": "capture", "site": "br-2", "folder": "br-2"}, results)
+        self.assertIn({"kind": "dry-run"}, results)
+
+    def test_a_dry_run_with_captures_reads_no_site_and_save_after_it_gives_the_same_columns(self):
+        flags = ["--captures", "/work/samples/lab/2.NE/stamp", "--fix", "lan0_zone", "--set", "localRoutes.staticRoutes[1].nextHop"]
+        runs = lambda c: sample_run("br-2")
+        code, out, _, preview, reads = self.compare([zoned("Guest", "br-2")], ["--dry-run"] + flags, runs=runs)
+        self.assertEqual((code, reads), (0, []))  # nothing read again, and common.client_for (no request) was never called
+        columns = self.picked(preview)["columns"]
+        self.assertNotIn("lan0_zone", columns)  # --fix unticks a setting that differs between the sites
+        self.assertIn("Warning: deploymentInterfaces[lan0].zone stays fixed: br-2 gets br-1's value LAN", out)
+        code, _, built, saved, reads = self.compare([zoned("Guest", "br-2")], ["--yes", "--name", "br"] + flags, runs=runs)
+        self.assertEqual((code, reads), (0, []))
+        self.assertEqual(self.picked(saved)["columns"], columns)
+        self.assertEqual(built["sheet"]["localRoutes.staticRoutes[1].nextHop"]["decision"], "variable")
+        self.assertEqual(built["sheet"]["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "fixed")
+
+    def test_a_capture_folder_that_does_not_stand_for_its_site_is_refused(self):
+        cases = ((["/c/1", "/c/2"], None, "--captures takes one folder per site: 1 sites, 2 folders"),
+                 (["/c/1"], lambda c: sample_run("br-3"), "--captures: /c/1 holds br-3, not br-2"),
+                 (["/c/1"], lambda c: sample_run("br-2", orchestrator="other"), "--captures: /c/1 was read from other, not lab"),
+                 (["/c/1"], lambda c: sample_run("br-2", only=["appliance"]), "--captures: /c/1 is not a full sample capture"),
+                 (["/c/1"], lambda c: sample_run("br-2", role="reference"), "--captures: /c/1 is not a full sample capture"))
+        for folders, runs, message in cases:
+            with self.subTest(message=message), self.assertRaises(cli.Fail) as refused:
+                self.compare([zoned("Guest", "br-2")], ["--dry-run", "--captures"] + folders, runs=runs)
+            self.assertTrue(str(refused.exception).startswith(message), refused.exception)
+
+    def test_set_and_fix_refusals_are_one_line(self):
+        with self.assertRaises(cli.Fail) as refused:
+            self.compare([zoned("Guest", "br-2")], ["--dry-run", "--set", "nope"])
+        self.assertEqual(str(refused.exception), "--set: no setting named nope")
+        with self.assertRaises(cli.Fail) as refused:
+            self.compare([zoned("Guest", "br-2")], ["--dry-run", "--fix", "hostname"])
+        self.assertTrue(str(refused.exception).startswith("--fix: hostname cannot be fixed"), refused.exception)
+
+    def test_a_saved_site_whose_rows_fail_validation_says_it_is_saved(self):
+        code, out, built, results, _ = self.compare([zoned("Guest", "br-2")], ["--yes", "--name", "br"], validated=1)
+        self.assertEqual(code, 1)
+        self.assertIsNotNone(built)
+        self.assertRegex(out, r"site-br is saved: only the rows that failed validation need fixing")
+        self.assertEqual([r for r in results if r["kind"] == "saved"][0]["validated"], False)
+        code, out, _, results, _ = self.compare([zoned("Guest", "br-2")], ["--yes", "--name", "br"])
+        self.assertEqual(code, 0)
+        self.assertNotIn("is saved:", out)
+        self.assertEqual([r for r in results if r["kind"] == "saved"][0]["validated"], True)
+
+
 def renamed(host="br-2", change=None):
     other = copy.deepcopy(REFERENCE)
     other["applianceInfo"]["hostname"] = host
