@@ -134,9 +134,24 @@ class Preconfigs(unittest.TestCase):
         self.assertEqual(redact_secrets(value), ({"password": True, "md5": 5, "token": "", "psk": {"note": "x"}, "secret": ["<SECRET:$.secret[0]>"], "when": (1, 2)},
                                                  ["$.secret[0]"]))
 
-    def test_a_yaml_that_refers_to_itself_is_one_error_line(self):
-        code, out, err, _, _ = self.show("a: &a [*a]\n")
-        self.assertEqual((code, out, err), (2, "", "error: preconfig x (id 1): its YAML refers to itself, so it is not shown\n"))
+    def test_a_yaml_with_an_alias_is_not_shown(self):
+        """An alias copies a value onto another key, so the walk would redact it under the secret key and print it under the other."""
+        refusal = "error: preconfig x (id 1): its YAML uses aliases (*name), which can copy a secret onto a key that is not secret; it is not shown\n"
+        for text, secret in (("applianceInfo:\n  adminPassword: &p hunter2\n  hostname: *p\n", "hunter2"),
+                             ("a: &n 123456\nikeConfig:\n  presharedKey: *n\n", "123456"),
+                             ("base: &b {password: hunter2}\nother:\n  <<: *b\n", "hunter2"),  # a merge key is an alias too
+                             ("a: &a [*a]\n", None)):  # one that refers to itself
+            with self.subTest(text=text):
+                code, out, err, results, log = self.show(text)
+                self.assertEqual((code, out, err), (2, "", refusal))
+                self.assertEqual([r for r in results if r["kind"] == "preconfig-yaml"], [])
+                if secret:
+                    self.assertNotIn(secret, out + err + json.dumps(results) + log)
+        code, out, err, _, _ = self.show("a: " + "{b: " * 450 + "1" + "}" * 450 + "\n")  # parses, but too deep to walk or dump
+        self.assertEqual((code, out, err), (2, "", "error: preconfig x (id 1): its YAML nests too deep, so it is not shown\n"))
+        code, out, _, _, _ = self.show("applianceInfo:\n  hostname: '*p and &p are text here'\n")
+        self.assertEqual(code, 0)  # an asterisk inside a quoted value is not an alias
+        self.assertIn("*p and &p are text here", out)
 
     def test_an_id_wins_over_a_name_and_a_shared_name_lists_its_ids(self):
         items = [stored(1, "2", "applianceInfo:\n  hostname: by-name\n"), stored(2, "x", "applianceInfo:\n  hostname: by-id\n"),
