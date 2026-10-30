@@ -1,7 +1,7 @@
 """compare on fixed synthetic captures (tests/fixtures/compare/) gives fixed outputs: exit code, columns, sites.csv rows and notes.
 
 The goldens are the contract other front ends (the GUI) build on. After an intended change, regenerate them with
-`UPDATE_GOLDEN=1 python -m unittest tests.test_compare_golden` and review the diff of tests/fixtures/compare/golden/.
+`EDGECONNECT_UPDATE_GOLDEN=1 python -m unittest tests.test_compare_golden` and review the diff of tests/fixtures/compare/golden/.
 Offline: capture is replaced by the fixture captures, /validate by the offline checks (check.run and render without --validate).
 """
 import contextlib
@@ -76,7 +76,7 @@ class Golden(unittest.TestCase):
             with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
                 got = compare(Path(tmp), spec)
                 path = FIXTURES / "golden" / "{}.json".format(name)
-                if os.environ.get("UPDATE_GOLDEN"):
+                if os.environ.get("EDGECONNECT_UPDATE_GOLDEN"):
                     path.parent.mkdir(exist_ok=True)
                     path.write_text(json.dumps(got, indent=1) + "\n")
                 self.assertEqual(got, json.loads(path.read_text()))

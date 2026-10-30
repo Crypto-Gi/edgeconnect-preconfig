@@ -2,7 +2,7 @@
 """Writes the synthetic captures under tests/fixtures/compare/captures/: a base site and one partner per scenario.
 
 Every name and address is made up (example names, 192.0.2.0/24 and 198.51.100.0/24). Run it after changing a capture below,
-then `UPDATE_GOLDEN=1 python -m unittest tests.test_compare_golden` and review the golden diff.
+then `EDGECONNECT_UPDATE_GOLDEN=1 python -m unittest tests.test_compare_golden` and review the golden diff.
 """
 import copy
 import json

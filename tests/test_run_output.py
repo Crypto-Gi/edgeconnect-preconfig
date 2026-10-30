@@ -1,5 +1,6 @@
 """A run's printed lines, prompts and structured results (cli-requests R1, R3): quiet() and captured_output() capture only their own
 run's lines, a prompt at the end of stdin ends the command instead of waiting, and the recorder keeps each command's results."""
+import contextlib
 import csv
 import io
 import json
@@ -131,8 +132,12 @@ class StdinAtEnd(Fixture):
                 (["variables", folder], 1), (["variables", folder, "--pick", "top10", "--yes", "--name", "s"], 0),
                 (["compare", folder, "h2"], 1), (["validate", site, "--csv", site + "/sites.csv"], 0), (["upload", site, "--csv", site + "/sites.csv"], 0),
                 (["validate", "--yaml", str(yml), "--orchestrator", "lab"], 0), (["upload", "--yaml", str(yml), "--orchestrator", "lab"], 0)]
+        partner = write_capture(self.tmp / "cap2")  # compare refuses the build's own appliance as a partner: h2 is another nePk
+        run = json.loads((partner / "run.json").read_text(encoding="utf-8"))
+        run["appliance"].update(nePk="8.NE", hostName="h2")
+        (partner / "run.json").write_text(json.dumps(run), encoding="utf-8")
         for argv, expected in runs:
-            with self.subTest(argv=argv[:2]):
+            with self.subTest(argv=argv[:2]), mock.patch("capture.capture", return_value=partner) if argv[0] == "compare" else contextlib.nullcontext():
                 [(code, text)] = in_threads(lambda: self.run_cli(argv))
                 self.assertEqual(code, expected, text)
                 if expected == 1:
