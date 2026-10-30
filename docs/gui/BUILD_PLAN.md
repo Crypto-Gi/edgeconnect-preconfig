@@ -396,6 +396,7 @@ Accessibility pass (axe-core on every screen, both themes), a Playwright smoke t
 written YAML files), README and docs GUI sections, a WSL check by hand, version bump, release as a GitHub pre-release from `gui`
 (`main` and its Latest release untouched).
 Done when: CI is green, the WSL check has passed and the pre-release is published.
+The owner has no Windows machine, so the check by hand runs the GUI on an Ubuntu host over SSH instead (the same port forwarded to the Mac's browser), as the automation GUI's release did; WSL itself stays untested.
 Built as (without the version bump and release, which come last): `tests/e2e/gui_launcher.py` starts `GuiServer` in the test process over
 the engine tests' fake Orchestrator (fleet checked through it too, the golden synthetic capture for a build and, as h2 would read it, for a
 compared site, the golden preconfigs) and `tests/e2e/test_browser.py` drives it with Python Playwright: the smoke test goes from Find
