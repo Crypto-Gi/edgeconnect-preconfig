@@ -27,7 +27,8 @@
   "lan0_dns_servers_0",
   "lan0_netbios_node_type",
   "lan0_maximum_lease",
-  "lan0_default_lease"
+  "lan0_default_lease",
+  "local_routes_lan0_next_hop"
  ],
  "rows": [
   {
@@ -55,6 +56,7 @@
    "lan0_netbios_node_type": "B",
    "lan0_maximum_lease": "86400",
    "lan0_default_lease": "3600",
+   "local_routes_lan0_next_hop": "192.0.2.126",
    "preconfig_name": "branch-a_preconfig",
    "serial_number": ""
   }

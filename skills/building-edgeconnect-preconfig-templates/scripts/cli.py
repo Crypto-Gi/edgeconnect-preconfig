@@ -731,37 +731,41 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
             refuse_base(site)
         others.append(other)
     reference = load_yaml(base / "reference.yaml")
-    from generate import Builder
-    probe = Builder()
-    probe.find_secrets(reference)
-    rows = [{k: cell(v) for k, v in r.items()} for r in classify(reference, probe.secret_paths, None, others)]
     names = [o["applianceInfo"]["hostname"] for o in others]
     base_host = me.get("hostName")
     seen = [dict(sheet_items(o)) for o in others]
-    picker = Picker(reference, rows, {}, seen)
+    mine = dict(sheet_items(reference))
+    notes: Dict[str, str] = {}  # site -> why it gets no row; decided first, so such a site decides no column either
+    for n, o, s in zip(names, others, seen):
+        diffs = layout_differences(reference, o)
+        why = "" if diffs else shape_note(mine, s, n, base_host)
+        if diffs:
+            notes[n] = ("Note: {} lists its items differently ({}{}). Its values would land on the wrong interfaces, so sites.csv gets no row for it; "
+                        "build a separate template for that design.".format(n, ", ".join(diffs[:4]), " ..." if len(diffs) > 4 else ""))
+        elif why:
+            notes[n] = ("Note: {}. sites.csv gets no row for {}: the template holds {}'s settings only. Run compare with {} as the base "
+                        "(build it first), or build a separate template for that design.".format(why, n, base_host, n))
+    kept = [(n, o, s) for n, o, s in zip(names, others, seen) if n not in notes]
+    from generate import Builder
+    probe = Builder()
+    probe.find_secrets(reference)
+    rows = [{k: cell(v) for k, v in r.items()} for r in classify(reference, probe.secret_paths, None, [o for _, o, _ in kept])]
+    picker = Picker(reference, rows, {}, [s for _, _, s in kept])
     differ = [r for r in picker.free if picker.on[r["path"]]]
     same = sum(1 for r in rows if r["reason"] == "same at every site you gave")
     only = sum(1 for r in rows if r["flag"] == "true" and r["reason"].startswith("only "))
     locked = sum(1 for r in picker.rows if r["locked"])
+    shown = [n for n, _, _ in kept]
     print("\n{} settings are always per site (hostname, secrets, Deployment page, appliance info), and {} more are per site at {} and {}:".format(
-        locked, len(differ), info["appliance"].get("hostName"), ", ".join(names)))
-    print("  {:>4}  {:<52} {:<30} {:>5}  {}   {}".format("#", "Setting", info["appliance"].get("hostName"), "", "Choice", "   ".join("| " + n for n in names)))
+        locked, len(differ), base_host, ", ".join(shown) or "no other site"))
+    print("  {:>4}  {:<52} {:<30} {:>5}  {}   {}".format("#", "Setting", base_host, "", "Choice", "   ".join("| " + n for n in shown)))
     print("\n".join(picker.show(differ, "Different between your sites (pre-ticked)")))
     print("{} settings are the same at every site and stay fixed.".format(same))
     if only:
         print("{} settings exist only at some of the sites and are left fixed.".format(only))
-    misfits = {n: layout_differences(reference, o) for n, o in zip(names, others)}
-    mine = dict(sheet_items(reference))
-    for n, s in zip(names, seen):
-        diffs = misfits[n]
-        why = "" if diffs else shape_note(mine, s, n, base_host)
-        if diffs:
-            print("Note: {} lists its items differently ({}{}). Its values would land on the wrong interfaces, so sites.csv gets no row for it; "
-                  "build a separate template for that design.".format(n, ", ".join(diffs[:4]), " ..." if len(diffs) > 4 else ""))
-        elif why:
-            misfits[n] = [why]
-            print("Note: {}. sites.csv gets no row for {}: the template holds {}'s settings only. Run compare with {} as the base "
-                  "(build it first), or build a separate template for that design.".format(misfits[n][0], n, base_host, n))
+    for n in names:
+        if n in notes:
+            print(notes[n])
     if not a.yes:
         answer = read("Build the template with these settings per site? [Y/n/edit] ").strip().lower()
         if answer in ("n", "no"):
@@ -770,14 +774,13 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         if answer in ("e", "edit") and not interact(picker, "all", read):
             print("nothing written")
             return 1
-    kept = [n for n in names if not misfits[n]]
     for r in picker.free:
         if r["reason"] == LAYOUT_DIFFERS and not picker.on[r["path"]] and kept:
-            print("Warning: {} stays fixed: {} gets {}'s value {}".format(r["label"], ", ".join(kept), base_host, r["value"] or '""'))
+            print("Warning: {} stays fixed: {} gets {}'s value {}".format(r["label"], ", ".join(shown), base_host, r["value"] or '""'))
     name = finish(picker, reference, info["site_type"], a.name, a.yes, read)
     if not name:
         return 1
-    rows_for = [{"hostname": n, "items": s} for n, s in zip(names, seen) if n in kept]
+    rows_for = [{"hostname": n, "items": s} for n, _, s in kept]
     target = build_site(a.folder, info, name, picker.sheet(reference), rows_for)
     ensure_sites_csv(target)  # every other site may have been left out: sites.csv still holds this site's row
     picker.record(reference, target)

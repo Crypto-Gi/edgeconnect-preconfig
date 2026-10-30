@@ -484,6 +484,14 @@ class CompareShape(unittest.TestCase):
         self.assertEqual(built["sheet"]["localRoutes.staticRoutes[0].nextHop"]["decision"], "variable")  # br-2's own next hop, not br-1's
         self.assertEqual([r["hostname"] for r in built["rows_for"]], ["br-2"])  # br-3 lacks it: no row
 
+    def test_a_site_without_a_row_decides_no_column(self):
+        def other_design(o):
+            o["deploymentInfo"]["deploymentInterfaces"][0].update(zone="Guest", interfaceLabel="Data")
+            o["localRoutes"]["staticRoutes"].append({"routeIpSubnet": "198.51.100.0/25", "nextHop": "192.0.2.253"})
+        code, out, built = run_compare(zoned(), [renamed(change=other_design), zoned(host="br-3")])
+        self.assertEqual([r["hostname"] for r in built["rows_for"]], ["br-3"])
+        self.assertEqual(built["sheet"]["deploymentInfo.deploymentInterfaces[0].zone"]["decision"], "fixed")  # differs only at br-2, which gets no row
+
     def test_dhcp_relay_against_server_is_named(self):
         def relay(o):
             o["deploymentInfo"]["dhcpInfo"][0] = {"dhcpInterfaceName": "lan0", "dhcpType": "relay", "dhcpProxyServers": ["192.0.2.50"]}
