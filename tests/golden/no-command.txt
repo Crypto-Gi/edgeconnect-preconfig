@@ -21,6 +21,8 @@ edgeconnect-preconfig: build preconfig templates from a working appliance, witho
   validate   --yaml FILE|DIR ... --orchestrator NICK    check existing preconfig YAML files; never writes
   upload     --yaml FILE|DIR ... --orchestrator NICK    same checks, then upload every file that passes (no --approve)
              [--name NAME] [--serial SERIAL]
+  gui        [--port PORT] [--no-browser]               the same commands in a local web GUI on 127.0.0.1 (a clone of
+                                                       the repository only; not in an installed skill)
 
 FOLDER is what build wrote (or a site-<name> folder inside it). Validation runs on the Orchestrator the appliance was read
 from, unless --validate-on names another; either way it must be listed in EC_VALIDATORS. Every Orchestrator read is a GET.

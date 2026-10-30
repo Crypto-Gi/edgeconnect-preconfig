@@ -329,7 +329,7 @@ def serve(port: int = 0, browser: bool = True) -> int:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(prog="python3 -m toolkit.gui", description="Start the preconfig GUI on 127.0.0.1.")
+    parser = argparse.ArgumentParser(prog="edgeconnect-preconfig gui", description="Start the preconfig GUI on 127.0.0.1.")
     parser.add_argument("--port", type=int, default=0, help="port to listen on (default: any free port)")
     parser.add_argument("--no-browser", action="store_true", help="only print the link; do not open a browser")
     args = parser.parse_args(argv)

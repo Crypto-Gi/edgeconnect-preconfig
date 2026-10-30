@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install or update the EdgeConnect toolkit from main, in one folder (macOS and Linux): you pick
+# Install or update the EdgeConnect toolkit from main (a clone already on another branch, such as gui, stays on it), in one folder (macOS and Linux): you pick
 # the repositories (the edgeconnect-auto CLI, the edgeconnect-preconfig CLI, the MCP server's guide and report skills) and each
 # one's agent skill, plus, if you want it, the MCP server run locally (stdio) for the agents you
 # choose. The same file ships in edgeconnect-orchestrator-automation, edgeconnect-preconfig and
@@ -238,17 +238,26 @@ case "$SCOPE" in
 esac
 PRECONFIG_SCRIPTS="$ROOT/edgeconnect-preconfig/toolkit/scripts"
 
-say "Repositories (main) in $ROOT"
+# A clean clone is updated on the branch it is on (a clone on gui stays on gui); a detached one goes back to main.
+update_clone() {
+  if [ -n "$(git -C "$ROOT/$1" status --porcelain --untracked-files=no)" ]; then
+    echo "$1: already cloned, has local changes, not updated (commit or discard them, then run again)"
+    return 0
+  fi
+  branch=$(git -C "$ROOT/$1" symbolic-ref --short -q HEAD) || branch=""
+  if [ -z "$branch" ]; then
+    branch=main
+    git -C "$ROOT/$1" checkout -q main || die "$1: could not switch to main"
+  fi
+  git -C "$ROOT/$1" pull -q --ff-only origin "$branch" || die "$1: could not update $branch (diverged, not on GitHub, or no network; git -C $ROOT/$1 checkout main to go back to main)"
+  echo "$1: already cloned, updated $branch to $(git -C "$ROOT/$1" rev-parse --short HEAD)"
+}
+
+say "Repositories in $ROOT (a new clone is main; a clone you have keeps its branch)"
 mkdir -p "$ROOT"
 for repo in $REPOS; do
   if [ -d "$ROOT/$repo/.git" ]; then
-    if [ -n "$(git -C "$ROOT/$repo" status --porcelain --untracked-files=no)" ]; then
-      echo "$repo: already cloned, has local changes, not updated (commit or discard them, then run again)"
-    else
-      git -C "$ROOT/$repo" checkout -q main || die "$repo: could not switch to main"
-      git -C "$ROOT/$repo" pull -q --ff-only origin main || die "$repo: could not update main (diverged, or no network)"
-      echo "$repo: already cloned, updated to $(git -C "$ROOT/$repo" rev-parse --short HEAD)"
-    fi
+    update_clone "$repo"
   else
     git clone -q "https://github.com/Crypto-Gi/$repo.git" "$ROOT/$repo" || die "$repo: clone failed; check your network access to github.com and run again"
     echo "$repo: cloned at $(git -C "$ROOT/$repo" rev-parse --short HEAD)"

@@ -60,7 +60,7 @@ edgeconnect-preconfig/
 │   ├── VERSION                               # toolkit version
 │   ├── references/                           # 9.6/9.7/10.0 default templates, endpoint-catalogue, known-constraints, lessons, validate-behaviour, variable-ranking.json
 │   ├── scripts/                              # 17 runtime scripts (cli, capture, cache_check, translate, mappers, decisions, variables, generate, cells, render, check, validate, upload, synth, options, runlog, common)
-│   └── gui/                                  # the local web GUI (python3 -m toolkit.gui): server, tasks, engine, fleet status, approval, static/
+│   └── gui/                                  # the local web GUI (edgeconnect-preconfig gui, or python3 -m toolkit.gui): server, tasks, engine, fleet status, approval, static/
 ├── skills/
 │   └── building-edgeconnect-preconfig-templates/   # <-- installable skill: SKILL.md + a copy of toolkit/ (tools/build_skill.py)
 ├── tools/build_skill.py                      # copies toolkit/ into the skill and rebuilds dist/; --check reports drift

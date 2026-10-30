@@ -2,6 +2,8 @@
 
 ## Unreleased (gui branch)
 
+- **`edgeconnect-preconfig gui`** starts the local web GUI (`--port`, `--no-browser`, as `python3 -m toolkit.gui`, which still works) from the command `setup.sh` installs, once the clone is on the `gui` branch. In an installed agent skill, which has no GUI, it stops with one error line (exit 2). `--help` lists it.
+- **`setup.sh` re-run keeps each clone on its branch**: a clean clone is pulled (fast-forward only) on the branch it is on, so a clone on `gui` stays on `gui` instead of being switched back to `main`. A detached clone goes back to `main`; a branch that is not on GitHub or has diverged stops the run without switching.
 - **GUI:** leaving a page (Back, a typed address) now closes a dialog left open on it, such as Save template and CSV, which stayed over the next page until Close was pressed.
 
 ## 1.4.0-rc.1 (2026-10-30, pre-release from the `gui` branch)
@@ -35,7 +37,7 @@
 - **compare: fewer extra columns for identical sites**: an address inside the site's subnets outside the Deployment page (a VRRP address, a route next hop, a BGP peer) that is the same at every compared site stays fixed.
 - **compare: a route-map name or IDS/IPS setting at only some sites is a ticked column** (`docs/decisions/0019`, owner): a segment's `redistToSDwanFabricRouteMap` or `idsIpsConfig` mode/profile that the base has and a partner does not is a column; the partner keeps its row with a blank cell and a `Note:` to fill it in. Before, it cost the partner its row.
 - **compare** changes leave single-site `build` output unchanged.
-- **Docs match the code**: the README, `.env.example`, `CONTRIBUTING.md`, `SKILL.md`, the decision index and `docs/` (install, command line, GUI, testing, build plan) were checked against the code and corrected: the `preconfigs` command and every `variables`/`compare` flag in the README, how to get and start the GUI (`python3 -m toolkit.gui`; there is no `gui` command), what a re-run of `setup.sh` changes, `EDGECONNECT_REPORT_DIR` and the refused `user:password@` base URL in `.env.example`, compare's twice-typed and stopped-validation messages, and two apply-time rows in `validate-behaviour.md`. `edgeconnect-preconfig --help` now shows the `build`, `variables` and `compare` options it left out (`--target-release`, `--target-ecos`, `--pick all`, `--fix`, `--dry-run`, `--captures`).
+- **Docs match the code**: the README, `.env.example`, `CONTRIBUTING.md`, `SKILL.md`, the decision index and `docs/` (install, command line, GUI, testing, build plan) were checked against the code and corrected: the `preconfigs` command and every `variables`/`compare` flag in the README, how to get and start the GUI, what a re-run of `setup.sh` changes, `EDGECONNECT_REPORT_DIR` and the refused `user:password@` base URL in `.env.example`, compare's twice-typed and stopped-validation messages, and two apply-time rows in `validate-behaviour.md`. `edgeconnect-preconfig --help` now shows the `build`, `variables` and `compare` options it left out (`--target-release`, `--target-ecos`, `--pick all`, `--fix`, `--dry-run`, `--captures`).
 
 ## 1.3.3 (2026-10-30)
 

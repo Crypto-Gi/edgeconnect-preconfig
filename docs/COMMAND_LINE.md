@@ -2,7 +2,7 @@
 
 Back to the [README](../README.md). Install first: [INSTALL.md](INSTALL.md).
 
-`setup.sh` installs the `edgeconnect-preconfig` command (in `~/.local/bin`; it runs `scripts/cli.py` with the toolkit's Python and the shared `.env` of the install folder, unless `EC_DOTENV` names another). Six commands cover the whole job, and `preconfigs` shows what is already on an Orchestrator; `edgeconnect-preconfig --help` lists them, each takes `--help`, and `edgeconnect-preconfig --version` prints the toolkit version and its commit. The local web GUI is not one of these commands: it starts with `python3 -m toolkit.gui` ([GUI.md](GUI.md)).
+`setup.sh` installs the `edgeconnect-preconfig` command (in `~/.local/bin`; it runs `scripts/cli.py` with the toolkit's Python and the shared `.env` of the install folder, unless `EC_DOTENV` names another). Six commands cover the whole job, and `preconfigs` shows what is already on an Orchestrator; `edgeconnect-preconfig --help` lists them, each takes `--help`, and `edgeconnect-preconfig --version` prints the toolkit version and its commit. `edgeconnect-preconfig gui [--port PORT] [--no-browser]` starts the local web GUI from a clone on the `gui` branch (not from an installed agent skill, which has no GUI; it says so and exits 2); see [GUI.md](GUI.md).
 
 ```bash
 edgeconnect-preconfig list --orchestrator lab                      # test the .env profile and list appliances: hostname, nePk, model, ECOS, site, reachable
