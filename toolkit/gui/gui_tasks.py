@@ -38,6 +38,7 @@ UPLOADS = {"upload", "upload_yaml"}
 # compare and preconfigs join READS with their engine helpers (R6 pending; preconfigs is step 10).
 FINAL = {"done", "failed", "rejected", "expired", "cancelled"}
 _OPEN = {"queued", "running", "awaiting_approval"}
+_NEPK = re.compile(r"^\d+\.NE$", re.I)
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")  # a build or site type folder name as the GUI lists it: no path in it
 
 
@@ -80,7 +81,9 @@ class Task:
         """The task as the browser sees it; the whole Result (rows, issues, text) comes from result()."""
         found = self.result
         result = None if found is None else {
-            "exit_code": found.exit_code, "status": found.status, "counts": found.counts, "approval": found.approval,
+            "exit_code": found.exit_code, "status": found.status, "counts": found.counts, "approval": found.approval and dict(found.approval, counts={
+                "ready": found.counts.get("PLANNED", 0), "invalid": found.counts.get("INVALID", 0), "conflict": found.counts.get("SKIPPED", 0),
+                "rows": len(found.rows)}),  # so the page can say "uploads N of M"
             "issues": len(found.issues), "rows": len(found.rows), "files": len(found.files)}
         return {"id": self.id, "action": self.action, "orchestrator": self.orchestrator, "state": self.state, "message": self.message,
                 "created": self.created, "deadline": self.deadline, "folder": str(self.folder) if self.folder else None, "result": result}
@@ -260,9 +263,10 @@ class TaskManager:
         if action == "list":
             return self._read(task, [], lambda: engine.list_appliances(orch, opt("search"), **context))
         if action == "build":
-            appliance = self._text(request, "appliance")
+            appliance = self._text(request, "appliance").strip()
+            if _NEPK.match(appliance):  # the lock below is the build folder's name, which comes from the hostname
+                raise TaskError("build takes the appliance's hostname as the appliance list shows it, not its nePk {}".format(appliance))
             validate_on = self._orchestrator(opt("validate_on"), required=False) or None
-            # shortcut: an appliance named by nePk locks apart from its hostname folder; the GUI's picker sends the hostname.
             return self._read(task, ["appliance:" + cli.safe_name(appliance).lower()], lambda: engine.build(
                 orch, appliance, out=self.out_root, validate_on=validate_on, target_release=opt("target_release"), target_ecos=opt("target_ecos"), **context))
         if action == "variables":

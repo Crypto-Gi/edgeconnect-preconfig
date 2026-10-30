@@ -112,6 +112,7 @@ class TaskTests(Fixture):
         task = self.wait(self.upload(tasks, "site-x", "site-y"), "awaiting_approval", "failed", "rejected")
         self.assertEqual((task.state, task.view()["result"]["counts"], self.orch.posts()), ("awaiting_approval", {"PLANNED": 2}, []))
         self.assertEqual(task.view()["result"]["approval"]["gates"][0]["expected"], "lab")
+        self.assertEqual(task.view()["result"]["approval"]["counts"], {"ready": 2, "invalid": 0, "conflict": 0, "rows": 2})
         self.assertIsNotNone(task.view()["deadline"])
         tasks.approve(task.id, ["lab"])
         self.wait(task, "done", "failed", "rejected")
@@ -161,6 +162,34 @@ class TaskTests(Fixture):
         release.set()
         self.assertEqual((self.wait(check, "done", "failed").state, self.wait(preview, "done", "failed").state), ("done", "done"))
         self.assertEqual([r["kind"] for r in preview.result.outputs], ["dry-run", "picker"])  # a preview writes nothing
+
+    def test_an_upload_with_invalid_and_conflicting_rows_still_asks_for_the_ready_ones(self):
+        tasks = self.manager()
+        task = tasks.create({"action": "upload", "orchestrator": "lab", "build": "h1", "site": "t",
+                             "csv_text": self.csv_text([("site-n", {}), ("taken", {}), ("site-bad", {"lan0_ip": "bad"})])})
+        self.wait(task, "awaiting_approval", "failed", "rejected")
+        self.assertEqual(task.view()["result"]["approval"]["counts"], {"ready": 1, "invalid": 1, "conflict": 1, "rows": 3})
+
+    def test_a_second_build_of_the_same_hostname_queues_and_a_nepk_is_refused(self):
+        release = threading.Event()
+
+        def slow(*args, **kwargs):
+            release.wait(10)
+            return write_capture(common.work_dir() / "cap-{}".format(threading.get_ident()))
+        elsewhere = Path(tempfile.mkdtemp(dir=str(self.tmp)))  # a rebuild of h1 here would move the shared build aside
+        tasks = TaskManager(str(self.on), str(elsewhere), str(elsewhere / "work"))
+        self.managers.append(tasks)
+        with mock.patch.object(capture, "capture", side_effect=slow):
+            first = self.wait(tasks.create({"action": "build", "orchestrator": "lab", "appliance": "h1", "validate_on": "lab"}), "running")
+            second = tasks.create({"action": "build", "orchestrator": "lab", "appliance": "H1"})
+            listing = self.wait(tasks.create({"action": "list", "orchestrator": "lab"}), "done", "failed")
+            time.sleep(0.3)
+            self.assertEqual((first.state, second.state, listing.state), ("running", "queued", "done"))
+            release.set()
+            self.assertEqual([self.wait(t, "done", "failed").state for t in (first, second)], ["done", "done"], second.result and second.result.text)
+        for nepk in ("9.NE", " 12.ne "):
+            with self.assertRaisesRegex(TaskError, "build takes the appliance's hostname as the appliance list shows it, not its nePk"):
+                tasks.create({"action": "build", "orchestrator": "lab", "appliance": nepk})
 
     # ------------------------------------------------------------ the approval gates, through the task layer
 
