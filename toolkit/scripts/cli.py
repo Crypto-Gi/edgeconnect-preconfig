@@ -178,7 +178,10 @@ def cmd_preconfigs(argv: List[str]) -> int:
         raise Fail("{}: its YAML uses aliases (*name), which can copy a secret onto a key that is not secret; it is not shown".format(label))
     if not isinstance(doc, dict):
         raise Fail("{}: its YAML is not a mapping of sections, so it is not shown".format(label))
-    shown = yaml.safe_dump(redact_secrets(doc, strict=True)[0], sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)
+    try:
+        shown = yaml.safe_dump(redact_secrets(doc, strict=True)[0], sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)
+    except RecursionError:  # a few hundred levels of nesting parse, but the walk or the dump runs out of stack
+        raise Fail("{}: its YAML nests too deep, so it is not shown".format(label))
     record("preconfig-yaml", name=item.get("name"), id=item.get("id"), text=shown)
     print("# {} on {}, secrets redacted as <SECRET:path>\n{}".format(label, a.orchestrator, shown), end="")
     return 0

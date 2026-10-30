@@ -147,6 +147,8 @@ class Preconfigs(unittest.TestCase):
                 self.assertEqual([r for r in results if r["kind"] == "preconfig-yaml"], [])
                 if secret:
                     self.assertNotIn(secret, out + err + json.dumps(results) + log)
+        code, out, err, _, _ = self.show("a: " + "{b: " * 450 + "1" + "}" * 450 + "\n")  # parses, but too deep to walk or dump
+        self.assertEqual((code, out, err), (2, "", "error: preconfig x (id 1): its YAML nests too deep, so it is not shown\n"))
         code, out, _, _, _ = self.show("applianceInfo:\n  hostname: '*p and &p are text here'\n")
         self.assertEqual(code, 0)  # an asterisk inside a quoted value is not an alias
         self.assertIn("*p and &p are text here", out)
