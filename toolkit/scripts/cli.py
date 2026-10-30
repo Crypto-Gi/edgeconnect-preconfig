@@ -173,13 +173,12 @@ def cmd_preconfigs(argv: List[str]) -> int:
     except Exception as error:  # the parser's message quotes the line, which may hold a secret: only where it broke is shown
         mark = getattr(error, "problem_mark", None)
         raise Fail("{}: its YAML does not parse{}; its text is not shown, as it may hold a secret".format(label, " (line {}, column {})".format(mark.line + 1, mark.column + 1) if mark else ""))
+    import yaml
+    if any(isinstance(event, yaml.AliasEvent) for event in yaml.parse(text)):  # redaction is by key: an alias (or <<: merge) would print a secret's value under another key
+        raise Fail("{}: its YAML uses aliases (*name), which can copy a secret onto a key that is not secret; it is not shown".format(label))
     if not isinstance(doc, dict):
         raise Fail("{}: its YAML is not a mapping of sections, so it is not shown".format(label))
-    import yaml
-    try:
-        shown = yaml.safe_dump(redact_secrets(doc, strict=True)[0], sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)
-    except RecursionError:  # an alias inside itself (a: &a [*a])
-        raise Fail("{}: its YAML refers to itself, so it is not shown".format(label))
+    shown = yaml.safe_dump(redact_secrets(doc, strict=True)[0], sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)
     record("preconfig-yaml", name=item.get("name"), id=item.get("id"), text=shown)
     print("# {} on {}, secrets redacted as <SECRET:path>\n{}".format(label, a.orchestrator, shown), end="")
     return 0
