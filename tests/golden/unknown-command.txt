@@ -1,0 +1,5 @@
+$ edgeconnect-preconfig nope
+exit 2
+--- stdout
+--- stderr
+unknown command 'nope'; run: edgeconnect-preconfig --help

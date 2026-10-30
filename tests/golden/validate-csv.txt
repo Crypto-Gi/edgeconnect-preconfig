@@ -1,0 +1,8 @@
+$ edgeconnect-preconfig validate <tmp>/out/h1/site-t10 --csv <tmp>/out/h1/site-t10/sites.csv
+exit 0
+--- stdout
+
+validating every row of sites.csv on lab ...
+ok   h1_preconfig -> <tmp>/out/h1/site-t10/rendered/h1_preconfig.yml
+rows that passed are in <tmp>/out/h1/site-t10/rendered
+--- stderr

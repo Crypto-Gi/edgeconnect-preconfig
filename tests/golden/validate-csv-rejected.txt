@@ -1,0 +1,13 @@
+$ edgeconnect-preconfig validate <tmp>/out/h1/site-t10 --csv <tmp>/rejected.csv
+exit 1
+--- stdout
+
+validating every row of rejected.csv on lab ...
+ok   h1_preconfig -> <tmp>/out/h1/site-t10/rendered/h1_preconfig.yml
+WARN h9: interface address 10.0.0.1 is also used by row 1 (fine for private LANs, a mistake for WAN addresses)
+WARN h9: interface address 2001:db8:1::1 is also used by row 1 (fine for private LANs, a mistake for WAN addresses)
+WARN h9: interface address 198.51.100.10 is also used by row 1 (fine for private LANs, a mistake for WAN addresses)
+FAIL h9
+     Orchestrator /validate rejected row: HTTP 400: applianceInfo.site: invalid value
+fix the FAIL rows in <tmp>/rejected.csv and run validate again; the rows that passed are in <tmp>/out/h1/site-t10/rendered
+--- stderr

@@ -1,0 +1,19 @@
+$ edgeconnect-preconfig build --orchestrator lab --appliance h1 --out <tmp>/out
+exit 0
+--- stdout
+reading h1 from lab (GET only) ...
+converting for Orchestrator release 9.7.1.42046 ...
+checking and validating on lab ...
+
+Saved <tmp>/out/h1  (/validate on lab: accepted)
+  reference.yaml      the appliance as preconfig YAML
+  h1.jinja2           the template
+  h1.csv              empty sheet (headers only) for new sites
+  example.csv         this appliance's own values, secrets blank - copy it to start your sites.csv
+  summary.md          what was carried and what was not; verdict: Complete for preconfig; 2 item(s) to check by hand.
+
+Next: choose the per-site settings
+  edgeconnect-preconfig variables <tmp>/out/h1
+or let other sites of the same design choose them
+  edgeconnect-preconfig compare <tmp>/out/h1 <site> <site>
+--- stderr

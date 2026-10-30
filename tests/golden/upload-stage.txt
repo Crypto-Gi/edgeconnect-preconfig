@@ -1,0 +1,8 @@
+$ edgeconnect-preconfig upload --template <tmp>/out/h1/site-t10/t10.jinja2 --csv <tmp>/out/h1/site-t10/sites.csv --orchestrator lab --out <tmp>/upload-stage
+exit 0
+--- stdout
+ROW  1 | VALID    | h1_preconfig             | .yml written immediately -> <tmp>/upload-stage/rendered/h1_preconfig.yml
+
+Summary: total=1 | valid_yaml_written=1 | invalid_skipped=0 | conflict_skipped=0 | uploaded=0 | upload_failed=0
+Approval required: review the rows above and re-run with --approve to upload the 1 ready row(s).
+--- stderr

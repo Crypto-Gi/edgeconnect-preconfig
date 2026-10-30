@@ -1,0 +1,5 @@
+$ edgeconnect-preconfig variables <tmp>/out/h1 --pick top10 --set no_such_setting --yes
+exit 2
+--- stdout
+--- stderr
+error: --set: no setting named no_such_setting

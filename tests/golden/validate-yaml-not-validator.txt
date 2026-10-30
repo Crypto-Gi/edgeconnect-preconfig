@@ -1,0 +1,5 @@
+$ edgeconnect-preconfig validate --yaml <tmp>/yaml --orchestrator fieldref
+exit 2
+--- stdout
+--- stderr
+STOPPED: fieldref is not a validator Orchestrator (allowed: lab). To allow it, add it to EC_VALIDATORS in .env (comma-separated nicknames).

@@ -1,0 +1,18 @@
+$ edgeconnect-preconfig variables <tmp>/out/h1
+> typed: 2
+> typed: q
+exit 1
+--- stdout
+Hostname, serial number and secrets are always per site.
+How do you want to pick the rest?
+  1) Top 10 - the settings most often different between sites (start here)
+  2) Top 20
+  3) All settings, by section
+>   Always per site, no questions: hostname, 0 secret(s) and 49 Deployment-page and appliance-info values (type l to list them)
+     #  Setting                                              Value now                       Diff  Choice
+  -- Top 20: most often different between sites ------------------
+   20  dhcpInfo[lan0].gatewayIpAddress                      ""                              100%  VARIABLE
+  -- 25 more settings: type a to see all, by section
+Type numbers to flip (e.g. 4 12), s1.. to open a section, a for all sections, t for the Top list, l for the locked ones, a word to search, Enter when done, q to quit.
+> nothing written
+--- stderr

@@ -1,0 +1,9 @@
+$ edgeconnect-preconfig upload --yaml <tmp>/yaml/good.yml --orchestrator lab --name golden-upload
+exit 0
+--- stdout
+UPLOADED | golden-upload            | serial=- | id=2
+
+uploaded                       good.yml                 golden-upload: uploaded to Orchestrator (id=2), verified on Orchestrator
+
+1 file(s): 1 uploaded
+--- stderr

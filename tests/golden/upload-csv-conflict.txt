@@ -1,0 +1,8 @@
+$ edgeconnect-preconfig upload <tmp>/out/h1/site-t10 --csv <tmp>/taken.csv --approve
+exit 0
+--- stdout
+uploading taken.csv on lab ...
+ROW  1 | CONFLICT | taken                    | .yml written (taken.yml), upload skipped: preconfig_name 'taken' already exists on Orchestrator
+
+Summary: total=1 | valid_yaml_written=1 | invalid_skipped=0 | conflict_skipped=1 | uploaded=0 | upload_failed=0
+--- stderr
