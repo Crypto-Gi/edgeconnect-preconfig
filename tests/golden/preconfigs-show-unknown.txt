@@ -1,0 +1,6 @@
+$ edgeconnect-preconfig preconfigs --orchestrator lab --show nope
+exit 2
+--- stdout
+--- stderr
+error: preconfig 'nope': 0 matches by name or id on lab
+--- files

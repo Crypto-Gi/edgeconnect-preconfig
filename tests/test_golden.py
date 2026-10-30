@@ -36,6 +36,16 @@ UPDATE = os.environ.get("EDGECONNECT_UPDATE_GOLDEN") == "1"
 RELEASE = "9.7.1.42046"
 APPLIANCES = [{"hostName": "h1", "nePk": "9.NE", "model": "EC-V", "softwareVersion": "9.7.1.0", "site": "S1", "state": 1},
               {"hostName": "h2", "nePk": "8.NE", "model": "EC-XS", "softwareVersion": "9.6.2.1", "site": "S1", "state": 2}]
+# preconfigs on the Orchestrator, for the preconfigs verb: secrets in a key, a banner, a number, a server key, and one whose " breaks the YAML
+SECRETS = ("Adm1n-Pw-77", "B4nner-Pw-55", "7788990011", "Rad-Key-33", "Br0ken", "Pw-66")
+SECRET_YAML = ('applianceInfo:\n  hostname: br-1\n  adminPassword: Adm1n-Pw-77\nbanners:\n  loginBanner: "lab use only; password: B4nner-Pw-55"\n'
+               'ikeConfig:\n  presharedKey: 7788990011\nnac:\n  server:\n    - host: 10.0.0.5\n      key: Rad-Key-33\n')
+BROKEN_YAML = 'applianceInfo:\n  hostname: br-2\n  adminPassword: "Br0ken"Pw-66"\n'
+PRECONFIGS = [{"id": 7, "name": "br-1", "serialNum": "001BBC000001", "tag": "east", "modifiedTime": 1761782400000, "autoApply": False,
+               "configData": base64.b64encode(SECRET_YAML.encode()).decode()},
+              {"id": 8, "name": "br-2", "serialNum": None, "tag": "", "modifiedTime": 1761868800000, "configData": base64.b64encode(BROKEN_YAML.encode()).decode()},
+              {"id": 9, "name": "br-3", "serialNum": "001BBC000003", "tag": "west"},
+              {"id": 10, "name": "br-4", "configData": "not base64 at all"}]
 
 
 class Orchestrator:
@@ -183,6 +193,24 @@ class Golden(unittest.TestCase):
 
     def test_list_search_no_match(self):
         self.check("list-search-none", ["list", "--orchestrator", "lab", "--search", "nothing"])
+
+    # ------------------------------------------------------------ preconfigs
+
+    def test_preconfigs(self):
+        self.orch.existing[:] = copy.deepcopy(PRECONFIGS)
+        self.check("preconfigs", ["preconfigs", "--orchestrator", "lab"])
+
+    def test_preconfigs_show(self):
+        self.orch.existing[:] = copy.deepcopy(PRECONFIGS)
+        self.check("preconfigs-show", ["preconfigs", "--orchestrator", "lab", "--show", "br-1"])
+
+    def test_preconfigs_show_broken_yaml(self):
+        self.orch.existing[:] = copy.deepcopy(PRECONFIGS)
+        self.check("preconfigs-show-broken", ["preconfigs", "--orchestrator", "lab", "--show", "8"], code=2)
+
+    def test_preconfigs_show_unknown(self):
+        self.orch.existing[:] = copy.deepcopy(PRECONFIGS)
+        self.check("preconfigs-show-unknown", ["preconfigs", "--orchestrator", "lab", "--show", "nope"], code=2)
 
     # ------------------------------------------------------------ build
 

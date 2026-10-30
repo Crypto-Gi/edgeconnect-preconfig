@@ -1,0 +1,6 @@
+$ edgeconnect-preconfig preconfigs --orchestrator lab --show 8
+exit 2
+--- stdout
+--- stderr
+error: preconfig br-2 (id 8): its YAML does not parse (line 3, column 26); its text is not shown, as it may hold a secret
+--- files
