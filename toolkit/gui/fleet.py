@@ -26,6 +26,9 @@ SLOW_SECONDS = 2.0
 _SLOT = re.compile(r"^orch_(\d+)$")
 _COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 _ON, _OFF = {"on", "true", "yes", "1"}, {"off", "false", "no", "0", ""}  # as the automation GUI reads <nickname>_gui_writes
+_NICKNAME = re.compile(r"^[a-z0-9_]+$")  # automation's config.py: a nickname, and the names it reserves
+_RESERVED = {"default", "orchestrator", "edgeconnect", "ec"}
+_REFUSE = "the automation tools (edgeconnect-auto) stop at this key: "
 
 
 @dataclasses.dataclass(frozen=True)
@@ -48,6 +51,7 @@ class Fleet:
     orchestrators: List[Status]
     not_listed: List[str]  # nicknames with settings in .env but no orch_N line, as the CLI's profile list leaves them out
     note: str = ""
+    warnings: List[str] = dataclasses.field(default_factory=list)  # .env keys the automation tools would refuse, by key name only
 
 
 def profiles(env: Mapping[str, str]) -> List[str]:
@@ -79,10 +83,35 @@ def check_all(
             return status
         return dataclasses.replace(status, **{field: value.replace(key, "<API_KEY>") for field, value in dataclasses.asdict(status).items() if isinstance(value, str)})
 
+    warnings = automation_refusals(dotenv_path or common.run_dotenv() or common._find_dotenv())
     if not names:
-        return Fleet([], unlisted, note)
+        return Fleet([], unlisted, note, warnings)
     with ThreadPoolExecutor(max_workers=len(names)) as pool:
-        return Fleet(list(pool.map(check, names)), unlisted, note)
+        return Fleet(list(pool.map(check, names)), unlisted, note, warnings)
+
+
+def automation_refusals(dotenv_path: str) -> List[str]:
+    """The keys of this .env that make every edgeconnect-auto command stop (its config.py), named by key, never by value.
+
+    In file order: unnumbered orch_ keys and unclosed quotes; then, in slot order, nicknames it refuses or sees twice.
+    """
+    raw = common.parse_dotenv(dotenv_path)  # values as written: preconfig keeps an unclosed quote, automation stops at it
+    found = []
+    for key, value in raw.items():
+        if key.lower().startswith("orch_") and key.lower() != "orch_default" and not _SLOT.match(key.lower()):
+            found.append(key + ": " + _REFUSE + "an orch_ key must be numbered (orch_<N>), or be orch_default")
+        if value[:1] in {"'", '"'} and (len(value) < 2 or value[-1] != value[0]):
+            found.append(key + ": " + _REFUSE + "its quote is not closed")
+    owners: Dict[str, str] = {}
+    slots = sorted((int(match.group(1)), key, value.strip().lower()) for key, value in raw.items() for match in [_SLOT.match(key.lower())] if match and value.strip())
+    for _, key, name in slots:
+        if not _NICKNAME.match(name) or name in _RESERVED:
+            found.append(key + ": " + _REFUSE + "a nickname uses letters, digits or _ only, and is not default, ec, edgeconnect or orchestrator")
+        elif name in owners:
+            found.append(key + ": " + _REFUSE + "this nickname is already used by " + owners[name])
+        else:
+            owners[name] = key
+    return found
 
 
 def _check(name: str, env: Mapping[str, str], validators: Set[str], timeout: float, client_factory: Callable[[str], Any], clock: Callable[[], float]) -> Status:

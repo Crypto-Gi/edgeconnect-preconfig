@@ -187,6 +187,25 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(self.fleet.note, "spare has settings in .env but no orch_N line, so it is not listed; add an orch_<N>=<nickname> line to list one")
         self.assertEqual((self.check("spare_base_url=https://spare.invalid\n"), self.fleet.not_listed), ({}, ["spare"]))
 
+    def test_keys_the_automation_tools_would_refuse_are_named_without_their_value(self):
+        text = dotenv("lab") + "\n".join([
+            "orch_validators=lab", "orch_default=lab", "orch_2=Edge-B", "orch_3=Default", "export orch_4=lab", "orch_5=",
+            "edge-b_base_url=https://edge-b.invalid", "spare_api_key=\"half-quoted", "spare_label='ok'", "spare_note=\"",
+        ]) + "\n"
+        self.check(text)
+        refuse = "the automation tools (edgeconnect-auto) stop at this key: "
+        self.assertEqual(dataclasses.asdict(self.fleet).get("warnings"), [
+            "orch_validators: " + refuse + "an orch_ key must be numbered (orch_<N>), or be orch_default",
+            "spare_api_key: " + refuse + "its quote is not closed",
+            "spare_note: " + refuse + "its quote is not closed",
+            "orch_2: " + refuse + "a nickname uses letters, digits or _ only, and is not default, ec, edgeconnect or orchestrator",
+            "orch_3: " + refuse + "a nickname uses letters, digits or _ only, and is not default, ec, edgeconnect or orchestrator",
+            "orch_4: " + refuse + "this nickname is already used by orch_1",
+        ])
+        self.assertNotIn("half-quoted", json.dumps(dataclasses.asdict(self.fleet)))
+        self.check(dotenv("lab", "edge_b"))
+        self.assertEqual(self.fleet.warnings, [])
+
     def test_the_given_env_is_used_inside_another_run_context(self):
         other = os.path.join(os.path.dirname(self.path), "other.env")
         Path(other).write_text(dotenv("elsewhere"), encoding="utf-8")
