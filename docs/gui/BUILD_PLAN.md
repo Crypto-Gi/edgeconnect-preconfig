@@ -231,6 +231,9 @@ Done when: tests pass, golden outputs are byte-identical, two run contexts with 
 two builds and a render in parallel each get only their own lines, and every verb run through the engine with stdin at end of
 file finishes without waiting.
 
+Built as: PRs #10 (golden outputs), #11 (run context), #12 (per-run output, prompts at the end of stdin, recorder results and
+structured problems) and #13 (the approval hook and batch fingerprint in `upload.run_batch`), all made as CLI additions.
+
 ## Step 2: Approval module (approval.py)
 The automation module's GUI front end: a single-use approval bound to a fingerprint of the template, CSV and `columns.json`
 bytes, each ready row's name, serial and the SHA-256 of its rendered YAML, and the Orchestrator's identity read in that same
@@ -238,6 +241,8 @@ run; 10-minute expiry. It is redeemed by the hook in `run_batch` just before the
 the check and the approval (it failed before and passes now, or a conflict cleared) is refused, not sent. The terminal path is unchanged: the CLI still
 uploads only with `--approve`.
 Done when: tests prove an approval cannot be reused, expires, and is refused for different rows or another Orchestrator.
+Built as: `toolkit/gui/approval.py` (`GuiApprovals`, `upload_gates`, and `approver(token, nickname)` for the run context),
+tested in `tests/test_gui_approval.py` through `cli.main` with a fake Orchestrator.
 
 ## Step 3: Engine (engine.py)
 `engine.run(argv, context)` runs one CLI command line in-process and returns a Result: exit code, status, issues (row, column,
