@@ -430,9 +430,14 @@ class Problem(str):
         return made
 
 
-def problem_data(row: Optional[int], problem: str) -> Dict[str, Any]:
-    """A problem as data: row, column and value when the message carries them, and the message."""
-    return {"row": row, "column": getattr(problem, "column", None), "value": getattr(problem, "value", None), "message": str(problem)}
+def problem_data(row: Optional[int], problem: str, secrets: Any = ()) -> Dict[str, Any]:
+    """A problem as data: row, column and value when the message carries them, and the message; a secret column's value is
+    <SECRET> in both, so the record never holds a secret (the printed text may show fewer problems than are recorded)."""
+    column, value, message = getattr(problem, "column", None), getattr(problem, "value", None), str(problem)
+    if column in secrets:
+        message = message.replace(str(value), "<SECRET>") if value not in (None, "") else message
+        value = "<SECRET>"
+    return {"row": row, "column": column, "value": value, "message": message}
 
 
 _OUTPUT: "contextvars.ContextVar[Optional[Tuple[TextIO, TextIO]]]" = contextvars.ContextVar("edgeconnect_preconfig_output", default=None)
@@ -451,10 +456,13 @@ class RoutedStream:
         return capture[self.index] if capture is not None else self.stream
 
     def write(self, text: str) -> int:
-        return self.target().write(text)
+        target = self.target()
+        return target.write(text) if target is not None else len(text)  # no stream (pythonw): print() writes nothing, as before
 
     def flush(self) -> None:
-        self.target().flush()
+        target = self.target()
+        if target is not None:
+            target.flush()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.stream, name)

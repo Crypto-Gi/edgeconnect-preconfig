@@ -614,8 +614,8 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         return 1
     rows_for = [{"hostname": n, "items": s} for n, s in zip(names, seen) if not misfits[n]]
     target = build_site(a.folder, info, name, picker.sheet(reference), rows_for)
-    ensure_sites_csv(target)
-    picker.record(reference, target)  # every other site may have been left out: sites.csv still holds this site's row
+    ensure_sites_csv(target)  # every other site may have been left out: sites.csv still holds this site's row
+    picker.record(reference, target)
     return validate_rows(target, target / "sites.csv", info, None)
 
 

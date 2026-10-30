@@ -146,7 +146,7 @@ def subnet_problems(columns: Dict[str, Dict[str, Any]], row: Dict[str, str]) -> 
         except ValueError:
             continue  # cell_problems reports it
         if nets and not any(cell.version == net.version and cell in net for _, net in nets):
-            problems.append("{}: {} is not inside the subnet of {} ({})".format(name, row[name], ", ".join(n for n, _ in nets), ", ".join(row[n] for n, _ in nets)))
+            problems.append(Problem("{}: {} is not inside the subnet of {} ({})".format(name, row[name], ", ".join(n for n, _ in nets), ", ".join(row[n] for n, _ in nets)), name, row[name]))
     return problems
 
 

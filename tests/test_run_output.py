@@ -2,6 +2,8 @@
 run's lines, a prompt at the end of stdin ends the command instead of waiting, and the recorder keeps each command's results."""
 import csv
 import io
+import json
+import os
 import shutil
 import sys
 import tempfile
@@ -19,6 +21,11 @@ import validate  # noqa: E402  guard-ok: scripts are imported after the sys.path
 from common import Recorder, RunContext, captured_output, running  # noqa: E402  guard-ok: scripts are imported after the sys.path insert
 from test_golden import Orchestrator, write_capture  # noqa: E402  guard-ok: the shared synthetic capture and fake Orchestrator
 from test_run_context import dotenv  # noqa: E402  guard-ok: the shared .env writer
+
+
+def no_env_validators():
+    """The process environment wins over every .env (as in the CLI): leave EC_VALIDATORS out of it for these cases."""
+    return mock.patch.dict(os.environ, {k: v for k, v in os.environ.items() if k.upper() != "EC_VALIDATORS"}, clear=True)
 
 
 def in_threads(*jobs):
@@ -70,7 +77,7 @@ class ParallelCapture(unittest.TestCase):
         self.assertEqual(outside.getvalue(), "not captured\n")
 
     def test_two_runs_with_their_own_env_print_their_own_refusal(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, no_env_validators():
             yml = Path(tmp) / "t.yml"
             yml.write_text('applianceInfo:\n  hostname: "t"\n', encoding="utf-8")
 
@@ -181,19 +188,111 @@ class Recorded(Fixture):
         self.assertEqual((skipped["name"], skipped["file"]), ("taken", str(taken)))
         self.assertTrue(skipped["status"].startswith("skipped"), skipped)
 
-    def test_no_recorder_keeps_nothing_and_prints_the_same(self):
-        self.context.recorder = None
-        code, text = self.run_cli(["build", "--orchestrator", "lab", "--appliance", "h1"])
-        self.assertEqual(code, 0)
-        self.assertEqual(self.recorder.results, [])
-        self.assertIn("Saved {}".format(self.tmp / "preconfig-output" / "h1"), text)
+    def test_a_recorder_does_not_change_what_is_printed(self):
+        with_recorder = self.run_cli(["build", "--orchestrator", "lab", "--appliance", "h1"])
+        self.assertTrue(self.results("build"))
+        self.context = RunContext(validators={"lab"}, out_dir=self.tmp / "plain", work_dir=self.tmp / "work")
+        without = self.run_cli(["build", "--orchestrator", "lab", "--appliance", "h1"])
+        self.assertEqual(without[0], with_recorder[0])
+        self.assertEqual(without[1].replace(str(self.tmp / "plain"), str(self.tmp)), with_recorder[1])
 
-    def test_a_secret_value_is_never_recorded(self):
+    def test_a_secret_cell_is_never_recorded(self):
+        # a template that does not hold the secret column: flow-through fails and its message names the cell
+        template = self.tmp / "s.jinja2"
+        template.write_text('applianceInfo:\n  hostname: "{{ data[\'hostname\'] }}"\nnac:\n  key: "fixed"\n', encoding="utf-8")
+        meta = {"columns": {"hostname": {"path": "applianceInfo.hostname", "type": "str", "optional": False, "example": "h1"},
+                            "nac_key": {"path": "nac.key", "type": "str", "optional": False, "example": "", "secret": True}}}
+        (self.tmp / "columns.json").write_text(json.dumps(meta), encoding="utf-8")
+        sheet = self.tmp / "s.csv"
+        sheet.write_text("hostname,nac_key\nh1,s3cr3t-value\n", encoding="utf-8")
+        code, _ = self.run_cli(["render", "--template", str(template), "--csv", str(sheet), "--columns", str(self.tmp / "columns.json"), "--out", str(self.tmp / "r")])
+        self.assertEqual(code, 1)
+        [row] = self.results("row")
+        self.assertEqual([(p["column"], p["value"]) for p in row["problems"]], [("nac_key", "<SECRET>")], row)
+        self.assertNotIn("s3cr3t-value", json.dumps(row))
+        self.assertIn("<SECRET>", row["problems"][0]["message"])
+
+    def test_problem_data(self):
         problem = common.Problem("secret column k is empty", "k", "<SECRET>")
         self.assertEqual(problem, "secret column k is empty")
         self.assertEqual(common.problem_data(3, problem), {"row": 3, "column": "k", "value": "<SECRET>", "message": "secret column k is empty"})
         self.assertEqual(common.problem_data(3, "plain"), {"row": 3, "column": None, "value": None, "message": "plain"})
+        self.assertEqual(common.problem_data(3, common.Problem("k: 'x1' bad", "k", "x1"), {"k"})["message"], "k: '<SECRET>' bad")
 
+
+class RecordedUploads(Fixture):
+    def site(self):
+        self.run_cli(["build", "--orchestrator", "lab", "--appliance", "h1"])
+        self.run_cli(["variables", str(self.tmp / "preconfig-output" / "h1"), "--pick", "top10", "--yes", "--name", "s"])
+        del self.recorder.results[:]
+        return self.tmp / "preconfig-output" / "h1" / "site-s"
+
+    def test_a_failed_upload_records_why(self):
+        site = self.site()
+        real = self.orch.request
+
+        def refuse(method, path, **kw):
+            if method == "POST" and path == "/gms/appliance/preconfiguration":
+                raise common.ServerError("HTTP 500: busy", status=500)
+            return real(method, path, **kw)
+        with mock.patch.object(self.orch, "request", side_effect=refuse):
+            self.assertEqual(self.run_cli(["upload", str(site), "--csv", str(site / "sites.csv"), "--approve"])[0], 1)
+        [row] = self.results("row")
+        self.assertEqual(row["status"], "upload-failed")
+        self.assertEqual([p["message"] for p in row["problems"]], ["upload failed: HTTP 500: busy"])
+
+    def test_rows_before_a_stopped_validation_are_recorded(self):
+        site = self.site()
+        with (site / "sites.csv").open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        sheet = self.tmp / "two.csv"
+        with sheet.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows([rows[0], dict(rows[0], hostname="h9", preconfig_name="h9")])
+        real, calls = self.orch.request, []
+
+        def stop_second(method, path, **kw):
+            if path == validate.PATH:
+                calls.append(path)
+                if len(calls) == 2:
+                    raise common.AuthenticationError("HTTP 401", status=401)
+            return real(method, path, **kw)
+        with mock.patch.object(self.orch, "request", side_effect=stop_second):
+            self.assertEqual(self.run_cli(["upload", str(site), "--csv", str(sheet)])[0], 2)
+        [row] = self.results("row")
+        self.assertEqual((row["index"], row["status"]), (1, "ready"))
+        self.assertTrue(Path(row["file"]).is_file())
+
+
+class ParallelBuilds(unittest.TestCase):
+    def test_two_builds_and_a_render_in_parallel_each_get_only_their_own_lines(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(tmp), True)
+        orch = Orchestrator()
+        cap = write_capture(tmp / "cap")
+        sheet = tmp / "r.csv"
+        sheet.write_text("hostname\nr1\n", encoding="utf-8")
+        template = tmp / "r.jinja2"
+        template.write_text('applianceInfo:\n  hostname: "{{ data[\'hostname\'] }}"\n', encoding="utf-8")
+        together = threading.Barrier(3, timeout=20)
+
+        def run(name, argv):
+            out = io.StringIO()
+            with running(RunContext(validators={"lab"}, out_dir=tmp / name, work_dir=tmp / "work")), captured_output(out):
+                together.wait()
+                return cli.main(argv), out.getvalue()
+        with mock.patch("capture.capture", return_value=cap), mock.patch.object(validate, "client_for", return_value=orch):
+            a, b, r = in_threads(lambda: run("a", ["build", "--orchestrator", "lab", "--appliance", "h1"]),
+                                 lambda: run("b", ["build", "--orchestrator", "lab", "--appliance", "h1"]),
+                                 lambda: run("r", ["render", "--template", str(template), "--csv", str(sheet)]))
+        self.assertEqual((a[0], b[0], r[0]), (0, 0, 0), (a, b, r))
+        for (code, text), mine, others in ((a, "a", "br"), (b, "b", "ar"), (r, "r", "ab")):
+            self.assertIn(str(tmp / mine / "preconfig-output"), text)
+            for other in others:
+                self.assertNotIn(str(tmp / other / "preconfig-output"), text)
+        self.assertEqual(a[1].count("reading h1 from lab"), 1)
+        self.assertNotIn("reading", r[1])
 
 if __name__ == "__main__":
     unittest.main()

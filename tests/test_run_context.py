@@ -87,6 +87,7 @@ class ParsedEnvMap(unittest.TestCase):
     def test_a_parsed_map_in_the_context_is_used_without_reading_a_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             env = common._load_env_map(dotenv(tmp, "lab_c"))
+        env["ec_validators"] = "lab_c"  # what the file says, whatever the process environment held when it was parsed
         with mock.patch.object(common, "_load_env_map", side_effect=AssertionError("the file was read")), running(RunContext(env=env)):
             self.assertIn("lab_c", common.validators())
             self.assertTrue(common.client_for("lab_c").config.base_url.startswith("https://lab_c.example.com"))
