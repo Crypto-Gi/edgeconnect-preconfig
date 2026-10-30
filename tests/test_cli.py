@@ -3,6 +3,7 @@ import copy
 import csv
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -12,6 +13,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "toolkit" / "scripts"))
 sys.path.insert(0, str(ROOT / "tests" / "harnesses"))
+os.environ["EDGECONNECT_REPORT_DIR"] = ""  # a command logs to reports/ (runlog.py); the run-log tests set their own folder
 import cli  # noqa: E402
 from generate import generate  # noqa: E402
 from rank_variables import rank  # noqa: E402

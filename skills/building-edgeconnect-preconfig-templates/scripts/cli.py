@@ -38,7 +38,7 @@ from common import DEFAULT_TEMPLATES_DIR, EdgeConnectError, PermissionDeniedErro
 
 PROG = "edgeconnect-preconfig"
 STATES = {1: "yes", 2: "NO", 3: "unsupported version", 4: "yes (out of sync)", 5: "yes (syncing)"}  # /appliance `state`
-NOT_STAGES = {"cells", "cli", "common", "decisions", "mappers", "synth", "variables"}  # libraries, not commands
+NOT_STAGES = {"cells", "cli", "common", "decisions", "mappers", "runlog", "synth", "variables"}  # libraries, not commands
 INTERFACE_NAME_KEYS = ("interfaceName", "dhcpInterfaceName", "raInterfaceName")
 ADDRESS_REASONS = ("this site's own interface address", "inside one of this site's own subnets")
 
@@ -695,7 +695,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     if argv[0] in ("-V", "--version", "version"):
         print(toolkit_version())
         return 0
-    verb, rest = argv[0], argv[1:]
+    import runlog
+    with runlog.logged(argv) as log:  # one line in reports/preconfig.jsonl per command (cli-requests R4)
+        log["code"] = run_verb(argv[0], argv[1:])
+    return log["code"]
+
+
+def run_verb(verb: str, rest: List[str]) -> int:
     from validate import Stop as ValidatorStop  # 401/403/network on /validate: every row would fail the same way
     try:
         if verb in ("validate", "upload") and rest and rest[0].startswith("--") and rest[0] not in ("--help", "-h"):

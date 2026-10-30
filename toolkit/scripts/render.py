@@ -97,7 +97,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 def _main(argv: Optional[List[str]] = None) -> int:
-    from common import normalize_serial, output_root, parse_yaml, problem_data, record, resolve_output_filename
+    from common import normalize_serial, note_secrets, output_root, parse_yaml, problem_data, record, resolve_output_filename
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site-dir", type=Path, help="site folder from translate.py: finds the template and columns.json, writes rendered/ there")
     parser.add_argument("--template", type=Path, help="template path (not needed with --site-dir)")
@@ -132,6 +132,7 @@ def _main(argv: Optional[List[str]] = None) -> int:
     seen_files: Dict[str, int] = {}
     seen_serials: Dict[str, int] = {}
     for idx, row in enumerate(read_rows(args.csv), 1):
+        note_secrets(columns, row)
         problems: List[str] = []
         pcfg_name, fname = ("row_{}".format(idx), "")
         try:

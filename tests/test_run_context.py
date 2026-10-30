@@ -13,6 +13,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "scripts"))
+os.environ["EDGECONNECT_REPORT_DIR"] = ""  # a command logs to reports/ (runlog.py); the run-log tests set their own folder
 import cli  # noqa: E402  guard-ok: scripts are imported after the sys.path insert, as in the other test modules
 import common  # noqa: E402  guard-ok: scripts are imported after the sys.path insert
 import translate  # noqa: E402  guard-ok: scripts are imported after the sys.path insert

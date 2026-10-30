@@ -22,7 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cells import cell_problems, interface_addresses, option_limits, subnet_problems  # noqa: E402
-from common import EdgeConnectError, Problem, client_for, run_context, normalize_serial, output_root, parse_yaml, problem_data, record, resolve_output_filename, utc_stamp, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
+from common import EdgeConnectError, Problem, client_for, normalize_serial, note_secrets, output_root, parse_yaml, problem_data, record, resolve_output_filename, run_context, utc_stamp, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 from render import flow_through, read_rows, render_row  # noqa: E402
 from validate import Stop, validate_text  # noqa: E402
 
@@ -150,6 +150,7 @@ def run_batch(
     uploaded_count = 0
     try:
         for idx, row in enumerate(read_rows(csv_path), 1):
+            note_secrets(columns, row)
             problems: List[str] = []
             pcfg_name, fname = ("row_{}".format(idx), "")
             try:
@@ -258,9 +259,11 @@ def run_batch(
             run = run_context()
             if run and run.approver:
                 try:
-                    run.approver(fingerprint)
+                    approval = run.approver(fingerprint)
                 except Exception as err:
                     raise Refused(" ".join(str(err).split()) or type(err).__name__) from None
+                if isinstance(approval, dict):  # who approved, when, what they typed: kept for the run log (R4)
+                    record("approval", record=approval)
             uploaded_count = upload_ready(client, ready_to_upload)
     finally:  # recorded also when /validate stops the batch: the rows before it have their .yml written
         for entry in row_results:
@@ -443,6 +446,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("STOPPED: {}".format(stop), file=sys.stderr)
         return 2
     except Refused as refused:
+        record("refused", reason=str(refused))
         print("NOT APPROVED, nothing uploaded: {}".format(refused), file=sys.stderr)
         return 2
     s = report["summary"]
