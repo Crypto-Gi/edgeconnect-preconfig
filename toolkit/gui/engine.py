@@ -108,7 +108,14 @@ def _line(argv: Sequence[str]) -> argparse.Namespace:
 
 
 def _refusal(argv: Sequence[str], approver: Optional[Callable[..., Any]]) -> Optional[str]:
-    """Why the engine does not run this upload (nothing is sent), or None. Only `upload` reaches upload.main and its POSTs."""
+    """Why the engine does not run this command (nothing is sent), or None. Only `upload` reaches upload.main and its POSTs."""
+    if argv and argv[0] == "validate" and len(argv) > 1 and argv[1].startswith("--") and argv[1] not in ("--help", "-h"):  # cli.main's stage form
+        try:
+            stage = _line(argv)
+        except _LineError as error:
+            return "the GUI could not read this validate command line ({})".format(error)
+        if stage.yaml is None:  # its files go to /validate as raw text, even one that does not parse and so cannot be scanned
+            return "the GUI does not send YAML files unparsed: use validate --yaml or upload --yaml, which parse each file first"
     if not argv or argv[0] != "upload":
         return None
     try:
@@ -155,6 +162,7 @@ def run(argv: Sequence[str], approver: Optional[Callable[[str], Any]] = None, **
         if r["kind"] == "file" and r["status"] == "refused: not a preconfig YAML" and re.match(r"\w+: ", r["detail"]):
             withheld = r["detail"].split(":")[0] + ": the parser's message is not shown, as it may quote a secret"
             text, r["detail"] = text.replace(r["detail"], withheld), withheld
+    text, outputs = _each(text, _no_snippet), _each(outputs, _no_snippet)
     scrub = _scrubber(argv)
     rows = [_row(r) for r in outputs if r["kind"] in ("row", "file")]
     status = "done" if code == 0 else "rejected" if refusal or (code == 2 and any(l.startswith(NOT_APPROVED) for l in text.splitlines())) else "failed"
@@ -208,23 +216,37 @@ def _scrubber(argv: Sequence[str]) -> Callable[[Any], Any]:
             found.setdefault(form, placeholder)
     if not found:
         return lambda value: value
-    # The CLI cuts messages ([:1000] /validate errors, [:300], [:200]); a cut piece ends a line, a "; " list item or a PyYAML snippet.
-    # shortcut: a cut that keeps 3 characters or fewer of a secret shows them, as does a snippet that starts inside one; scrub
-    # suffixes too if a message is ever cut from its start.
+    # The CLI cuts messages ([:1000] /validate errors, [:300], [:200]); a cut piece ends a line or a "; " list item (PyYAML's
+    # snippets, cut from either side, are withheld by _no_snippet before this runs).
+    # shortcut: a cut that keeps 3 characters or fewer of a secret shows them; scrub suffixes too if a message is ever cut from its start.
     cut = {form[:k]: placeholder for form, placeholder in found.items() for k in range(4, len(form))}
+
     def alternatives(forms: Mapping[str, str]) -> str:
         return "|".join(re.escape(form) for form in sorted(forms, key=len, reverse=True))
-    pattern = re.compile("(?P<full>{})".format(alternatives(found)) + (r"|(?P<cut>{})(?=; | \.\.\.|\r?$)".format(alternatives(cut)) if cut else ""), re.M)
+    pattern = re.compile("(?P<full>{})".format(alternatives(found)) + (r"|(?P<cut>{})(?=; |\r?$)".format(alternatives(cut)) if cut else ""), re.M)
 
-    def scrub(value: Any) -> Any:
-        if isinstance(value, str):  # one pass: a placeholder is never rescanned
-            return pattern.sub(lambda m: found[m["full"]] if m["full"] is not None else cut[m["cut"]], value)
-        if isinstance(value, dict):
-            return {k: scrub(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [scrub(v) for v in value]
-        return value
-    return scrub
+    # one pass: a placeholder is never rescanned
+    return lambda value: _each(value, lambda text: pattern.sub(lambda m: found[m["full"]] if m["full"] is not None else cut[m["cut"]], text))
+
+
+def _each(value: Any, change: Callable[[str], str]) -> Any:
+    """value with change applied to every string in it, at any depth."""
+    if isinstance(value, str):
+        return change(value)
+    if isinstance(value, dict):
+        return {k: _each(v, change) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_each(v, change) for v in value]
+    return value
+
+
+# PyYAML's mark and the source snippet under it: the quoted line (cut to about 75 characters, from either side) and its ^
+_SNIPPET = re.compile(r'(in "[^"\n]*", line \d+, column \d+):\n[^\n]*(?:\n[ \t]*\^)?')
+
+
+def _no_snippet(text: str) -> str:
+    """Withhold the source a YAML error quotes: a cut piece of a secret in it matches no form of the secret."""
+    return _SNIPPET.sub(r"\1 (the source snippet is withheld: it may hold a secret)", text)
 
 
 def _forms(value: str) -> Set[str]:

@@ -349,9 +349,31 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(result.counts, {"INVALID": 1})
         self.assertNotIn("ss-W0rd", shown(result))
 
+    def test_a_yaml_snippet_of_a_rendered_row_is_withheld(self):
+        secret = 'abcdefghijklmnopqrstuvwxyz0123456789"ABCDEFGHIJ'  # the " is far into the line: PyYAML's snippet is cut from the left
+        template = self.tmp / "quoted.jinja2"
+        template.write_text("applianceInfo:\n  hostname: {{ data['hostname'] }}\n  contact: \"{{ data['admin_password'] }}\"\n", encoding="utf-8")
+        sheet = self.sheet("long.csv", [{"hostname": "q-2", "admin_password": secret, "preconfig_name": "q-2"}], ["hostname", "admin_password", "preconfig_name"])
+        result = engine.render(template, sheet, self.tmp / "run-long", **self.context(self.on))
+        self.assertEqual(result.counts, {"INVALID": 1})
+        for part in ("0123456789", "ABCDEFGHIJ"):
+            self.assertNotIn(part, shown(result))
+        self.assertRegex(result.text, r'line 3, column \d+ \(the source snippet is withheld: it may hold a secret\)\n')
+        self.assertIn("(the source snippet is withheld: it may hold a secret)", result.issues[0]["message"])
+
+    def test_the_stage_form_sending_raw_yaml_files_is_refused(self):
+        path = self.tmp / "flow.yml"
+        path.write_text('vrrp: {authKey: "Fl0w"K3y}\n', encoding="utf-8")
+        result = engine.run(["validate", "--orchestrator", "lab", str(path)], **self.context(self.on))
+        self.assertEqual((result.exit_code, result.status, self.orch.calls), (2, "rejected", []))
+        self.assertIn("use validate --yaml or upload --yaml", result.text)
+        self.assertEqual(engine.run(["validate", "--help"], **self.context(self.on)).exit_code, 0)
+
     def test_files_named_without_yaml_are_scanned_too(self):
-        result = self.check_yaml("applianceInfo:\n  site: REJECT\nvrrp:\n  authKey: Sup3r-K3y\n", "Sup3r-K3y", "validate", "--orchestrator", "lab")
-        self.assertIn("REJECTED secret-file.yml", result.text)
+        other = self.tmp / "other.yml"
+        other.write_text("applianceInfo:\n  site: S1\n", encoding="utf-8")
+        result = self.check_yaml("applianceInfo:\n  site: REJECT\nvrrp:\n  authKey: Sup3r-K3y\n", "Sup3r-K3y", "validate", "--yaml", str(other), "--orchestrator", "lab")
+        self.assertIn("validate failed                secret-file.yml", result.text)  # the stage's positional files join --yaml
 
     def test_a_secret_cut_by_the_cli_leaves_no_prefix(self):
         secret = "Sup3r-K3y-0123456789"
