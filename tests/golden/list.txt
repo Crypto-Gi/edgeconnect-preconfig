@@ -10,3 +10,4 @@ Orchestrator lab: https://orch.example.com/gms/rest | release 9.7.1.42046 | logi
 +----------+------+-------+---------+------+-----------+
 2 appliance(s), 1 reachable
 --- stderr
+--- files

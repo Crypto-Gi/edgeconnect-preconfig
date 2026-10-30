@@ -8,3 +8,4 @@ skipped: name conflict         taken.yml                taken: 'taken' already e
 
 3 file(s): 1 passed
 --- stderr
+--- files

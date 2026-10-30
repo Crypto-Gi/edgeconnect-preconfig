@@ -7,3 +7,6 @@ ROW  1 | VALID    | h1_preconfig             | .yml written immediately -> <tmp>
 Summary: total=1 | valid_yaml_written=1 | invalid_skipped=0 | conflict_skipped=0 | uploaded=0 | upload_failed=0
 Approval required: review the rows above and re-run with --approve to upload the 1 ready row(s).
 --- stderr
+--- files
+457b990271caa566  <tmp>/out/h1/site-t10/rendered/h1_preconfig.yml
+2788406d82e685ff  <tmp>/out/h1/site-t10/upload-report.json

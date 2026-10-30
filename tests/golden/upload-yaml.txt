@@ -7,3 +7,4 @@ uploaded                       good.yml                 golden-upload: uploaded 
 
 1 file(s): 1 uploaded
 --- stderr
+--- files

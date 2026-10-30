@@ -3,3 +3,5 @@ exit 0
 --- stdout
 ok   h1_preconfig -> <tmp>/rendered/h1_preconfig.yml
 --- stderr
+--- files
+457b990271caa566  <tmp>/rendered/h1_preconfig.yml

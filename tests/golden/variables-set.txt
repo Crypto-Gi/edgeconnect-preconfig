@@ -11,3 +11,16 @@ Saved <tmp>/out/h1/site-gset  (example row validated on lab)
 Next:
   edgeconnect-preconfig validate <tmp>/out/h1/site-gset --csv <tmp>/out/h1/site-gset/sites.csv
 --- stderr
+--- files
+e132127f71c0a61a  <tmp>/out/h1/site-gset/checks.json
+063b80f5779dfeb4  <tmp>/out/h1/site-gset/columns.json
+4ba614758fc65c71  <tmp>/out/h1/site-gset/columns.md
+b6624edd3adca9ef  <tmp>/out/h1/site-gset/example.csv
+4cdcac654bb10f44  <tmp>/out/h1/site-gset/gset.csv
+969e01b32fb401ed  <tmp>/out/h1/site-gset/gset.jinja2
+e8bd59d9a8cf47e1  <tmp>/out/h1/site-gset/ledger.json
+661e2288c3a9e474  <tmp>/out/h1/site-gset/reference.yaml
+457b990271caa566  <tmp>/out/h1/site-gset/rendered/h1_preconfig.yml
+b6624edd3adca9ef  <tmp>/out/h1/site-gset/sites.csv
+1c0681d5e84c8cae  <tmp>/out/h1/site-gset/summary.md
+99c5f731e03c51a6  <tmp>/out/h1/site-gset/variables.csv

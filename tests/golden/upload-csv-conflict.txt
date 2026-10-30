@@ -6,3 +6,6 @@ ROW  1 | CONFLICT | taken                    | .yml written (taken.yml), upload 
 
 Summary: total=1 | valid_yaml_written=1 | invalid_skipped=0 | conflict_skipped=1 | uploaded=0 | upload_failed=0
 --- stderr
+--- files
+457b990271caa566  <tmp>/out/h1/site-t10/rendered/taken.yml
+192fd46b1ea418b9  <tmp>/out/h1/site-t10/upload-report.json

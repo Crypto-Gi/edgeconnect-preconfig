@@ -3,3 +3,4 @@ exit 2
 --- stdout
 --- stderr
 error: --set: no setting named no_such_setting
+--- files

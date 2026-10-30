@@ -16,3 +16,4 @@ How do you want to pick the rest?
 Type numbers to flip (e.g. 4 12), s1.. to open a section, a for all sections, t for the Top list, l for the locked ones, a word to search, Enter when done, q to quit.
 > nothing written
 --- stderr
+--- files

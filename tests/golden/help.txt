@@ -24,3 +24,4 @@ validate and upload with their own options (edgeconnect-preconfig STAGE --help).
 
 stages: cache-check, capture, check, generate, options, render, translate, upload, validate
 --- stderr
+--- files

@@ -11,3 +11,16 @@ Saved <tmp>/out/h1/site-gall  (example row validated on lab)
 Next:
   edgeconnect-preconfig validate <tmp>/out/h1/site-gall --csv <tmp>/out/h1/site-gall/sites.csv
 --- stderr
+--- files
+3d8d6440f371bdb6  <tmp>/out/h1/site-gall/checks.json
+98337fcdfb4344fe  <tmp>/out/h1/site-gall/columns.json
+28c6bf9678743a27  <tmp>/out/h1/site-gall/columns.md
+02d4f692225cc446  <tmp>/out/h1/site-gall/example.csv
+71f17549dd50dfcb  <tmp>/out/h1/site-gall/gall.csv
+f3372b967cb6fe62  <tmp>/out/h1/site-gall/gall.jinja2
+e8bd59d9a8cf47e1  <tmp>/out/h1/site-gall/ledger.json
+661e2288c3a9e474  <tmp>/out/h1/site-gall/reference.yaml
+fb1c5e105ce89e1e  <tmp>/out/h1/site-gall/rendered/h1_preconfig.yml
+02d4f692225cc446  <tmp>/out/h1/site-gall/sites.csv
+1c0681d5e84c8cae  <tmp>/out/h1/site-gall/summary.md
+2ef7a0e61d16a282  <tmp>/out/h1/site-gall/variables.csv

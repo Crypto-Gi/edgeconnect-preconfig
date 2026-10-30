@@ -1,0 +1,41 @@
+$ edgeconnect-preconfig variables <tmp>/out/h1
+> typed: 1
+> typed: (Enter)
+> typed: (Enter)
+> typed: y
+exit 0
+--- stdout
+Hostname, serial number and secrets are always per site.
+How do you want to pick the rest?
+  1) Top 10 - the settings most often different between sites (start here)
+  2) Top 20
+  3) All settings, by section
+>   Always per site, no questions: hostname, 0 secret(s) and 49 Deployment-page and appliance-info values (type l to list them)
+     #  Setting                                              Value now                       Diff  Choice
+  -- Top 10: most often different between sites ------------------
+   20  dhcpInfo[lan0].gatewayIpAddress                      ""                              100%  VARIABLE
+  -- 25 more settings: type a to see all, by section
+Type numbers to flip (e.g. 4 12), s1.. to open a section, a for all sections, t for the Top list, l for the locked ones, a word to search, Enter when done, q to quit.
+> 
+51 columns: hostname, group, site, cluster_profile, network_role, region, address, contact_name, server_per_segment, total_outbound_bandwidth, total_inbound_bandwidth, ipsec_udp_port, pass_through_shaped_traffic_bw_out, lan0_ip, lan0_90_ip, wan0_addressing_mode, wan0_ip, wan0_next_hop, wan0_bw_in, wan0_bw_out, wan0_behind_nat, ha_config_ha_peer_serial, ha_config_ha_peer_hostname, ha_config_ha_ip_pool, ha_config_ha_subnet_mask, ha_config_hav6_ip_pool, ha_config_hav6_subnet_mask, ha_config_ha_vlan_start, ha_config_ha_interface_order, ha_config_ha_peer_interface_info_0_outbound, ha_config_ha_peer_interface_info_0_inbound, ha_config_ha_peer_interface_info_0_ip_version, lan0_dhcp_type, lan0_dhcp_address_mask, lan0_start, lan0_end, lan0_netbios_node_type, lan0_maximum_lease, lan0_default_lease, lan0_90_hoplimit, lan0_90_linkmtu, lan0_90_managedflag, lan0_90_maxinterval, lan0_90_mininterval, lan0_90_otherconfigflag, lan0_90_reachabletime, lan0_90_retranstimer, lan0_90_routerdeflifetime, lan0_90_routerpreference, lan0_90_sendadv, lan0_gateway
+Site type name [h1]: Build site-h1? [Y/n] 
+Saved <tmp>/out/h1/site-h1  (example row validated on lab)
+  h1.jinja2            the template
+  sites.csv            fill one row per site (the first row is h1's own values)
+
+Next:
+  edgeconnect-preconfig validate <tmp>/out/h1/site-h1 --csv <tmp>/out/h1/site-h1/sites.csv
+--- stderr
+--- files
+bd35a6c0751d9128  <tmp>/out/h1/site-h1/checks.json
+432bc1acf3565c8c  <tmp>/out/h1/site-h1/columns.json
+1abc142c3bb91f0b  <tmp>/out/h1/site-h1/columns.md
+80a3fcc15ec915b7  <tmp>/out/h1/site-h1/example.csv
+2348741d392f8069  <tmp>/out/h1/site-h1/h1.csv
+0fd75bb049837337  <tmp>/out/h1/site-h1/h1.jinja2
+e8bd59d9a8cf47e1  <tmp>/out/h1/site-h1/ledger.json
+661e2288c3a9e474  <tmp>/out/h1/site-h1/reference.yaml
+457b990271caa566  <tmp>/out/h1/site-h1/rendered/h1_preconfig.yml
+80a3fcc15ec915b7  <tmp>/out/h1/site-h1/sites.csv
+1c0681d5e84c8cae  <tmp>/out/h1/site-h1/summary.md
+68af435437066959  <tmp>/out/h1/site-h1/variables.csv

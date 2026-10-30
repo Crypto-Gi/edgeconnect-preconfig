@@ -80,3 +80,16 @@ Saved <tmp>/out/h1/site-gask  (example row validated on lab)
 Next:
   edgeconnect-preconfig validate <tmp>/out/h1/site-gask --csv <tmp>/out/h1/site-gask/sites.csv
 --- stderr
+--- files
+771e9efe4974d1fa  <tmp>/out/h1/site-gask/checks.json
+e1bbbf514dd38b64  <tmp>/out/h1/site-gask/columns.json
+b2ee08ac5200f338  <tmp>/out/h1/site-gask/columns.md
+705c91e410b94ebe  <tmp>/out/h1/site-gask/example.csv
+48a5f1faf2b4bea1  <tmp>/out/h1/site-gask/gask.csv
+2bf5a4ad61967f2f  <tmp>/out/h1/site-gask/gask.jinja2
+e8bd59d9a8cf47e1  <tmp>/out/h1/site-gask/ledger.json
+661e2288c3a9e474  <tmp>/out/h1/site-gask/reference.yaml
+457b990271caa566  <tmp>/out/h1/site-gask/rendered/h1_preconfig.yml
+705c91e410b94ebe  <tmp>/out/h1/site-gask/sites.csv
+1c0681d5e84c8cae  <tmp>/out/h1/site-gask/summary.md
+3de5c4900e9bc98f  <tmp>/out/h1/site-gask/variables.csv

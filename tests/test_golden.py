@@ -2,11 +2,12 @@
 
 Every case runs cli.main offline: the synthetic capture of test_translate_robust stands in for the appliance read, and a fake Orchestrator
 answers GET /gms/versions, /appliance and the preconfig list, POST /validate and the preconfig upload. The temp folder, timestamps and
-the toolkit version are masked. compare is pinned with its own fixes (1.3.4), not here.
+the toolkit version are masked, in the printed text and in the files each case writes (listed with a hash of their masked text). compare is pinned with its own fixes (1.3.4), not here.
 
 To accept a deliberate change of output: EDGECONNECT_UPDATE_GOLDEN=1 python3 -m unittest tests.test_golden, then review the diff of tests/golden/.
 """
 import base64
+import hashlib
 import contextlib
 import copy
 import io
@@ -82,16 +83,16 @@ class Golden(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = Path(tempfile.mkdtemp())
-        cls.orch = Orchestrator()
+        cls.orch, cls.hashed = Orchestrator(), {}  # hashed: file hashes by (path, mtime, size)
         cls.cap = write_capture(cls.tmp / "cap")
         cls.out = cls.tmp / "out"
         cls.cwd = os.getcwd()
         os.chdir(str(cls.tmp))  # stage defaults (./preconfig-output) land in the temp folder
+        cls.capture = mock.patch("capture.capture", return_value=cls.cap)
         cls.patches = [mock.patch.object(cli, "VALIDATORS", {"lab"}), mock.patch.object(validate, "VALIDATORS", {"lab"}),
                        mock.patch.object(cli, "client_for", return_value=cls.orch), mock.patch.object(validate, "client_for", return_value=cls.orch),
-                       mock.patch.object(upload, "client_for", return_value=cls.orch), mock.patch("capture.capture", return_value=cls.cap)]
-        for p in cls.patches:
-            p.start()
+                       mock.patch.object(upload, "client_for", return_value=cls.orch), cls.capture]
+        cls.read = [p.start() for p in cls.patches][-1]
 
     @classmethod
     def tearDownClass(cls):
@@ -103,11 +104,27 @@ class Golden(unittest.TestCase):
     def setUp(self):
         self.orch.existing[:] = [{"id": 1, "name": "taken", "serialNum": None}]  # each case sees only the one preconfig already there
 
+    def files(self):
+        """Every file under the temp folder but the capture, by path: its masked text's hash and when it was written."""
+        found, seen = {}, self.__class__.hashed
+        for path in sorted(self.tmp.rglob("*")):
+            if path.is_file() and self.cap not in path.parents:
+                stat = path.stat()
+                key = (str(path), stat.st_mtime_ns, stat.st_size)
+                if key not in seen:
+                    seen[key] = hashlib.sha256(self.mask(path.read_text(encoding="utf-8")).encode("utf-8")).hexdigest()[:16]
+                found[self.mask(str(path))] = (seen[key], stat.st_mtime_ns)
+        return found
+
     def run_cli(self, argv, answers=None):
-        """cli.main(argv) with stdout and stderr captured; answers are the lines typed at the prompts (stdin)."""
+        """cli.main(argv) with stdout and stderr captured; answers are the lines typed at the prompts (stdin). self.written lists the files it wrote."""
         typed = io.StringIO("".join(a + "\n" for a in answers or []))
+        before = self.files()
         with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err, mock.patch.object(sys, "stdin", typed):
             code = cli.main(argv)
+        after = self.files()
+        self.written = "".join("{}  {}\n".format(h, p) for p, (h, _) in after.items() if before.get(p) != (h, _))  # written again counts, same text or not
+        self.written += "".join("removed  {}\n".format(p) for p in before if p not in after)
         return code, out.getvalue(), err.getvalue()
 
     def mask(self, text):
@@ -119,7 +136,7 @@ class Golden(unittest.TestCase):
     def check(self, name, argv, answers=None, code=0):
         got, out, err = self.run_cli(argv, answers)
         typed = "".join("\n> typed: " + (a or "(Enter)") for a in answers or [])
-        text = self.mask("$ edgeconnect-preconfig {}{}\nexit {}\n--- stdout\n{}--- stderr\n{}".format(" ".join(argv), typed, got, out, err))
+        text = self.mask("$ edgeconnect-preconfig {}{}\nexit {}\n--- stdout\n{}--- stderr\n{}--- files\n{}".format(" ".join(argv), typed, got, out, err, self.written))
         path = GOLDEN / (name + ".txt")
         if UPDATE:
             GOLDEN.mkdir(exist_ok=True)
@@ -170,6 +187,11 @@ class Golden(unittest.TestCase):
     def test_build(self):
         shutil.rmtree(str(self.out), ignore_errors=True)
         self.check("build", ["build", "--orchestrator", "lab", "--appliance", "h1", "--out", str(self.out)])
+        self.assertEqual(self.read.call_args[0], ("lab", "h1", "reference", 0.2, common.WORK_DIR / "reference" / "lab"))  # where the read is kept
+
+    def test_build_into_the_current_folder(self):
+        shutil.rmtree(str(self.tmp / "preconfig-output"), ignore_errors=True)
+        self.check("build-default-out", ["build", "--orchestrator", "lab", "--appliance", "h1"])
 
     def test_build_again_keeps_the_earlier_one(self):
         self.built()
@@ -196,8 +218,9 @@ class Golden(unittest.TestCase):
         self.check("variables-set-unknown", ["variables", str(self.built()), "--pick", "top10", "--set", "no_such_setting", "--yes"], code=2)
 
     def test_variables_asked(self):
-        # Top 10, open the locked list, flip setting 1, Enter, default name, yes
+        # Top 10, open the locked list, flip setting 1, Enter, then a name; and once more taking the default name
         self.check("variables-asked", ["variables", str(self.built())], answers=["1", "l", "1", "", "gask", "y"])
+        self.check("variables-asked-default-name", ["variables", str(self.built())], answers=["1", "", "", "y"])
 
     def test_variables_quit(self):
         self.check("variables-quit", ["variables", str(self.built())], answers=["2", "q"], code=1)
@@ -252,6 +275,13 @@ class Golden(unittest.TestCase):
     def test_render_stage(self):
         site = self.site()
         self.check("render-stage", ["render", "--template", str(site / "t10.jinja2"), "--csv", str(site / "sites.csv"), "--out", str(self.tmp / "rendered")])
+
+    def test_render_stage_into_the_current_folder(self):
+        site = self.site()
+        self.check("render-stage-default-out", ["render", "--template", str(site / "t10.jinja2"), "--csv", str(site / "sites.csv")])
+
+    def test_translate_stage(self):
+        self.check("translate-stage", ["translate", "--capture", str(self.cap), "--site-type", "tr", "--out", str(self.tmp / "translate"), "--target-release", RELEASE])
 
     def test_upload_stage(self):
         site = self.site()
