@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, RunContext, find_default_template, load_yaml, output_root, run_context, running, toolkit_version, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 from generate import generate  # noqa: E402
 from decisions import list_mode, make_decide, propose  # noqa: E402
-from variables import classify, only_at, read_sheet, sheet_items, write_sheet  # noqa: E402
+from variables import classify, only_at, read_sheet, sheet_items, write_sheet  # noqa: E402  guard-ok: imported after the sys.path insert
 from mappers import ECOS_RELEASE, ITEM_ERRORS, MAPPERS, Ctx, cli_lines, failed_read, guarded, id_names, item_failed, own_sharing, passthrough_max_bandwidth, Unreadable, unreadable_read  # noqa: E402  guard-ok: imported after the sys.path insert
 
 HARDEN = {0: "All", 1: "harden", 2: "stateful", 3: "statefulSNAT"}  # verified via Swagger + live apply-and-diff

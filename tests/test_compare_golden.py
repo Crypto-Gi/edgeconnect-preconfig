@@ -18,9 +18,9 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "toolkit" / "scripts"))
-import check  # noqa: E402
-import cli  # noqa: E402
-import render  # noqa: E402
+import check  # noqa: E402  guard-ok: imported after the sys.path insert
+import cli  # noqa: E402  guard-ok: imported after the sys.path insert
+import render  # noqa: E402  guard-ok: imported after the sys.path insert
 
 FIXTURES = ROOT / "tests" / "fixtures" / "compare"
 RELEASE = "9.7.1.42046"

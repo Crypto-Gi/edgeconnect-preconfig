@@ -37,7 +37,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT, LAYOUT_DIFFERS  # noqa: E402
+from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT, LAYOUT_DIFFERS  # noqa: E402  guard-ok: imported after the sys.path insert
 from common import DEFAULT_TEMPLATES_DIR, EdgeConnectError, PermissionDeniedError, captured_output, client_for, load_yaml, output_root, parse_yaml, record, redact_secrets, toolkit_version, utc_stamp, validators, work_dir, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 
 PROG = "edgeconnect-preconfig"
@@ -736,7 +736,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     probe.find_secrets(reference)
     rows = [{k: cell(v) for k, v in r.items()} for r in classify(reference, probe.secret_paths, None, others)]
     names = [o["applianceInfo"]["hostname"] for o in others]
-    base_host = info["appliance"].get("hostName")
+    base_host = me.get("hostName")
     seen = [dict(sheet_items(o)) for o in others]
     picker = Picker(reference, rows, {}, seen)
     differ = [r for r in picker.free if picker.on[r["path"]]]
