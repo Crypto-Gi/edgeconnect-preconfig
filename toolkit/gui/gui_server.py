@@ -5,7 +5,7 @@ launch URL printed in the terminal. The link works once (other accounts on the c
 command line) and gives an HttpOnly, SameSite=Strict session cookie, a different secret, that every page, API call and
 progress stream needs. Requests naming any other Host (DNS rebinding) and state-changing requests from any other Origin are
 refused, every POST must be JSON, and no CORS headers are ever sent. API keys stay in this process: no response carries them.
-Not copied: the run log tables (gui_tables, step 7) and Undo (gui_revert, D7).
+Not copied: Undo (gui_revert, D7). The run log tables (gui_tables) came in step 7.
 """
 import argparse
 import dataclasses
@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import common
+import gui_tables
 import runlog
 from fleet import check_all
 from gui_tasks import FINAL, TaskError, TaskManager, dumps
@@ -52,6 +53,7 @@ class GuiServer(ThreadingHTTPServer):
         self.login_lock = threading.Lock()
         self.tasks = tasks
         self.report_dir = report_dir
+        self.runlog = gui_tables.RunLog(Path(report_dir) if report_dir else None)
         port = self.server_address[1]
         self.hosts = {"127.0.0.1:{}".format(port), "localhost:{}".format(port), "[::1]:{}".format(port)}
         self.url = "http://127.0.0.1:{}/?token={}".format(port, self.token)
@@ -81,7 +83,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._login(parse_qs(parts.query)["token"][0])
             self._require_cookie()
             if method == "GET" and path.startswith("/api/"):
-                return self._get_api(path)
+                return self._get_api(path, {key: values[-1] for key, values in parse_qs(parts.query).items()})
             if method == "POST" and path.startswith("/api/"):
                 return self._post_api(path)
             if method == "GET":
@@ -129,7 +131,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def _get_api(self, path: str) -> None:
+    def _get_api(self, path: str, query: Dict[str, str]) -> None:
         tasks = self.server.tasks
         if path == "/api/orchestrators":
             try:
@@ -149,7 +151,9 @@ class Handler(BaseHTTPRequestHandler):
                 raise TaskError("not found", 404)
             found = tasks.site_file(*parts)
             return self._download(found.name, found.read_bytes(), "text/csv; charset=utf-8" if found.suffix == ".csv" else "text/plain; charset=utf-8")
-        # /api/runs (the run log tables) comes with gui_tables in step 7; compare and preconfigs with their tasks (R6, step 10).
+        if path.startswith("/api/runs"):
+            return self._runs(path, query)
+        # compare and preconfigs come with their tasks (R6, step 10).
         task_id, action = _task_path(path)
         if action == "":
             return self._json(200, tasks.get(task_id).view())
@@ -158,6 +162,27 @@ class Handler(BaseHTTPRequestHandler):
         if action == "result":
             return self._json(200, {"result": tasks.get(task_id).full_result()})
         raise TaskError("not found", 404)
+
+    def _runs(self, path: str, query: Dict[str, str]) -> None:
+        """/api/runs[.csv] lists runs; /api/runs/<run_id>[/rows.csv] is one run or its per-row table. GET only: nothing here changes."""
+        log = self.server.runlog
+        if path in ("/api/runs", "/api/runs.csv"):
+            runs, unreadable = log.runs()
+            if path.endswith(".csv"):
+                rows = gui_tables.select(runs, query, gui_tables.RUN_FILTERS, "timestamp", True)[0]
+                return self._download("runs.csv", gui_tables.to_csv(rows, gui_tables.RUN_FIELDS + ("exit_code",)), "text/csv; charset=utf-8")
+            folder = str(log.directory) if log.directory is not None else None
+            return self._json(200, dict(gui_tables.page(runs, query, gui_tables.RUN_FILTERS, "timestamp", True), folder=folder, unreadable=unreadable))
+        parts = path.split("/")
+        if len(parts) not in (4, 5) or parts[2] != "runs" or not gui_tables.RUN_ID.match(parts[3]) or (len(parts) == 5 and parts[4] != "rows.csv"):
+            raise TaskError("not found", 404)
+        summary = log.find(parts[3])
+        if summary is None:
+            raise TaskError("no run {} in the run log".format(parts[3]), 404)
+        if len(parts) == 5:
+            rows = gui_tables.select(summary["_outcomes"], query, ("outcome",))[0]
+            return self._download("{}-rows.csv".format(parts[3]), gui_tables.to_csv(rows, gui_tables.ROW_FIELDS), "text/csv; charset=utf-8")
+        return self._json(200, gui_tables.run_detail(summary, query))
 
     def _post_api(self, path: str) -> None:
         if self.headers.get_content_type() != "application/json":

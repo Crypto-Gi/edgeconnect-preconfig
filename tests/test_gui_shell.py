@@ -7,14 +7,19 @@ import unittest
 from pathlib import Path
 
 STATIC = Path(__file__).resolve().parents[1] / "toolkit" / "gui" / "static"
-# The server (gui_server.py) answers these, under automation's names; /api/builds is preconfig's own.
-ENDPOINTS = {"/api/orchestrators", "/api/tasks", "/api/tasks/<id>/cancel", "/api/builds"}
+# The server (gui_server.py) answers these, under automation's names; /api/builds is preconfig's own. "/api/runs/" is
+# followed by the run ID.
+ENDPOINTS = {"/api/orchestrators", "/api/tasks", "/api/tasks/<id>/cancel", "/api/builds", "/api/runs", "/api/runs.csv", "/api/runs/", "/api/runs/<id>/rows.csv"}
+SCRIPTS = ("app.js", "tables.js", "runs.js")  # in the order index.html loads them
 
 
 class ShellTests(unittest.TestCase):
     def setUp(self):
         self.html = (STATIC / "index.html").read_text(encoding="utf-8")
-        self.js = (STATIC / "app.js").read_text(encoding="utf-8")
+        self.js = "\n".join((STATIC / name).read_text(encoding="utf-8") for name in SCRIPTS)
+
+    def test_the_page_loads_every_script_in_order(self):
+        self.assertEqual(re.findall(r'<script src="([\w.]+)"></script>', self.html), list(SCRIPTS))
 
     def test_every_element_the_script_uses_is_on_the_page(self):
         ids = set(re.findall(r'\bid="([\w-]+)"', self.html))

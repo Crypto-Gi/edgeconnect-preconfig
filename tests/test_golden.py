@@ -195,6 +195,25 @@ class Golden(unittest.TestCase):
     def test_list_search_no_match(self):
         self.check("list-search-none", ["list", "--orchestrator", "lab", "--search", "nothing"])
 
+    def test_list_records_each_printed_appliance(self):
+        """cli-requests R8: one `appliance` result per printed row, same values, filter and order, so the GUI need not parse the table."""
+        wide = APPLIANCES + [{"hostName": "Store 7 東京", "nePk": "7.NE", "model": "EC-S", "softwareVersion": "9.5.2.0", "site": "Main St", "state": 0}]
+        for search, expected in ((None, ["h1", "h2", "Store 7 東京"]), ("main st", ["Store 7 東京"]), ("nothing", [])):
+            recorder = common.Recorder()
+            with self.subTest(search=search), mock.patch(__name__ + ".APPLIANCES", wide), common.running(common.RunContext(recorder=recorder)):
+                code, out, _ = self.run_cli(["list", "--orchestrator", "lab"] + (["--search", search] if search else []))
+                rows = [r for r in recorder.results if r["kind"] == "appliance"]
+                self.assertEqual((code, [r["hostname"] for r in rows]), (0, expected))
+                if expected:
+                    self.assertIn("Store 7 東京", out)
+        self.assertEqual(rows, [])
+        recorder = common.Recorder()
+        with mock.patch(__name__ + ".APPLIANCES", wide), common.running(common.RunContext(recorder=recorder)):
+            self.run_cli(["list", "--orchestrator", "lab", "--search", "tokyo"])  # no match by the romanised name: the filter is the table's
+            self.run_cli(["list", "--orchestrator", "lab", "--search", "7.ne"])
+        self.assertEqual([r for r in recorder.results if r["kind"] == "appliance"],
+                         [{"kind": "appliance", "hostname": "Store 7 東京", "nepk": "7.NE", "model": "EC-S", "ecos": "9.5.2.0", "site": "Main St", "reachable": "unknown"}])
+
     # ------------------------------------------------------------ preconfigs
 
     def test_preconfigs(self):

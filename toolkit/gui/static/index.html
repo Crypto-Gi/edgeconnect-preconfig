@@ -80,6 +80,27 @@
         <ul class="notes" id="later-cli"></ul>
       </section>
     </section>
+
+    <section id="view-runs" class="view" aria-labelledby="runs-title" hidden>
+      <a class="back" href="#/">← All tasks</a>
+      <div class="eyebrow">Run log</div>
+      <h1 id="runs-title">What changed</h1>
+      <p class="lede" id="runs-text"></p>
+      <div class="panel" id="runs-table"></div>
+    </section>
+
+    <section id="view-run" class="view" aria-labelledby="run-title" hidden>
+      <a class="back" href="#/runs">← All runs</a>
+      <div class="eyebrow" id="run-id"></div>
+      <h1 id="run-title"></h1>
+      <p class="lede" id="run-next"></p>
+      <div class="split">
+        <section class="panel" aria-labelledby="run-facts-title"><h2 id="run-facts-title">Run</h2><dl class="facts" id="run-facts"></dl></section>
+        <section class="panel" aria-labelledby="run-notes-title"><h2 id="run-notes-title">Summary</h2><div id="run-notes"></div></section>
+      </div>
+      <section class="panel" id="run-approval" aria-labelledby="run-approval-title" hidden><h2 id="run-approval-title">Approval</h2><dl class="facts" id="run-approval-facts"></dl></section>
+      <section class="panel" aria-labelledby="run-rows-title"><h2 id="run-rows-title">Rows</h2><div id="run-rows"></div></section>
+    </section>
   </div>
 </main>
 
@@ -102,5 +123,7 @@
 
 <footer class="wrap foot">Runs on this computer only. Fonts: IBM Plex and Bricolage Grotesque, <a href="OFL-IBM-Plex.txt">OFL</a> / <a href="OFL-Bricolage-Grotesque.txt">OFL</a>.</footer>
 <script src="app.js"></script>
+<script src="tables.js"></script>
+<script src="runs.js"></script>
 </body>
 </html>
