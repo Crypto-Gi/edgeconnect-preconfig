@@ -188,7 +188,7 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--orchestrator", required=True, help=".env profile nickname, e.g. prod or lab")
+    parser.add_argument("--orchestrator", required=True, help=".env profile nickname, e.g. main or lab")
     parser.add_argument("--appliance", required=True, help="nePk (e.g. 0.NE) or exact hostname")
     parser.add_argument("--role", required=True, choices=("reference", "sample"))
     parser.add_argument("--pause", type=float, default=0.2, help="seconds between requests (default 0.2)")

@@ -53,14 +53,14 @@ The six commands above run these stages for you. To run them yourself (`SKILL_SC
 ```bash
 SKILL_SCRIPTS="toolkit/scripts"
 
-python3 "$SKILL_SCRIPTS/capture.py" --orchestrator prod --appliance 2.NE --role reference
+python3 "$SKILL_SCRIPTS/capture.py" --orchestrator main --appliance 2.NE --role reference
 ```
 > Prints the capture folder at the end. Captures live and cached appliance state via `GET` only, redacts all passwords/PSKs/RADIUS keys/certificates to `<SECRET:path>` before touching disk (free-text credentials in banners or notes may not all be caught; review captures before sharing them), and automatically downloads `GET /gms/appliance/preconfiguration/default` into the work folder's `reference/default-templates/orchestrator-<release>.yml` (`PRECONFIG_WORK`; never inside the toolkit) if the Orchestrator release is new (not with `--only`, and not when the key may not read `GET /gms/versions`). Use `--role sample` for the other sites of the same design (written under `samples/`). A read the key's roles refuse is recorded and reported, not fatal; see [When a command stops](#when-a-command-stops).
 
 ### Generate the Site-Type Jinja2 & CSV Template
 ```bash
 python3 "$SKILL_SCRIPTS/translate.py" \
-  --capture ./preconfig-work/reference/prod/2.NE/<UTC_STAMP> \
+  --capture ./preconfig-work/reference/main/2.NE/<UTC_STAMP> \
   --site-type retail-branch \
   --target-release 9.7.1.42046 \
   --target-ecos 9.7.1.0
