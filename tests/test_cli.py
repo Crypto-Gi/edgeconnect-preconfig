@@ -335,7 +335,41 @@ class CompareLayout(unittest.TestCase):
                     mock.patch("translate.build", side_effect=NothingToConvert("capture 'x' lacks appliance or deployment.sysConfig data")), \
                     contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(cli.main(["compare", str(folder), "br-2"]), 2)
-        self.assertEqual(err.getvalue(), "error: capture 'x' lacks appliance or deployment.sysConfig data\n")
+        self.assertEqual(err.getvalue(), "error: br-2: no appliance or deployment data could be read (offline with no Orchestrator cache?), so it cannot be compared\n")
+
+    def broken(self, damage):
+        """cmd_compare with a real translate.Capture on a damaged partner capture: (exit code, stderr)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "build.json").write_text(json.dumps({"site_type": "br", "orchestrator": "lab", "validator": "lab", "capture": "c", "target_release": "9.7.1.42046",
+                                                            "appliance": {"hostName": "br-1", "nePk": "1.NE"}}))
+            cap = folder / "cap-2026-10-30T000000Z"
+            (cap / "capture").mkdir(parents=True)
+            (cap / "run.json").write_text(json.dumps({"appliance": {"nePk": "2.NE"}}))
+            (cap / "capture-index.json").write_text(json.dumps([{"id": "appliance", "label": "live", "status": "ok", "file": "capture/appliance.live.json"}]))
+            (cap / "capture" / "appliance.live.json").write_text(json.dumps({"data": {"hostName": "br-2"}}))
+            damage(cap)
+            with mock.patch("capture.capture", return_value=cap), contextlib.redirect_stderr(io.StringIO()) as err, contextlib.redirect_stdout(io.StringIO()):
+                code = cli.main(["compare", str(folder), "br-2"])
+        return code, err.getvalue()
+
+    def test_a_damaged_capture_is_one_line_naming_the_site(self):
+        for damage, detail in ((lambda cap: (cap / "capture-index.json").unlink(), "FileNotFoundError: capture-index.json"),
+                               (lambda cap: (cap / "capture" / "appliance.live.json").write_text("{not json"), "JSONDecodeError: ")):
+            code, err = self.broken(damage)
+            self.assertEqual(code, 2)
+            self.assertTrue(err.startswith("error: br-2: its capture could not be read ({}".format(detail)), err)
+            self.assertEqual(len(err.splitlines()), 1)
+            self.assertNotIn("cap-2026", err)  # the site as typed, not the capture folder
+
+    def test_the_base_appliance_is_refused_as_its_own_partner(self):
+        for typed in ("br-1", "BR-1", "1.NE"):
+            code, out, built = run_compare(REFERENCE, [], argv=(typed, "--yes"))
+            self.assertEqual((code, built), (2, None))
+            self.assertIn("error: {} is the appliance this build was read from".format(typed), out)
+        code, out, built = run_compare(REFERENCE, [renamed()], nepk=lambda site: "1.NE")  # another name, the same appliance
+        self.assertEqual((code, built), (2, None))
+        self.assertIn("error: br-2 is the appliance this build was read from", out)
 
 
 def zoned(zone="LAN", host="br-1"):
@@ -345,7 +379,7 @@ def zoned(zone="LAN", host="br-1"):
     return ref
 
 
-def run_compare(reference, others, argv=("--yes",), answers=()):
+def run_compare(reference, others, argv=("--yes",), answers=(), nepk=lambda site: site + ".NE"):
     """cmd_compare on in-memory references (no capture, no translate, no Orchestrator): (exit code, output, build_site call or None)."""
     import yaml
     with tempfile.TemporaryDirectory() as tmp:
@@ -360,7 +394,7 @@ def run_compare(reference, others, argv=("--yes",), answers=()):
             return folder
         names = [o["applianceInfo"]["hostname"] for o in others]
         with mock.patch("capture.capture", side_effect=lambda nick, site, *a: site), \
-                mock.patch("translate.Capture", side_effect=lambda c: mock.Mock(run={"appliance": {"nePk": c + ".NE"}})), \
+                mock.patch("translate.Capture", side_effect=lambda c: mock.Mock(run={"appliance": {"nePk": nepk(c)}})), \
                 mock.patch("translate.build", side_effect=[copy.deepcopy(o) for o in others]), \
                 mock.patch("translate.prune", side_effect=lambda value, allowed, ledger: value), \
                 mock.patch.object(cli, "build_site", side_effect=build_site), mock.patch.object(cli, "ensure_sites_csv"), \

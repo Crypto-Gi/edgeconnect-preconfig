@@ -697,6 +697,14 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     if len(a.sites) > 4:
         raise Fail("compare takes 1 to 4 other sites")
     info = load_build(a.folder)
+    me = info.get("appliance") or {}
+    base_ne = me.get("nePk")
+
+    def refuse_base(site: str) -> None:
+        raise Fail("{} is the appliance this build was read from: give other sites of the same design".format(site))
+    for site in a.sites:
+        if site.lower() in {str(me.get(k) or "").lower() for k in ("hostName", "nePk")}:
+            refuse_base(site)
     base = a.folder if (a.folder / "build.json").is_file() else a.folder.parent
     from capture import Stop, capture
     from translate import Capture, NothingToConvert, allowed_paths, build, prune
@@ -709,10 +717,19 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         except Stop as stop:
             raise Fail(str(stop))
     allowed = allowed_paths(info["target_release"])
-    try:
-        others = [prune(build(Capture(c), [], info.get("target_ecos")), allowed, []) for c in caps]
-    except NothingToConvert as error:
-        raise Fail(str(error))
+    others = []
+    for site, c in zip(a.sites, caps):
+        try:
+            cap = Capture(c)
+            other = prune(build(cap, [], info.get("target_ecos")), allowed, [])
+        except NothingToConvert:
+            raise Fail("{}: no appliance or deployment data could be read (offline with no Orchestrator cache?), so it cannot be compared".format(site))
+        except Exception as error:  # a damaged capture: one line naming the site as typed, not a traceback
+            detail = Path(error.filename).name if isinstance(error, OSError) and error.filename else str(error)[:200]
+            raise Fail("{}: its capture could not be read ({}: {}); run compare again to read it afresh".format(site, type(error).__name__, detail))
+        if base_ne and (cap.run.get("appliance") or {}).get("nePk") == base_ne:
+            refuse_base(site)
+        others.append(other)
     reference = load_yaml(base / "reference.yaml")
     from generate import Builder
     probe = Builder()
