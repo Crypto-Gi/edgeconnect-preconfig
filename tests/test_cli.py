@@ -306,6 +306,21 @@ class CompareLayout(unittest.TestCase):
         renamed["deploymentInfo"]["deploymentInterfaces"][2]["interfaceName"] = "uplink"  # any other name, not only lanN/wanN
         self.assertEqual(cli.layout_differences(REFERENCE, renamed), ["deploymentInterfaces[2]: wan0 vs uplink"])
 
+    def test_another_deployment_mode_interface_type_or_ha_interface_gets_no_row(self):
+        ref = copy.deepcopy(REFERENCE)
+        ref["deploymentInfo"].update(deploymentMode="router", haConfig={"haInterface": "lan1"})
+        ref["deploymentInfo"]["deploymentInterfaces"][0]["interfaceType"] = "lan"
+        other = copy.deepcopy(ref)
+        other["deploymentInfo"].update(deploymentMode="server", haConfig={"haInterface": "lan2"})
+        other["deploymentInfo"]["deploymentInterfaces"][0]["interfaceType"] = "wan"
+        self.assertCountEqual(cli.layout_differences(ref, other), ["deploymentMode: router vs server", "deploymentInterfaces[0].interfaceType: lan vs wan",
+                                                                   "haConfig.haInterface: lan1 vs lan2"])
+        other["applianceInfo"]["hostname"] = "br-2"
+        code, out, built = run_compare(ref, [other])
+        self.assertEqual(built["rows_for"], [])
+        self.assertIn("Note: br-2 has another design (", out)
+        self.assertIn("deploymentMode: router vs server", out)
+
     def test_when_every_other_site_is_left_out_the_csv_still_exists(self):
         import yaml
         other = copy.deepcopy(REFERENCE)

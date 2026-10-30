@@ -37,13 +37,14 @@ from typing import Any, Callable, Dict, List, Optional
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT, LAYOUT_DIFFERS  # noqa: E402  guard-ok: imported after the sys.path insert
+from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT, LAYOUT_COMPARED, LAYOUT_DIFFERS, LAYOUT_KEYS  # noqa: E402  guard-ok: imported after the sys.path insert
 from common import DEFAULT_TEMPLATES_DIR, EdgeConnectError, PermissionDeniedError, captured_output, client_for, load_yaml, output_root, parse_yaml, record, redact_secrets, toolkit_version, utc_stamp, validators, work_dir, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 
 PROG = "edgeconnect-preconfig"
 STATES = {1: "yes", 2: "NO", 3: "unsupported version", 4: "yes (out of sync)", 5: "yes (syncing)"}  # /appliance `state`
 NOT_STAGES = {"cells", "cli", "common", "decisions", "mappers", "runlog", "synth", "variables"}  # libraries, not commands
 INTERFACE_NAME_KEYS = ("interfaceName", "dhcpInterfaceName", "raInterfaceName")
+DESIGN_KEYS = LAYOUT_KEYS - LAYOUT_COMPARED - set(INTERFACE_NAME_KEYS)  # differing at a compared site: another design, no row (docs/decisions/0018)
 ADDRESS_REASONS = ("this site's own interface address", "inside one of this site's own subnets")
 
 
@@ -546,7 +547,8 @@ def build_site(folder: Path, info: Dict[str, Any], name: str, sheet: List[Dict[s
 
 
 def layout_differences(reference: Dict[str, Any], other: Dict[str, Any]) -> List[str]:
-    """List items another site holds at the same position under another interface name (wan1 where this site has wan0).
+    """List items another site holds at the same position under another interface name (wan1 where this site has wan0), and
+    a deployment mode, interface type or HA interface that differs: another design, so such a site gets no row.
 
     Rows are matched by position, so such a site's values would land on the wrong interface. Names are compared directly;
     a tunnel or rule name may differ per site and does not count."""
@@ -565,6 +567,12 @@ def layout_differences(reference: Dict[str, Any], other: Dict[str, Any]) -> List
                 walk(x, y, "{}[{}]".format(path, i))
 
     walk(reference, other, "")
+    from variables import sheet_items
+    theirs = dict(sheet_items(other))
+    for path, value in sheet_items(reference):
+        key = re.sub(r"\[\d+\]", "", path).split(".")[-1]
+        if path.split(".")[0] in ALWAYS_SECTIONS and key in DESIGN_KEYS and theirs.get(path, value) != value:
+            out.append("{}: {} vs {}".format(path.replace("deploymentInfo.", "", 1), value, theirs[path]))
     return out
 
 
@@ -740,7 +748,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         diffs = layout_differences(reference, o)
         why = "" if diffs else shape_note(mine, s, n, base_host)
         if diffs:
-            notes[n] = ("Note: {} lists its items differently ({}{}). Its values would land on the wrong interfaces, so sites.csv gets no row for it; "
+            notes[n] = ("Note: {} has another design ({}{}): its values would not fit this template, so sites.csv gets no row for it; "
                         "build a separate template for that design.".format(n, ", ".join(diffs[:4]), " ..." if len(diffs) > 4 else ""))
         elif why:
             notes[n] = ("Note: {}. sites.csv gets no row for {}: the template holds {}'s settings only. Run compare with {} as the base "
