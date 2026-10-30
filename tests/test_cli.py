@@ -278,6 +278,8 @@ class Dispatch(unittest.TestCase):
             self.assertEqual(cli.run_stage("nope", []), 2)
         self.assertIn("cache-check", cli.stages())
         self.assertNotIn("compare", cli.stages())  # the old stage name is now the compare verb
+        self.assertNotIn("cells", cli.stages())  # libraries without main() are not commands
+        self.assertNotIn("synth", cli.stages())
 
     def test_a_refused_validator_is_one_line_not_a_traceback(self):
         from validate import Stop

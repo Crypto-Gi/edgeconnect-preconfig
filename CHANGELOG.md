@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.3 (2026-10-30)
+
+- **The stage form ends in one error line**: `validate --yaml`, `upload --yaml` and the other stage commands (`validate --orchestrator ...`, `render`, `upload --site-dir ...`) now print a refused validator or a network error as one line and exit 2, as the verbs do. A non-validator Orchestrator used to print a Python traceback before the message, because the stage ran as `__main__` and its `Stop` was not the class the caller caught.
+- **Validator names ignore case in the stage form too**: `render ... --validate LAB` now matches `EC_VALIDATORS=lab`, as the verbs already did.
+- **The `orch_validators` alias is no longer read** (`docs/decisions/0011`): use `EC_VALIDATORS`. The automation CLI refuses unnumbered `orch_` keys, so the alias broke every `edgeconnect-auto` command when both tools share one `.env`. A `.env` that set only the alias now allows no validator, and the refusal says to add the nickname to `EC_VALIDATORS`.
+- **Clearer message** when the HTTP client cannot send `/validate` as a read (the old text named another repository's branch).
+
 ## 1.3.2 (2026-10-28)
 
 - **Routes with next hop 0.0.0.0 or :: lose their interface** (`docs/decisions/0016`): a local route (`localRoutes`, `segmentLocalRoutes`) with next hop `0.0.0.0` or `::` and a named interface is now written without `interfaceName`, whatever the source or target ECOS, and ledgered `mapped` with prefix, interface and segment. The interface has no effect, and ECOS 9.7+ rejects it on apply. The route's zone is written as the source has it; the appliance shows such a route with zone none (ECOS ignores a zone on a route without an interface), where the interface route showed the interface's zone. 1.3.0 left such routes out (ledgered unresolved) for a 9.7+ or unknown target ECOS, and kept the interface before 9.7. Two routes that become the same are written once, with a ledger line. `--target-ecos` is still accepted and recorded in `build.json`, `ledger.json` and `summary.md`, but no rule depends on it at present; the summary's unknown line says so.
