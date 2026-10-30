@@ -766,7 +766,8 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
             raise Fail("{}: no appliance or deployment data could be read (offline with no Orchestrator cache?), so it cannot be compared".format(site))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:  # a damaged capture: one line naming the site as typed, not a traceback
             detail = Path(error.filename).name if isinstance(error, OSError) and error.filename else str(error)[:200]
-            raise Fail("{}: its capture could not be read ({}: {}); run compare again to read it afresh".format(site, type(error).__name__, detail))
+            raise Fail("{}: its capture{} could not be read ({}: {}); run compare {}to read it afresh".format(
+                site, " " + str(c) if a.captures else "", type(error).__name__, detail, "without --captures " if a.captures else "again "))
         except Exception as error:  # anything else is a bug in the toolkit, not in the capture
             raise Fail("{}: toolkit error {}: {} (please report it)".format(site, type(error).__name__, str(error)[:200]))
         if a.captures:
@@ -810,14 +811,17 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         refused = picker.fix_by_name([x.strip() for x in a.fix.split(",") if x.strip()], reference)
         if refused:
             raise Fail("--fix: " + "; ".join(refused))
+    also = [r for r in picker.free if picker.on[r["path"]] and r not in differ]  # what --set added: listed apart, they do not differ
     same = sum(1 for r in rows if r["reason"] == "same at every site you gave")
     only = sum(1 for r in rows if r["flag"] == "true" and r["reason"].startswith("only "))
     locked = sum(1 for r in picker.rows if r["locked"])
     shown = [n for n, _, _ in kept]
     print("\n{} settings are always per site (hostname, secrets, Deployment page, appliance info), and {} more are per site at {} and {}:".format(
-        locked, len(differ), base_host, ", ".join(shown) or "no other site"))
+        locked, sum(1 for r in differ + also if picker.on[r["path"]]), base_host, ", ".join(shown) or "no other site"))
     print("  {:>4}  {:<52} {:<30} {:>5}  {}   {}".format("#", "Setting", base_host, "", "Choice", "   ".join("| " + n for n in shown)))
     print("\n".join(picker.show(differ, "Different between your sites (pre-ticked)")))
+    if also:
+        print("\n".join(picker.show(also, "Also per site (--set)")))
     print("{} settings are the same at every site and stay fixed.".format(same))
     if only:
         print("{} settings exist only at some of the sites and are left fixed.".format(only))
@@ -859,8 +863,10 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     picker.record(reference, target)
     code = validate_rows(target, target / "sites.csv", info, None)
     record("saved", folder=str(target), validated=code == 0)
-    if code:
+    if code == 1:
         print("{} is saved: only the rows that failed validation need fixing, in {} (nothing has to be compared again)".format(target, target / "sites.csv"))
+    elif code:  # render STOPPED (validator refused, network): no row was validated
+        print("{} is saved, but its rows were not validated (see STOPPED above): run validate on it when the validator answers".format(target))
     return code
 
 

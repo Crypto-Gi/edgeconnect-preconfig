@@ -496,7 +496,9 @@ class CompareForTheGui(unittest.TestCase):
             names = [o["applianceInfo"]["hostname"] for o in others]
             run_of = runs or (lambda c: sample_run(Path(c).name))
             with mock.patch("capture.capture", side_effect=lambda nick, site, *a: reads.append(site) or Path(site)), \
-                    mock.patch("common.client_for", side_effect=AssertionError("no Orchestrator request")), \
+                    mock.patch.object(cli, "client_for", side_effect=AssertionError("no Orchestrator request")), \
+                    mock.patch("validate.client_for", side_effect=AssertionError("no Orchestrator request")), \
+                    mock.patch("upload.client_for", side_effect=AssertionError("no Orchestrator request")), \
                     mock.patch("translate.Capture", side_effect=lambda c: mock.Mock(run=run_of(c))), \
                     mock.patch("translate.build", side_effect=[copy.deepcopy(o) for o in others]), \
                     mock.patch("translate.prune", side_effect=lambda value, allowed, ledger: value), \
@@ -526,9 +528,14 @@ class CompareForTheGui(unittest.TestCase):
         flags = ["--captures", "/work/samples/lab/2.NE/stamp", "--fix", "lan0_zone", "--set", "localRoutes.staticRoutes[1].nextHop"]
         runs = lambda c: sample_run("br-2")
         code, out, _, preview, reads = self.compare([zoned("Guest", "br-2")], ["--dry-run"] + flags, runs=runs)
-        self.assertEqual((code, reads), (0, []))  # nothing read again, and common.client_for (no request) was never called
+        self.assertEqual((code, reads), (0, []))  # nothing read again, and no client_for (no request) was ever called
         columns = self.picked(preview)["columns"]
         self.assertNotIn("lan0_zone", columns)  # --fix unticks a setting that differs between the sites
+        self.assertIn("and 1 more are per site at br-1 and br-2:", out)  # the --fix'ed one no longer counts, the --set one does
+        fixed_only = self.compare([zoned("Guest", "br-2")], ["--dry-run", "--fix", "lan0_zone"])[1]
+        self.assertIn("and 0 more are per site at br-1 and br-2:", fixed_only)
+        self.assertIn("-- Also per site (--set)", out)
+        self.assertIn("staticRoutes", out.split("-- Also per site (--set)")[1].splitlines()[1])
         self.assertIn("Warning: deploymentInterfaces[lan0].zone stays fixed: br-2 gets br-1's value LAN", out)
         code, _, built, saved, reads = self.compare([zoned("Guest", "br-2")], ["--yes", "--name", "br"] + flags, runs=runs)
         self.assertEqual((code, reads), (0, []))
@@ -561,9 +568,13 @@ class CompareForTheGui(unittest.TestCase):
         self.assertIsNotNone(built)
         self.assertRegex(out, r"site-br is saved: only the rows that failed validation need fixing")
         self.assertEqual([r for r in results if r["kind"] == "saved"][0]["validated"], False)
+        code, out, _, results, _ = self.compare([zoned("Guest", "br-2")], ["--yes", "--name", "br"], validated=2)  # render STOPPED
+        self.assertEqual(code, 2)
+        self.assertIn("site-br is saved, but its rows were not validated (see STOPPED above)", out)
+        self.assertNotIn("failed validation", out)
         code, out, _, results, _ = self.compare([zoned("Guest", "br-2")], ["--yes", "--name", "br"])
         self.assertEqual(code, 0)
-        self.assertNotIn("is saved:", out)
+        self.assertNotIn("is saved", out)
         self.assertEqual([r for r in results if r["kind"] == "saved"][0]["validated"], True)
 
 
