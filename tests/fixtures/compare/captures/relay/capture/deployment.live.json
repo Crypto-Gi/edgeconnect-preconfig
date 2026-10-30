@@ -1,0 +1,94 @@
+{
+ "data": {
+  "sysConfig": {
+   "mode": "router",
+   "maxBW": 100000,
+   "ifLabels": {
+    "lan": [
+     {
+      "id": "4",
+      "name": "Data"
+     }
+    ],
+    "wan": [
+     {
+      "id": "1",
+      "name": "INET"
+     }
+    ]
+   },
+   "vrfs": [
+    {
+     "id": "0",
+     "name": "Default"
+    }
+   ],
+   "vrfZonesMap": {
+    "0": {
+     "a": {
+      "id": 0,
+      "name": "Trusted"
+     },
+     "b": {
+      "id": 1,
+      "name": "Guest"
+     }
+    }
+   },
+   "roles": [
+    {
+     "id": "0",
+     "name": "default"
+    }
+   ]
+  },
+  "modeIfs": [
+   {
+    "ifName": "wan0",
+    "applianceIPs": [
+     {
+      "vlan": 0,
+      "label": "1",
+      "wanSide": true,
+      "vrf": 0,
+      "zone": 0,
+      "harden": 1,
+      "behindNAT": "none",
+      "maxBW": {
+       "outbound": 50000,
+       "inbound": 50000
+      },
+      "version": 4,
+      "ip": "198.51.100.20",
+      "mask": 25,
+      "wanNexthop": "198.51.100.1"
+     }
+    ]
+   },
+   {
+    "ifName": "lan0",
+    "applianceIPs": [
+     {
+      "vlan": 0,
+      "label": "4",
+      "wanSide": false,
+      "vrf": 0,
+      "zone": 0,
+      "ip": "192.0.2.1",
+      "mask": 25,
+      "dhcpd": {
+       "type": "relay",
+       "relay": {
+        "dhcpserver": [
+         "198.51.100.67"
+        ],
+        "option82": false,
+        "option82_policy": "append"
+       }
+      }
+     }
+    ]
+   }
+  ]
+ }
+}

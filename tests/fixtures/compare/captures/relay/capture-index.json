@@ -1,0 +1,32 @@
+[
+ {
+  "id": "appliance",
+  "label": "live",
+  "status": "ok",
+  "file": "capture/appliance.live.json"
+ },
+ {
+  "id": "groups",
+  "label": "live",
+  "status": "ok",
+  "file": "capture/groups.live.json"
+ },
+ {
+  "id": "extra-info",
+  "label": "live",
+  "status": "ok",
+  "file": "capture/extra-info.live.json"
+ },
+ {
+  "id": "deployment",
+  "label": "live",
+  "status": "ok",
+  "file": "capture/deployment.live.json"
+ },
+ {
+  "id": "subnets",
+  "label": "live",
+  "status": "ok",
+  "file": "capture/subnets.live.json"
+ }
+]

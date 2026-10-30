@@ -1,0 +1,6 @@
+{
+ "exit": 2,
+ "notes": [
+  "error: branch-b: its capture could not be read (FileNotFoundError: capture-index.json); run compare again to read it afresh"
+ ]
+}

@@ -1,0 +1,8 @@
+{
+ "orchestrator": "example",
+ "release": "9.7.1.42046",
+ "appliance": {
+  "nePk": "5.NE",
+  "hostName": "branch-b"
+ }
+}

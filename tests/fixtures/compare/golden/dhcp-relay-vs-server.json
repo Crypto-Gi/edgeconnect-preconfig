@@ -1,0 +1,62 @@
+{
+ "exit": 0,
+ "notes": [
+  "Note: branch-b uses DHCP relay on lan0, branch-a uses server; branch-b has 10 setting(s) branch-a lacks: deploymentInfo.dhcpInfo[0].dhcpProxyServers[0], deploymentInfo.dhcpInfo[0].enableOptions82, deploymentInfo.dhcpInfo[0].option82SubOptions1 ...; branch-b lacks 8 setting(s) branch-a has: deploymentInfo.dhcpInfo[0].defaultLease, deploymentInfo.dhcpInfo[0].dhcpAddressMask, deploymentInfo.dhcpInfo[0].dnsServers[0] .... sites.csv gets no row for branch-b: the template holds branch-a's settings only. Run compare with branch-b as the base (build it first), or build a separate template for that design."
+ ],
+ "columns": [
+  "hostname",
+  "group",
+  "site",
+  "network_role",
+  "address",
+  "contact_name",
+  "server_per_segment",
+  "total_outbound_bandwidth",
+  "total_inbound_bandwidth",
+  "lan0_ip",
+  "wan0_addressing_mode",
+  "wan0_ip",
+  "wan0_next_hop",
+  "wan0_bw_in",
+  "wan0_bw_out",
+  "wan0_behind_nat",
+  "lan0_dhcp_type",
+  "lan0_dhcp_address_mask",
+  "lan0_start",
+  "lan0_end",
+  "lan0_dns_servers_0",
+  "lan0_netbios_node_type",
+  "lan0_maximum_lease",
+  "lan0_default_lease"
+ ],
+ "rows": [
+  {
+   "hostname": "branch-a",
+   "group": "Branches",
+   "site": "Example-A",
+   "network_role": "non-hub",
+   "address": "1 Example Road",
+   "contact_name": "ops",
+   "server_per_segment": "false",
+   "total_outbound_bandwidth": "100000",
+   "total_inbound_bandwidth": "100000",
+   "lan0_ip": "192.0.2.1/25",
+   "wan0_addressing_mode": "static",
+   "wan0_ip": "198.51.100.10/25",
+   "wan0_next_hop": "198.51.100.1",
+   "wan0_bw_in": "50000",
+   "wan0_bw_out": "50000",
+   "wan0_behind_nat": "none",
+   "lan0_dhcp_type": "server",
+   "lan0_dhcp_address_mask": "192.0.2.0/25",
+   "lan0_start": "192.0.2.10",
+   "lan0_end": "192.0.2.100",
+   "lan0_dns_servers_0": "198.51.100.53",
+   "lan0_netbios_node_type": "B",
+   "lan0_maximum_lease": "86400",
+   "lan0_default_lease": "3600",
+   "preconfig_name": "branch-a_preconfig",
+   "serial_number": ""
+  }
+ ]
+}
