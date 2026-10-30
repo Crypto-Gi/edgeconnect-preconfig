@@ -440,6 +440,13 @@ class CompareShape(unittest.TestCase):
             del o["deploymentInfo"]["deploymentInterfaces"][2]["ipAddressMask"]  # blank (None) at the base: nothing would be copied
         self.assertEqual(self.rows_and_notes(renamed(change=blank_wan)), (["br-2"], []))
 
+    def test_dhcp_relay_against_server_is_named(self):
+        def relay(o):
+            o["deploymentInfo"]["dhcpInfo"][0] = {"dhcpInterfaceName": "lan0", "dhcpType": "relay", "dhcpProxyServers": ["192.0.2.50"]}
+        rows, notes = self.rows_and_notes(renamed(change=relay))
+        self.assertEqual(rows, [])
+        self.assertIn("br-2 uses DHCP relay on lan0, br-1 uses server", notes[0])
+
 
 class ListLogin(unittest.TestCase):
     def client(self, versions_error=None):

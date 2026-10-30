@@ -574,7 +574,8 @@ def shape_note(mine: Dict[str, Any], theirs: Dict[str, Any], site: str, base: st
     The template holds the base's settings only: a row would drop the site's own extra settings and give it the base's."""
     from variables import only_at
     extra, missing = only_at(mine, theirs)
-    parts = []
+    parts = ["{} uses DHCP {} on {}, {} uses {}".format(site, theirs[p], mine.get(p[:-len("dhcpType")] + "dhcpInterfaceName"), base, v)
+             for p, v in mine.items() if p.endswith(".dhcpType") and theirs.get(p, v) != v]
     for paths, what in ((extra, "{} has {} setting(s) {} lacks"), (missing, "{} lacks {} setting(s) {} has")):
         if paths:
             parts.append(what.format(site, len(paths), base) + ": " + ", ".join(paths[:3]) + (" ..." if len(paths) > 3 else ""))
