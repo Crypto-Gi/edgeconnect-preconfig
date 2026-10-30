@@ -1,0 +1,48 @@
+/* Build and "choose what changes per site" (docs/gui/BUILD_PLAN.md step 8). Only app.css's own tokens, so both themes keep
+   the contrast tests/test_gui_design.py checks there. */
+.field { display: grid; gap: .3rem; }
+.field label { font-weight: 500; }
+.field input, .field select { max-width: 22rem; background: var(--ink); }
+.log { list-style: none; margin: 0; padding: .5rem .7rem; max-height: 14rem; overflow: auto; background: var(--ink); border: 1px solid var(--line); border-radius: 10px; font-size: .8rem; }
+.log:empty { display: none; }
+.log li { white-space: pre-wrap; overflow-wrap: anywhere; }
+.summary { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .82rem; line-height: 1.5; max-height: 32rem; overflow: auto; }
+
+.pick-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.pick-left { display: grid; gap: .8rem; min-width: 0; }
+.pick-panels { display: grid; gap: .8rem; }
+.pick-right { position: sticky; top: 4.5rem; }
+.pick-section > summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: .3rem 1rem; justify-content: space-between; font: 700 1.05rem/1.2 var(--f-display); }
+.pick-section > summary .muted { font: 500 .8rem/1.2 var(--f-mono); }
+.pick-section.locked { border-color: var(--gate); }
+.rows { list-style: none; margin: 0; padding: 0; display: grid; gap: .1rem; }
+.rows .rows { margin: .2rem 0 0 1.6rem; padding-left: .6rem; border-left: 1px dashed var(--line); }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 8rem) 5.6rem; gap: .1rem .8rem; align-items: baseline; padding: .35rem .4rem; border-radius: 8px; }
+.row:hover, .row:focus-within { background: var(--glow); }
+.row > .check { white-space: normal; align-items: baseline; min-width: 0; }
+.row .setting { overflow-wrap: anywhere; font-size: .9rem; }
+.row .value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.row .pct { font-size: .8rem; color: var(--muted); text-align: right; }
+.row .column { grid-column: 1 / -1; color: var(--signal); padding-left: 1.4rem; }
+.row .column:empty { display: none; }
+.row .lock, .row .why, .row > .rows { grid-column: 1 / -1; padding-left: 1.4rem; font-size: .8rem; }
+.lock { color: var(--gate); }
+.why { font-weight: 500; }
+#pick-table tr.on td:last-child { color: var(--signal); }
+.tabs [role="tab"] { cursor: pointer; }
+[aria-pressed="true"].btn { background: var(--signal); color: var(--on-signal); border-color: var(--signal); }
+
+.yaml-box { max-height: calc(100vh - 9rem); overflow: auto; position: relative; background: var(--ink); border: 1px solid var(--line); border-radius: 10px; }
+.yaml { list-style: none; margin: 0; padding: .4rem 0; font: 400 .78rem/1.55 var(--f-mono); user-select: none; -webkit-user-select: none; cursor: default; }
+.yaml li { display: flex; gap: .7rem; padding: 0 .6rem 0 0; border-left: 3px solid transparent; white-space: pre; }
+.yaml li::before { content: attr(data-n); color: var(--muted); min-width: 2.6rem; text-align: right; flex: none; }
+.yaml li.on { background: var(--glow); border-left-color: var(--signal); }
+.yaml li.hover { background: color-mix(in srgb, var(--gate) 18%, transparent); border-left-color: var(--gate); }
+.yaml .tag { margin-left: auto; padding-left: 1rem; color: var(--signal); font-weight: 500; }
+
+@media (max-width: 900px) {
+  .pick-grid { grid-template-columns: minmax(0, 1fr); }
+  .pick-right { position: static; }
+  .row { grid-template-columns: minmax(0, 1fr) auto; }
+  .row .value { grid-column: 1 / -1; padding-left: 1.4rem; }
+}

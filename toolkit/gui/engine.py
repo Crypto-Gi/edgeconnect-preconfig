@@ -224,6 +224,13 @@ def _approval(argv: Sequence[str], outputs: Sequence[Mapping[str, Any]]) -> Opti
 
 # ---------------------------------------------------------------- secrets in text (BUILD_PLAN "Engineering rules")
 
+def hide_secrets(reference: Any, text: str) -> str:
+    """text (a build's reference.yaml or summary.md) with every secret of the YAML file `reference`, and every <SECRET:...>
+    placeholder capture wrote, shown as <SECRET> (D13), for the GUI's read-only viewers.
+    shortcut: a secret spanning lines becomes one line and moves the lines after it; capture redacts PEM and hashes first."""
+    return re.sub(r"<SECRET:[^>\n]*>", "<SECRET>", _scrub(_secret_forms(["validate", "--yaml", _abs(reference)]))(text))
+
+
 def _secret_forms(argv: Sequence[str]) -> Dict[str, str]:
     """Every literal secret value of the run's inputs, in each form the CLI can print it in, with its placeholder: a CSV secret
     column's cells (from columns.json, or secret-like headers without one) by <SECRET:column>, a secret value of a YAML file
