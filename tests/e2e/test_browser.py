@@ -132,9 +132,8 @@ class BrowserTests(unittest.TestCase):
         site = self.tmp / "preconfig-output" / "h1" / "site-smoke"
         self.assertEqual(template.read_bytes(), (site / "smoke.jinja2").read_bytes())
         self.assertEqual(sheet.read_bytes(), (site / "sites.csv").read_bytes())
-        page.get_by_role("dialog", name="Save template and CSV").get_by_role("button", name="Close").click()
-
-        page.locator("#view-pick").get_by_role("link", name="← All tasks").click()
+        page.evaluate("location.hash = '#/'")  # leaving the page (Back, a typed address) with the dialog open closes it
+        expect(page.get_by_role("dialog", name="Save template and CSV")).to_be_hidden()
         page.get_by_role("link", name="Make the preconfig files").click()
         page.locator("#make-template").set_input_files(str(template))
         page.locator("#make-csv").set_input_files(str(sheet))

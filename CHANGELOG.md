@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased (gui branch)
+
+- **GUI:** leaving a page (Back, a typed address) now closes a dialog left open on it, such as Save template and CSV, which stayed over the next page until Close was pressed.
+
 ## 1.4.0-rc.1 (2026-10-30, pre-release from the `gui` branch)
 
 - **Local web GUI** (`python3 -m toolkit.gui`, see `docs/GUI.md`): build a template from an appliance, choose what changes per site (alone or compared with up to 4 other sites, each site's own value beside the base's), make, validate and upload the preconfig files, upload existing YAML files, see the appliances and preconfigs on an Orchestrator, and the run log as tables. It runs the same commands as the terminal, in-process; uploads are off until `<nick>_gui_preconfig_uploads=on`, a CSV upload needs the Orchestrator's nickname typed, and nothing ever applies a preconfig. The command line's own output is unchanged; the CLI additions it uses are listed below.
