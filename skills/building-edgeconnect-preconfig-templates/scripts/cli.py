@@ -123,6 +123,8 @@ def cmd_list(argv: List[str]) -> int:
         if not a.search or any(a.search.lower() in str(c).lower() for c in row[:5]):
             rows.append(row)
     rows.sort(key=lambda r: str(r[0]).lower())
+    for r in rows:  # the GUI reads these, not the table, which a hostname with spaces or wide characters makes ambiguous (cli-requests R8)
+        record("appliance", **dict(zip(("hostname", "nepk", "model", "ecos", "site", "reachable"), r)))
     print(table(["Hostname", "nePk", "Model", "ECOS", "Site", "Reachable"], rows) if rows else "no appliances{}".format(" match" if a.search else ""))
     print("{} appliance(s), {} reachable".format(len(rows), sum(1 for r in rows if r[5].startswith("yes"))))
     if client.write_requests:
