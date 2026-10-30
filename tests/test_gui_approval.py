@@ -160,6 +160,13 @@ class ApprovedUpload(unittest.TestCase):
         self.assertEqual((code, self.posts), (2, []))
         self.assertIn("NOT APPROVED, nothing uploaded: the batch changed since it was approved", err)
 
+    def test_a_run_that_reaches_another_orchestrator_after_its_approval_sends_nothing(self):
+        token = self.approve()
+        self.orch.config.base_url = "https://elsewhere.example.com/gms/rest"  # the nickname now points at another Orchestrator
+        code, err, _ = self.gui.run(self.upload + ["--approve"], self.approvals.approver(token, "lab"))
+        self.assertEqual((code, self.posts), (2, []))
+        self.assertIn("NOT APPROVED, nothing uploaded: the batch changed since it was approved", err)
+
     def test_an_approval_for_another_orchestrator_sends_nothing(self):
         token = self.approve()
         code, err, _ = self.gui.run(self.upload + ["--approve"], self.approvals.approver(token, "other"))
