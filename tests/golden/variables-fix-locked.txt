@@ -1,0 +1,6 @@
+$ edgeconnect-preconfig variables <tmp>/out/h1 --pick top10 --fix hostname,site,no_such_setting --yes
+exit 2
+--- stdout
+--- stderr
+error: --fix: hostname cannot be fixed: always per site, hostname; site cannot be fixed: always per site, deployment-page value (docs/decisions/0006); no setting named no_such_setting
+--- files

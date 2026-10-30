@@ -247,6 +247,13 @@ class Golden(unittest.TestCase):
     def test_variables_set_unknown(self):
         self.check("variables-set-unknown", ["variables", str(self.built()), "--pick", "top10", "--set", "no_such_setting", "--yes"], code=2)
 
+    def test_variables_dry_run(self):
+        self.check("variables-dry-run", ["variables", str(self.built()), "--pick", "top10", "--set", "deploymentInfo.deploymentMode,template_groups",
+                                         "--fix", "template_groups", "--dry-run"])
+
+    def test_variables_fix_locked(self):
+        self.check("variables-fix-locked", ["variables", str(self.built()), "--pick", "top10", "--fix", "hostname,site,no_such_setting", "--yes"], code=2)
+
     def test_variables_asked(self):
         # Top 10, open the locked list, flip setting 1, Enter, then a name; and once more taking the default name
         self.check("variables-asked", ["variables", str(self.built())], answers=["1", "l", "1", "", "gask", "y"])

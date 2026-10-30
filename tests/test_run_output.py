@@ -271,6 +271,37 @@ class RecordedUploads(Fixture):
         self.assertTrue(Path(row["file"]).is_file())
 
 
+class DryRunThenSave(Fixture):
+    def test_a_dry_run_writes_nothing_asks_nothing_calls_no_orchestrator_and_save_gives_its_columns(self):
+        self.assertEqual(self.run_cli(["build", "--orchestrator", "lab", "--appliance", "h1"])[0], 0)
+        folder = self.tmp / "preconfig-output" / "h1"
+        flags = ["--pick", "top10", "--set", "deploymentInfo.deploymentMode,template_groups", "--fix", "template_groups"]
+        del self.recorder.results[:]
+        before = sorted((str(p), p.stat().st_mtime_ns) for p in self.tmp.rglob("*"))
+        reports = self.tmp / "reports"
+        with mock.patch.object(self.orch, "get", side_effect=AssertionError("GET during a dry run")), \
+                mock.patch.object(self.orch, "request", side_effect=AssertionError("request during a dry run")), \
+                mock.patch.dict(os.environ, {"EDGECONNECT_REPORT_DIR": str(reports)}):
+            code, dry_text = self.run_cli(["variables", str(folder)] + flags + ["--dry-run"])  # stdin at its end: a question would end it with exit 1
+        self.assertEqual(code, 0, dry_text)
+        self.assertEqual(sorted((str(p), p.stat().st_mtime_ns) for p in self.tmp.rglob("*")), before)  # no file, not even the run log's
+        [dry] = self.results("picker")
+        rows = {r["path"]: r for r in dry["rows"]}
+        self.assertTrue(rows["deploymentInfo.deploymentMode"]["on"])
+        self.assertFalse(rows["templateGroups.groups"]["on"])  # --fix undid --set
+        self.assertEqual(rows["applianceInfo.hostname"]["lines"], [2, 2])
+
+        with mock.patch.dict(os.environ, {"EDGECONNECT_REPORT_DIR": str(reports)}):
+            code, saved_text = self.run_cli(["variables", str(folder)] + flags + ["--name", "s", "--yes"])
+        self.assertEqual(code, 0, saved_text)
+        [saved] = self.results("picker")
+        self.assertEqual(saved["columns"], dry["columns"])
+        self.assertTrue(saved_text.startswith(dry_text))  # the same column line, then what Save wrote
+        self.assertTrue((reports / "preconfig.jsonl").is_file())  # the Save is logged as before
+        with (folder / "site-s" / "sites.csv").open(newline="", encoding="utf-8") as handle:
+            self.assertEqual(set(next(csv.reader(handle))) - {"preconfig_name", "serial_number", "tag", "autoApply"}, set(dry["columns"]))
+
+
 class ParallelBuilds(unittest.TestCase):
     def test_two_builds_and_a_render_in_parallel_each_get_only_their_own_lines(self):
         tmp = Path(tempfile.mkdtemp())
