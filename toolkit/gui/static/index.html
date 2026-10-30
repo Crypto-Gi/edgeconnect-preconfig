@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EdgeConnect Automation</title>
+<link rel="preload" href="ibm-plex-sans-latin-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="bar" id="bar">
+  <div class="wrap bar-row">
+    <a class="brand" href="#/">EdgeConnect <b>Automation</b></a>
+    <div class="switcher">
+      <label for="orch" class="sr-only">Orchestrator</label>
+      <span class="orch-swatch" id="orch-swatch" aria-hidden="true"></span>
+      <select id="orch" disabled><option>Loading…</option></select>
+      <span class="status-word" id="orch-status" aria-live="polite"></span>
+    </div>
+    <button class="btn" id="palette-open" type="button" aria-keyshortcuts="Control+K Meta+K">Commands <kbd>Ctrl K</kbd></button>
+    <button class="btn" id="theme" type="button" aria-label="Switch between light and dark theme">Theme</button>
+  </div>
+</header>
+
+<main id="main" tabindex="-1">
+  <div class="wrap">
+    <section id="view-home" aria-labelledby="home-title">
+      <div class="eyebrow" id="home-orch"></div>
+      <h1 id="home-title">What do you want to do?</h1>
+      <p class="lede" id="home-writes"></p>
+      <ul class="intents" id="intents" aria-label="Tasks"></ul>
+
+      <div class="split">
+        <section class="panel" aria-labelledby="fleet-title">
+          <div class="panel-head">
+            <h2 id="fleet-title">Orchestrators</h2>
+            <button class="btn" id="fleet-refresh" type="button">Check again</button>
+          </div>
+          <ul class="fleet" id="fleet" aria-live="polite" aria-busy="true"><li class="muted">Checking every Orchestrator…</li></ul>
+        </section>
+        <section class="panel" aria-labelledby="tasks-title">
+          <div class="panel-head"><h2 id="tasks-title">Tasks in this session</h2></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th scope="col">Task</th><th scope="col">Orchestrator</th><th scope="col">State</th><th scope="col">Message</th></tr></thead>
+            <tbody id="tasks"><tr><td colspan="4" class="muted">No tasks yet.</td></tr></tbody>
+          </table></div>
+        </section>
+      </div>
+    </section>
+
+    <section id="view-flow" class="view" aria-labelledby="flow-title" hidden>
+      <a class="back" href="#/">← All tasks</a>
+      <div class="eyebrow" id="flow-orch"></div>
+      <h1 id="flow-title"></h1>
+      <ol class="stepper" id="flow-steps" aria-label="Steps"></ol>
+
+      <section class="panel" id="flow-load" aria-labelledby="flow-load-title">
+        <h2 id="flow-load-title"></h2>
+        <p class="muted" id="flow-load-text"></p>
+        <div class="toolbar" id="flow-remove-kind" hidden>
+          <label for="flow-kind">Object type</label>
+          <select id="flow-kind">
+            <option value="firewall">Firewall rules</option>
+            <option value="template-acls">Template ACLs</option>
+            <option value="address-groups">Address groups</option>
+            <option value="service-groups">Service groups</option>
+            <option value="app-groups">Application groups</option>
+            <option value="app-definitions">Applications</option>
+          </select>
+        </div>
+        <div class="toolbar" id="flow-csv"><label class="btn" for="flow-file">Choose CSV…</label><input type="file" id="flow-file" accept=".csv,text/csv" class="sr-only"><span id="flow-file-name" class="muted"></span></div>
+        <form id="flow-names" class="gate" hidden>
+          <label for="flow-zone-names">Zone names, one per line</label>
+          <textarea id="flow-zone-names" rows="5" required spellcheck="false" autocomplete="off"></textarea>
+          <div class="actions"><button class="btn primary" type="submit">Plan these zones</button></div>
+        </form>
+      </section>
+
+      <section class="panel" id="flow-fix" aria-labelledby="flow-fix-title" hidden>
+        <h2 id="flow-fix-title"></h2>
+        <p id="flow-fix-text" class="muted" role="status"></p>
+        <ul class="notes" id="flow-fix-warnings"></ul>
+        <div id="flow-issues"></div>
+        <div class="actions"><button class="btn" type="button" id="flow-reload">Load a corrected CSV</button><button class="btn primary" type="button" id="flow-plan">Plan on this Orchestrator</button></div>
+      </section>
+
+      <section class="panel" id="flow-review" aria-labelledby="flow-review-title" hidden>
+        <h2 id="flow-review-title"></h2>
+        <div class="callout bad" id="flow-deletes" hidden></div>
+        <div id="flow-warnings"></div>
+        <ul class="notes" id="flow-counts"></ul>
+        <div id="flow-changes"></div>
+        <p class="muted" id="flow-writes-off" hidden></p>
+        <div class="callout bad" id="flow-confirm" hidden>
+          <label class="check" for="flow-understood"><input type="checkbox" id="flow-understood"> <span id="flow-understood-text"></span></label>
+          <div class="actions"><button class="btn danger" type="button" id="flow-delete" disabled>Delete…</button></div>
+        </div>
+        <div class="actions"><button class="btn" type="button" id="flow-restart">Start again</button><button class="btn primary" type="button" id="flow-approve">Approve these changes…</button></div>
+      </section>
+
+      <section class="panel" id="flow-progress" aria-labelledby="flow-progress-title" hidden>
+        <h2 id="flow-progress-title"></h2>
+        <p id="flow-progress-text" role="status" aria-live="polite"></p>
+        <div class="actions"><button class="btn" type="button" id="flow-open-approval" hidden>Open the approval</button><button class="btn danger" type="button" id="flow-cancel" hidden>Cancel this write</button></div>
+      </section>
+
+      <section class="panel" id="flow-done" aria-labelledby="flow-done-title" hidden>
+        <h2 id="flow-done-title"></h2>
+        <p id="flow-done-text"></p>
+        <ul class="notes" id="flow-done-counts"></ul>
+        <div id="flow-rows"></div>
+        <div class="actions"><a class="btn" id="flow-run-link" href="#/runs">Open this run</a><button class="btn primary" type="button" id="flow-again">Start again</button></div>
+      </section>
+    </section>
+
+    <section id="view-runs" class="view" aria-labelledby="runs-title" hidden>
+      <a class="back" href="#/">← All tasks</a>
+      <div class="eyebrow">Run log</div>
+      <h1 id="runs-title">What changed</h1>
+      <p class="lede" id="runs-text"></p>
+      <div class="panel" id="runs-table"></div>
+    </section>
+
+    <section id="view-run" class="view" aria-labelledby="run-title" hidden>
+      <a class="back" href="#/runs">← All runs</a>
+      <div class="eyebrow" id="run-id"></div>
+      <h1 id="run-title"></h1>
+      <p class="lede" id="run-next"></p>
+      <div class="split">
+        <section class="panel" aria-labelledby="run-facts-title"><h2 id="run-facts-title">Run</h2><dl class="facts" id="run-facts"></dl></section>
+        <section class="panel" aria-labelledby="run-notes-title"><h2 id="run-notes-title">Summary</h2><div id="run-notes"></div></section>
+      </div>
+      <section class="panel" id="run-revert" aria-labelledby="run-revert-title" hidden>
+        <h2 id="run-revert-title">Undo this upload</h2>
+        <p id="run-revert-text"></p>
+        <button class="btn danger" id="run-revert-start" type="button" hidden>Undo this upload</button>
+      </section>
+      <section class="panel" aria-labelledby="run-rows-title"><h2 id="run-rows-title">Rows</h2><div id="run-rows"></div></section>
+    </section>
+
+    <section id="view-inventory" class="view" aria-labelledby="inventory-title" hidden>
+      <a class="back" href="#/">← All tasks</a>
+      <div class="eyebrow" id="inventory-orch"></div>
+      <h1 id="inventory-title">Inventory</h1>
+      <p class="lede">Segments, zones and groups as this Orchestrator has them now. Reading them changes nothing.</p>
+      <div class="panel-head"><span class="muted" id="inventory-status" role="status"></span><button class="btn primary" id="inventory-load" type="button">Read inventory</button></div>
+      <div class="tabs" role="tablist" aria-label="Inventory tables" id="inventory-tabs"></div>
+      <div class="panel" id="inventory-table" role="tabpanel" hidden></div>
+    </section>
+
+  </div>
+</main>
+
+<dialog id="palette" aria-labelledby="palette-label">
+  <label id="palette-label" for="palette-input" class="sr-only">Type a command</label>
+  <input id="palette-input" type="text" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Type a command or a task…">
+  <ul id="palette-list" role="listbox" aria-label="Commands"></ul>
+  <p class="hint">↑ ↓ to move, Enter to run, Esc to close</p>
+</dialog>
+
+<dialog id="switch-dialog" aria-labelledby="switch-title" aria-describedby="switch-text">
+  <h2 id="switch-title">Switch Orchestrator?</h2>
+  <p id="switch-text"></p>
+  <div class="actions">
+    <button class="btn" id="switch-download" type="button">Download the loaded CSV</button>
+    <button class="btn danger" id="switch-confirm" type="button">Switch and start fresh</button>
+    <button class="btn" id="switch-cancel" type="button" autofocus>Stay here</button>
+  </div>
+</dialog>
+
+<dialog id="approve-dialog" aria-labelledby="approve-title" aria-describedby="approve-text">
+  <div class="orch-band" id="approve-band"></div>
+  <h2 id="approve-title">Approve this write</h2>
+  <p id="approve-text"></p>
+  <form id="approve-form" method="dialog">
+    <div id="approve-gates"></div>
+    <label class="gate" for="approve-orch"><span id="approve-orch-label"></span><input type="text" id="approve-orch" autocomplete="off" spellcheck="false" required></label>
+    <p class="muted" id="approve-clock" aria-live="off"></p>
+    <div class="actions">
+      <button class="btn primary" type="submit" id="approve-submit">Approve and write</button>
+      <button class="btn" type="button" id="approve-later">Not yet</button>
+    </div>
+  </form>
+</dialog>
+
+<footer class="wrap foot">Runs on this computer only. Fonts: IBM Plex and Bricolage Grotesque, <a href="OFL-IBM-Plex.txt">OFL</a> / <a href="OFL-Bricolage-Grotesque.txt">OFL</a>.</footer>
+<script src="app.js"></script>
+</body>
+</html>
