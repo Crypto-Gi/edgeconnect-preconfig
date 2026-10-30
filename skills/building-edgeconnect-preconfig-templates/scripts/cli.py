@@ -19,6 +19,8 @@
   validate   --yaml FILE|DIR ... --orchestrator NICK    check existing preconfig YAML files; never writes
   upload     --yaml FILE|DIR ... --orchestrator NICK    same checks, then upload every file that passes (no --approve)
              [--name NAME] [--serial SERIAL]
+  gui        [--port PORT] [--no-browser]               the same commands in a local web GUI on 127.0.0.1 (a clone of
+                                                       the repository only; not in an installed skill)
 
 FOLDER is what build wrote (or a site-<name> folder inside it). Validation runs on the Orchestrator the appliance was read
 from, unless --validate-on names another; either way it must be listed in EC_VALIDATORS. Every Orchestrator read is a GET.
@@ -979,10 +981,28 @@ def main(argv: Optional[List[str]] = None) -> int:
     if argv[0] in ("-V", "--version", "version"):
         print(toolkit_version())
         return 0
+    if argv[0] == "gui":  # a server, not one run: the GUI logs each command it runs itself
+        return run_gui(argv[1:])
     import runlog
     with runlog.logged(argv) as log:  # one line in reports/preconfig.jsonl per command (cli-requests R4)
         log["code"] = run_verb(argv[0], argv[1:])
     return log["code"]
+
+
+def run_gui(argv: List[str]) -> int:
+    """edgeconnect-preconfig gui: start the local web GUI (toolkit/gui, which a skill copy of the toolkit does not have)."""
+    folder = HERE.parent / "gui"
+    if not (folder / "gui_server.py").is_file():
+        print("error: the GUI is not in this copy of the toolkit (an installed agent skill has none); run it from a clone of edgeconnect-preconfig "
+              "on the gui branch or a release that has it", file=sys.stderr)
+        return 2
+    if str(folder) not in sys.path:
+        sys.path.insert(0, str(folder))
+    import gui_server
+    try:
+        return gui_server.main(argv)
+    except SystemExit as done:  # --help and argparse errors
+        return done.code if isinstance(done.code, int) else (0 if done.code is None else 1)
 
 
 def run_verb(verb: str, rest: List[str]) -> int:

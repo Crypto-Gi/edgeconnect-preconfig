@@ -20,7 +20,7 @@ The same `setup.sh` is in all three repositories. It asks a few questions, then 
 
 Everything lands in the one folder, from `main`: the repositories, for 1 and 2 a Python environment and the `edgeconnect-auto` (1) and `edgeconnect-preconfig` (2) commands in `~/.local/bin`, for a local MCP server its launcher `<folder>/bin/edgeconnect-mcp`, and one shared `.env`. The last screen shows how to fill in `.env` for what you picked: the Orchestrator lines, the API key, a self-signed certificate, `EC_VALIDATORS` for preconfig and MCP writes. It also writes `AGENTS.md` (which tool an agent should use for which task, and what this folder has installed) and a `CLAUDE.md` that points to it, so start your agent there; an `AGENTS.md` that `setup.sh` wrote and you never edited is kept up to date on every run, and one you have edited is never overwritten (the new text goes to `AGENTS.md.new`). Options for answering without prompts: `--repos 1,3` (or `all`), `--mcp stdio|docker|no`, `--agents 1,2,15` (numbers or names such as `claude-code,codex`), `--dir PATH`, `--skills folder|home`, `--yes` (or `-y`); `--help` lists them.
 
-**Run it again to update**, in place. Each picked repository already in the folder is switched to `main` and pulled (fast-forward only); one with uncommitted changes to tracked files is left as it is, with a message. The Python environment is kept and the requirements are installed again. `.env` keeps its contents once it exists; each run sets its permissions to 600 (owner only). The commands it wrote are refreshed; a command of the same name that it did not write is left alone. The skills are installed again for the agents you pick, which also updates them. Because it switches each clone to `main`, a clone you moved to the `gui` branch for the GUI is moved back, unless it has local changes.
+**Run it again to update**, in place. Each picked repository already in the folder is pulled (fast-forward only) on the branch it is on, so a clone you switched to `gui` stays on `gui` and gets its updates. One in detached HEAD, or with uncommitted changes to tracked files, is left as it is, with a message (detached commits are never dropped). A branch that is not on GitHub, or that has diverged, stops the run with `could not update <branch>` and is not switched. The Python environment is kept and the requirements are installed again. `.env` keeps its contents once it exists; each run sets its permissions to 600 (owner only). The commands it wrote are refreshed; a command of the same name that it did not write is left alone. The skills are installed again for the agents you pick, which also updates them.
 
 Picking 3 installs the MCP repository's skills (`setup.sh` installs every skill a picked repository has: `edgeconnect-guide` and, since edgeconnect-mcp v0.3.0, `edgeconnect-report`) and, if you choose local, the stdio MCP server for your agents; a Docker server is installed by hand, as the [edgeconnect-mcp README](https://github.com/Crypto-Gi/edgeconnect-mcp#install) covers.
 
@@ -67,7 +67,14 @@ Every key, its default and the values it accepts: [`.env.example`](../.env.examp
 
 ## The local web GUI
 
-The GUI (1.4.0-rc.1, a pre-release) is on the `gui` branch; `setup.sh` installs `main`, which does not have it yet. Clone that branch and install the same two packages:
+The GUI (1.4.0-rc.1, a pre-release) is on the `gui` branch; `setup.sh` installs `main`, which does not have it yet. Switch the clone `setup.sh` made to `gui` once; later `setup.sh` runs keep it on `gui` and update it, and the `edgeconnect-preconfig` command it installed then has the `gui` command:
+
+```bash
+git -C <install folder>/edgeconnect-preconfig checkout gui
+edgeconnect-preconfig gui            # or: edgeconnect-preconfig gui --port 8765 --no-browser
+```
+
+Without `setup.sh`, clone the branch and install the same two packages:
 
 ```bash
 git clone -b gui https://github.com/Crypto-Gi/edgeconnect-preconfig.git

@@ -2,19 +2,20 @@
 
 Back to the [README](../README.md). The command line it runs: [COMMAND_LINE.md](COMMAND_LINE.md). Install and `.env`: [INSTALL.md](INSTALL.md).
 
-The GUI does what the command line does, in a browser on this computer. Every button builds a normal `edgeconnect-preconfig` command line and runs it through the command line's own code, so the checks, the files written and the run log are the same as in the terminal. The browser only shows what that run decided. It is new in 1.4.0-rc.1, a pre-release from the `gui` branch: `setup.sh` installs `main`, which does not have it yet, so clone the `gui` branch ([INSTALL.md](INSTALL.md#the-local-web-gui)).
+The GUI does what the command line does, in a browser on this computer. Every button builds a normal `edgeconnect-preconfig` command line and runs it through the command line's own code, so the checks, the files written and the run log are the same as in the terminal. The browser only shows what that run decided. It is new in 1.4.0-rc.1, a pre-release from the `gui` branch: `setup.sh` installs `main`, which does not have it yet, so switch your clone to the `gui` branch ([INSTALL.md](INSTALL.md#the-local-web-gui)).
 
 ## Start it
 
-From the repository folder, in its Python environment (the one with `requirements.txt` installed):
+With the `edgeconnect-preconfig` command `setup.sh` installs, from any folder (the clone must be on `gui`):
 
 ```bash
-python3 -m toolkit.gui                          # opens your browser
-python3 -m toolkit.gui --port 8765 --no-browser # a fixed port; only prints the link
-python3 /path/to/edgeconnect-preconfig/toolkit/gui   # the same, from any folder
+edgeconnect-preconfig gui                          # opens your browser
+edgeconnect-preconfig gui --port 8765 --no-browser # a fixed port; only prints the link
 ```
 
-- `--port P` listens on that port (default: any free port); `--no-browser` prints the link without opening a browser. There is no option for the address: it is always 127.0.0.1. `edgeconnect-preconfig` has no `gui` command.
+Without `setup.sh`, in the repository's Python environment (the one with `requirements.txt` installed): `python3 -m toolkit.gui` from the repository folder, or `python3 /path/to/edgeconnect-preconfig/toolkit/gui` from any folder, with the same options. In an installed agent skill (a copy of `toolkit/` without `gui/`), `edgeconnect-preconfig gui` stops with `error: the GUI is not in this copy of the toolkit ...` (exit 2).
+
+- `--port P` listens on that port (default: any free port); `--no-browser` prints the link without opening a browser. There is no option for the address: it is always 127.0.0.1. A GUI session writes no run-log line of its own; each command it runs writes one, as in the terminal.
 - At start it prints the folders it uses, as absolute paths: the `.env`, `preconfig-output/` in the folder you start it from, the work folder (captures) and the run log folder (`off` when `EDGECONNECT_REPORT_DIR` is empty). The `.env` is found as the command line finds it; set `EC_DOTENV=/path/to/.env` to name another. `PRECONFIG_WORK` and `EDGECONNECT_REPORT_DIR` work as for the command line; set them before starting it.
 - Then it prints a sign-in link, `http://127.0.0.1:<port>/?token=...`. It works once: it signs this browser in and then stops working, so another account on the computer cannot reuse it. Do not share it. Opening the GUI in a second browser takes a restart.
 - Press Ctrl+C in the terminal to stop it. An upload that is sending finishes first.

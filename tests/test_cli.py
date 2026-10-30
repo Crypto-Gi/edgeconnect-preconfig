@@ -1016,5 +1016,32 @@ class Build(unittest.TestCase):
         self.assertIn("  example.csv         this appliance's own values, secrets blank - copy it to start your sites.csv", lines)
 
 
+class GuiCommand(unittest.TestCase):
+    """edgeconnect-preconfig gui: the local web GUI from the command setup.sh installs."""
+
+    def run_main(self, argv):
+        with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:
+            code = cli.main(argv)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_gui_passes_its_options_to_the_gui_server(self):
+        server = mock.Mock(main=mock.Mock(return_value=0))
+        with mock.patch.dict(sys.modules, {"gui_server": server}):
+            code, _, _ = self.run_main(["gui", "--port", "8765", "--no-browser"])
+        self.assertEqual(code, 0)
+        server.main.assert_called_once_with(["--port", "8765", "--no-browser"])
+
+    def test_gui_help_names_the_command(self):
+        code, out, _ = self.run_main(["gui", "--help"])
+        self.assertEqual(code, 0)
+        self.assertIn("usage: edgeconnect-preconfig gui", out)
+
+    def test_a_copy_without_the_gui_says_so(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(cli, "HERE", Path(tmp) / "scripts"):
+            code, _, err = self.run_main(["gui"])
+        self.assertEqual(code, 2)
+        self.assertIn("the GUI is not in this copy of the toolkit", err)
+
+
 if __name__ == "__main__":
     unittest.main()

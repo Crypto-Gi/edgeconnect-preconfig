@@ -140,12 +140,14 @@ Every option, the messages a command can stop with and what to do, the stage scr
 
 ## Local web GUI
 
-The same commands in a browser, on this computer only. It is new in 1.4.0-rc.1, a pre-release from the `gui` branch; `setup.sh` installs `main`, which does not have it yet, and `edgeconnect-preconfig` has no `gui` command. From a clone of the `gui` branch, in a Python environment with `requirements.txt` installed:
+The same commands in a browser, on this computer only. It is new in 1.4.0-rc.1, a pre-release from the `gui` branch; `setup.sh` installs `main`, which does not have it yet. Switch the clone `setup.sh` made to `gui` once (`git -C <install folder>/edgeconnect-preconfig checkout gui`); later `setup.sh` runs keep it there and update it. Then:
 
 ```bash
-python3 -m toolkit.gui                          # from the repository folder; opens your browser; Ctrl+C stops it
-python3 -m toolkit.gui --port 8765 --no-browser # a fixed port; prints the sign-in link instead
+edgeconnect-preconfig gui                          # opens your browser; Ctrl+C stops it
+edgeconnect-preconfig gui --port 8765 --no-browser # a fixed port; prints the sign-in link instead
 ```
+
+Without `setup.sh`, from a clone of the `gui` branch with `requirements.txt` installed, `python3 -m toolkit.gui` (same options) starts it from the repository folder. An installed agent skill has no GUI: `edgeconnect-preconfig gui` there says so.
 
 It listens on 127.0.0.1 only, on any free port unless `--port` names one, and prints a sign-in link that works once. It reads the same `.env` as the command line (`EC_DOTENV` names another) and writes to `preconfig-output/` and `reports/` in the current folder (`EDGECONNECT_REPORT_DIR` names another log folder), where everything stays after it stops.
 
