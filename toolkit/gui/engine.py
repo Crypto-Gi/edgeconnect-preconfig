@@ -99,7 +99,7 @@ class _Line(argparse.ArgumentParser):
 def _line(argv: Sequence[str]) -> argparse.Namespace:
     """The options the gates and the secret scrub read, parsed as argparse reads them (abbreviations included, so --appr counts)."""
     parser = _Line(add_help=False)
-    for option in ("--orchestrator", "--csv", "--columns", "--site-dir", "--template"):
+    for option in ("--orchestrator", "--csv", "--columns", "--site-dir", "--template", "--out"):
         parser.add_argument(option)
     parser.add_argument("--approve", action="store_true")
     parser.add_argument("--yaml", nargs="*")
@@ -115,7 +115,7 @@ def _refusal(argv: Sequence[str], approver: Optional[Callable[..., Any]]) -> Opt
         return "the GUI could not read this command line ({})".format(error)
     if line is None or not _built_here(argv, line):  # every other verb or stage reads inputs the secret scrub does not know
         return ("the GUI runs only the command lines it builds (list, build, variables, validate FOLDER --csv, upload FOLDER --csv, "
-                "upload --template --csv, render --template --csv, validate --yaml, upload --yaml); for existing YAML files use "
+                "upload --template --csv, render --template --csv, upload or render --site-dir --csv --out, validate --yaml, upload --yaml); for existing YAML files use "
                 "validate --yaml or upload --yaml, which parse each file first")
     if argv[0] != "upload":
         return None
@@ -134,12 +134,14 @@ def _built_here(argv: Sequence[str], line: argparse.Namespace) -> bool:
     verb, stage = argv[0], len(argv) > 1 and argv[1].startswith("-")  # cli.main: validate/upload with an option first run the stage
     if verb in ("list", "build", "variables"):
         return True
+    # a saved site folder with --out: what it writes goes to the run's own folder, never into the build folder
+    site_out = line.site_dir is not None and line.out is not None
     if verb == "render":
-        return line.template is not None and line.csv is not None
+        return (line.template is not None or site_out) and line.csv is not None
     if verb in ("validate", "upload") and not stage:  # FOLDER --csv
         return line.csv is not None
-    if verb in ("validate", "upload"):  # the stage only with --yaml (validate's own file arguments go out unparsed) or upload --template --csv
-        return line.yaml is not None or (verb == "upload" and line.template is not None and line.csv is not None)
+    if verb in ("validate", "upload"):  # the stage only with --yaml (validate's own file arguments go out unparsed) or upload --template/--site-dir --csv
+        return line.yaml is not None or (verb == "upload" and (line.template is not None or site_out) and line.csv is not None)
     return False
 
 
@@ -157,12 +159,16 @@ def _main(argv: List[str]) -> int:
         return 1
 
 
-def run(argv: Sequence[str], approver: Optional[Callable[[str], Any]] = None, **context: Any) -> Result:
-    """Run one CLI command line in this thread and return its Result. context: RunContext fields (dotenv, env, work_dir, out_dir...)."""
+def run(argv: Sequence[str], approver: Optional[Callable[[str], Any]] = None, on_line: Optional[Callable[[str], None]] = None,
+        **context: Any) -> Result:
+    """Run one CLI command line in this thread and return its Result. context: RunContext fields (dotenv, env, work_dir, out_dir...).
+    on_line gets each printed line as it comes, secret values replaced as in Result.text."""
     argv = [str(a) for a in argv]
     # as automation's _refuse: without a GUI approval run_batch is refused, never left to upload unapproved, even past the gates
     run_context = common.RunContext(recorder=common.Recorder(), approver=approver or _refuse, source="gui", **context)
-    out = io.StringIO()
+    found = _secret_forms(argv)  # read before the run, from the input files the command line names
+    held = on_line is not None and _held(argv, found)
+    out = _Lines(_scrub(found), on_line) if on_line is not None and not held else io.StringIO()
     with common.running(run_context), common.captured_output(out), _no_stdin():
         refusal = _refusal(argv, approver)
         if refusal:
@@ -174,7 +180,12 @@ def run(argv: Sequence[str], approver: Optional[Callable[[str], Any]] = None, **
             withheld = r["detail"].split(":")[0] + ": the parser's message is not shown, as it may quote a secret"
             text, r["detail"] = text.replace(r["detail"], withheld), withheld
     text, outputs = _each(text, _no_snippet), _each(outputs, _no_snippet)
-    scrub = _scrubber(argv)
+    scrub = _scrub(found)
+    if isinstance(out, _Lines):
+        out.end()
+    elif held:
+        for line in scrub(text).splitlines():
+            on_line(line)
     rows = [_row(r) for r in outputs if r["kind"] in ("row", "file")]
     status = "done" if code == 0 else "rejected" if refusal or (code == 2 and any(l.startswith(NOT_APPROVED) for l in text.splitlines())) else "failed"
     return Result(
@@ -213,10 +224,10 @@ def _approval(argv: Sequence[str], outputs: Sequence[Mapping[str, Any]]) -> Opti
 
 # ---------------------------------------------------------------- secrets in text (BUILD_PLAN "Engineering rules")
 
-def _scrubber(argv: Sequence[str]) -> Callable[[Any], Any]:
-    """Replace every literal secret value of the run's inputs, in strings at any depth: a CSV secret column's cells (from
-    columns.json, or secret-like headers without one) by <SECRET:column>, a secret value of a YAML file the argv names by its
-    <SECRET:path>. Each in every form the CLI can print it in, and its start where the CLI cut a message short."""
+def _secret_forms(argv: Sequence[str]) -> Dict[str, str]:
+    """Every literal secret value of the run's inputs, in each form the CLI can print it in, with its placeholder: a CSV secret
+    column's cells (from columns.json, or secret-like headers without one) by <SECRET:column>, a secret value of a YAML file
+    the argv names by its <SECRET:path>."""
     try:
         line = _line(argv) if argv else None
     except _LineError:
@@ -225,6 +236,11 @@ def _scrubber(argv: Sequence[str]) -> Callable[[Any], Any]:
     for value, placeholder in (_csv_secrets(argv, line) + _yaml_secrets(line)) if line else []:
         for form in _forms(value):
             found.setdefault(form, placeholder)
+    return found
+
+
+def _scrub(found: Mapping[str, str]) -> Callable[[Any], Any]:
+    """Replace each secret form in strings at any depth, and its start where the CLI cut a message short."""
     if not found:
         return lambda value: value
     # The CLI cuts messages ([:1000] /validate errors, [:300], [:200]); a cut piece ends a line or a "; " list item (PyYAML's
@@ -339,6 +355,58 @@ def _pairs(value: Any, redacted: Any) -> Iterator[Tuple[str, str]]:
         yield value, redacted
 
 
+# ---------------------------------------------------------------- printed lines as they come (BUILD_PLAN step 5)
+
+def _held(argv: Sequence[str], found: Mapping[str, str]) -> bool:
+    """Lines that can be made safe only once the run has ended are handed over then: a --yaml run (the parser's message for a file
+    that does not parse is withheld by its recorder result, made after its line) and a secret that spans lines."""
+    try:
+        line = _line(argv) if argv else None
+    except _LineError:
+        return True
+    return line is None or line.yaml is not None or any("\n" in form or "\r" in form for form in found)
+
+
+_MARK = re.compile(r'(in "[^"\n]*", line \d+, column \d+):$')
+_CARET = re.compile(r"[ \t]*\^")
+
+
+class _Lines(io.StringIO):
+    """The run's capture, also handing each finished line to on_line: the PyYAML snippet withheld as _no_snippet does, then scrubbed."""
+
+    def __init__(self, scrub: Callable[[str], str], on_line: Callable[[str], None]) -> None:
+        super().__init__()
+        self._scrub, self._on_line, self._open, self._after_mark = scrub, on_line, "", 0
+
+    def write(self, text: str) -> int:
+        written = super().write(text)
+        *lines, self._open = (self._open + text).split("\n")
+        for line in lines:
+            self._line(line)
+        return written
+
+    def end(self) -> None:
+        if self._open:
+            self._line(self._open)
+        self._open = ""
+
+    def _line(self, line: str) -> None:
+        if self._after_mark == 1:  # the source line PyYAML quotes
+            self._after_mark = 2
+            return
+        if self._after_mark == 2:  # and its ^ under it
+            self._after_mark = 0
+            caret = _CARET.match(line)
+            if caret:
+                line = line[caret.end():]
+                if not line:
+                    return
+        mark = _MARK.search(line)
+        if mark:
+            line, self._after_mark = line[:mark.start()] + mark.group(1) + " (the source snippet is withheld: it may hold a secret)", 1
+        self._on_line(self._scrub(line))
+
+
 # ---------------------------------------------------------------- one helper per action; paths are made absolute here
 
 def _abs(path: Any) -> str:
@@ -359,9 +427,11 @@ def build(orchestrator: str, appliance: str, out: Any = None, validate_on: Optio
                + _opt("--target-release", target_release) + _opt("--target-ecos", target_ecos), **context)
 
 
-def variables(folder: Any, pick: str, settings: Sequence[str] = (), name: Optional[str] = None, yes: bool = False, **context: Any) -> Result:
-    """--pick is always given, so no tick list or question is shown (BUILD_PLAN: no hidden prompts)."""
-    return run(["variables", _abs(folder), "--pick", pick] + _opt("--set", ",".join(settings) or None) + _opt("--name", name) + (["--yes"] if yes else []), **context)
+def variables(folder: Any, pick: str, settings: Sequence[str] = (), name: Optional[str] = None, yes: bool = False,
+              fixed: Sequence[str] = (), dry_run: bool = False, **context: Any) -> Result:
+    """--pick is always given, so no tick list or question is shown (BUILD_PLAN: no hidden prompts); dry_run is the preview."""
+    return run(["variables", _abs(folder), "--pick", pick] + _opt("--set", ",".join(settings) or None) + _opt("--fix", ",".join(fixed) or None)
+               + _opt("--name", name) + (["--yes"] if yes else []) + (["--dry-run"] if dry_run else []), **context)
 
 
 def validate(folder: Any, csv_path: Any, orchestrator: Optional[str] = None, **context: Any) -> Result:
@@ -369,9 +439,13 @@ def validate(folder: Any, csv_path: Any, orchestrator: Optional[str] = None, **c
 
 
 def upload(csv_path: Any, orchestrator: str, folder: Any = None, template: Any = None, out: Any = None,
-           approver: Optional[Callable[[str], Any]] = None, **context: Any) -> Result:
-    """A CSV upload: a check without an approver (its Result.approval is what approving takes), uploaded with one from approve()."""
-    source = [_abs(folder)] if folder is not None else ["--template", _abs(template)] + _opt("--out", out and _abs(out))
+           approver: Optional[Callable[[str], Any]] = None, site_dir: Any = None, **context: Any) -> Result:
+    """A CSV upload: a check without an approver (its Result.approval is what approving takes), uploaded with one from approve().
+    folder: `upload FOLDER`, which writes into it; site_dir: the stage `upload --site-dir S --out OUT`, which writes into out."""
+    if site_dir is not None:
+        source = ["--site-dir", _abs(site_dir), "--out", _abs(out)]
+    else:
+        source = [_abs(folder)] if folder is not None else ["--template", _abs(template)] + _opt("--out", out and _abs(out))
     return run(["upload"] + source + ["--csv", _abs(csv_path), "--orchestrator", orchestrator] + (["--approve"] if approver else []), approver, **context)
 
 
@@ -387,6 +461,12 @@ def upload_yaml(paths: Sequence[Any], orchestrator: str, name: Optional[str] = N
 def render(template: Any, csv_path: Any, out: Any, validate_on: Optional[str] = None, substitute: bool = False, **context: Any) -> Result:
     """The render stage: one YAML per row into out; with validate_on each row through /validate there (a validator only)."""
     return run(["render", "--template", _abs(template), "--csv", _abs(csv_path), "--out", _abs(out)] + _opt("--validate", validate_on)
+               + (["--substitute"] if substitute else []), **context)
+
+
+def render_site(site_dir: Any, csv_path: Any, out: Any, validate_on: Optional[str] = None, substitute: bool = False, **context: Any) -> Result:
+    """`validate SITE --csv` (render --site-dir --validate, as cli.validate_rows runs it) with the rows written into out instead of SITE/rendered."""
+    return run(["render", "--site-dir", _abs(site_dir), "--csv", _abs(csv_path), "--out", _abs(out)] + _opt("--validate", validate_on)
                + (["--substitute"] if substitute else []), **context)
 
 
