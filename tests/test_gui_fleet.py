@@ -211,10 +211,17 @@ class FleetTests(unittest.TestCase):
         self.assertNotIn(KEY, shown)
         self.assertNotIn("pa55word", shown)
 
-    def test_the_key_is_masked_in_free_text_only_never_in_a_fixed_field(self):
+    def test_the_key_is_masked_in_free_text_and_what_the_server_sent_never_in_the_status_word(self):
         result = self.check(dotenv("lab").replace("lab_api_key={}".format(KEY), "lab_api_key=green") + "spare_base_url=https://spare.invalid\n",
                             {"lab": {"/gmsserver/info": {"serialNumber": "green"}}})
-        self.assertEqual((result["lab"].status, result["lab"].id, result["lab"].reason), ("green", "green", "connected (release 9.5.1)"))
+        self.assertEqual((result["lab"].status, result["lab"].id, result["lab"].reason), ("green", "<API_KEY>", "connected (release 9.5.1)"))
+
+    def test_release_and_id_from_the_server_are_masked_and_at_most_100_characters(self):
+        long = "x" * 300
+        result = self.check(dotenv("lab"), {"lab": {"/gms/versions": {"current": KEY + long}, "/gmsserver/info": {"serialNumber": KEY + long}}})
+        self.assertEqual((result["lab"].release, result["lab"].id), (("<API_KEY>" + long)[:100], ("<API_KEY>" + long)[:100]))
+        self.assertNotIn(KEY, json.dumps(dataclasses.asdict(self.fleet)))
+        self.assertEqual(len(result["lab"].reason), len("connected (release )") + 100)
 
     def test_a_profile_without_an_orch_line_is_not_listed_and_the_result_says_so(self):
         result = self.check(dotenv("lab") + "spare_base_url=https://spare.invalid\nspare_api_key={}\n".format(KEY))
@@ -245,6 +252,10 @@ class FleetTests(unittest.TestCase):
         self.check(dotenv("lab") + "lab_gui_label=\"'Lab\"\nlab_note='\"'\n")
         self.assertEqual(self.fleet.warnings, [])
 
+    def test_an_unclosed_quote_on_an_earlier_copy_of_a_key_is_named(self):
+        self.check(dotenv("lab") + "lab_note=\"half\nlab_note=whole\n")
+        self.assertEqual(self.fleet.warnings, ["lab_note: the automation tools (edgeconnect-auto) stop at this key: its quote is not closed"])
+
     def test_orch_keys_in_the_process_environment_are_checked_as_automation_reads_them(self):
         with mock.patch.dict(os.environ, {"ORCH_VALIDATORS": "lab", "ORCH_9": "Edge-B", "ORCH_7": "lab"}):
             self.check(dotenv("lab"))
@@ -262,8 +273,9 @@ class FleetTests(unittest.TestCase):
         self.assertEqual(self.fleet.note, "ec, orchestrator: single-Orchestrator settings in .env or the environment, not listed, and their "
                                           "names are reserved; copy them to a nickname of your own, for example orch_<N>=main with main_base_url "
                                           "and main_api_key")
-        with mock.patch.dict(os.environ, {"SPARE_BASE_URL": "https://spare.invalid"}):
+        with mock.patch.dict(os.environ, {"SPARE_BASE_URL": "https://spare.invalid", "SPARE_API_KEY": KEY, "OTHER_TOOL_BASE_URL": "https://x.invalid"}):
             self.check(dotenv("lab"))
+        self.assertEqual(self.fleet.not_listed, ["spare"])  # a *_BASE_URL of another program, without a key, is not named
         self.assertEqual(self.fleet.note, "spare has settings in .env or the environment but no orch_N line, so it is not listed; add an "
                                           "orch_<N>=<nickname> line to list one")
 

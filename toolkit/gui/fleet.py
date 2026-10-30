@@ -15,7 +15,7 @@ import socket
 import ssl
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Dict, List, Mapping, Optional, Set
+from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
 from urllib.parse import urlsplit
 
 import common
@@ -25,6 +25,7 @@ from upload import orchestrator_identity
 GREEN, AMBER, RED = "green", "amber", "red"
 CHECK_SECONDS = 5.0
 SLOW_SECONDS = 2.0
+SERVER_TEXT = 100
 _SLOT = re.compile(r"^orch_(\d+)$")
 _COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 _ON, _OFF = {"on", "true", "yes", "1"}, {"off", "false", "no", "0", ""}  # as the automation GUI reads <nickname>_gui_writes
@@ -75,8 +76,11 @@ def check_all(
     names = profiles(env)
     path = dotenv_path or common.run_dotenv() or common._find_dotenv()  # no public way to name the .env the CLI would find
     raw = _raw_dotenv(path)
-    unlisted = sorted({key[:-len("_base_url")] for key in env if key.endswith("_base_url")} - set(names))
-    note = _not_listed_note(unlisted, {key.lower().replace("-", "_") for key in raw})
+    file_keys = {key.lower().replace("-", "_") for key, _ in raw}
+    # A *_BASE_URL only in the environment may be another program's: it is named only with its _api_key beside it.
+    unlisted = sorted({key[:-len("_base_url")] for key in env if key.endswith("_base_url") and (key in file_keys or key[:-len("base_url")] + "api_key" in env)}
+                      - set(names))
+    note = _not_listed_note(unlisted, file_keys)
 
     def check(name: str) -> Status:
         try:
@@ -93,6 +97,11 @@ def check_all(
         return Fleet([], unlisted, note, warnings)
     with ThreadPoolExecutor(max_workers=len(names)) as pool:
         return Fleet(list(pool.map(check, names)), unlisted, note, warnings)
+
+
+def _server_text(text: Any, env: Mapping[str, str], name: str) -> str:
+    """Text the Orchestrator sent, as shown: the key masked and at most SERVER_TEXT characters, whatever a server sends."""
+    return _mask(str(text), [env.get("{}_api_key".format(name), "")])[:SERVER_TEXT]
 
 
 def _mask(text: str, keys: List[str]) -> str:
@@ -117,9 +126,10 @@ def _not_listed_note(unlisted: List[str], file_keys: Set[str]) -> str:
     return ". ".join(notes)
 
 
-def _raw_dotenv(path: str) -> Dict[str, str]:
-    """Each key of the .env with its value as written, quotes kept, split into lines as both toolkits' parse_dotenv split them."""
-    found: Dict[str, str] = {}
+def _raw_dotenv(path: str) -> List[Tuple[str, str]]:
+    """Every key = value line of the .env in file order, repeats included, the value as written with its quotes, split into lines
+    as both toolkits' parse_dotenv split them."""
+    found: List[Tuple[str, str]] = []
     if not Path(path).is_file():
         return found
     for line in Path(path).read_text(encoding="utf-8").splitlines():
@@ -127,22 +137,22 @@ def _raw_dotenv(path: str) -> Dict[str, str]:
         line = line[7:].lstrip() if line.startswith("export ") else line
         if line and not line.startswith("#") and "=" in line:
             key, value = line.split("=", 1)
-            found[key.strip()] = value.strip()
+            found.append((key.strip(), value.strip()))
     return found
 
 
-def automation_refusals(raw: Mapping[str, str], environ: Mapping[str, str]) -> List[str]:
+def automation_refusals(raw: List[Tuple[str, str]], environ: Mapping[str, str]) -> List[str]:
     """The keys of the .env (_raw_dotenv) and the environment that make every edgeconnect-auto command stop (its config.py), named
     by key, never by value: unnumbered orch_ keys, then unclosed quotes in .env, then in slot order nicknames it refuses or sees twice.
     """
     quoted = {"'", '"'}
-    merged = {key.lower(): (key, value[1:-1] if len(value) >= 2 and value[0] in quoted and value[-1] == value[0] else value) for key, value in raw.items()}
+    merged = {key.lower(): (key, value[1:-1] if len(value) >= 2 and value[0] in quoted and value[-1] == value[0] else value) for key, value in raw}
     merged.update({key.lower(): (key + " (in the environment)", value) for key, value in sorted(environ.items())})  # automation: the environment wins
     found = []
     for lower, (key, _) in merged.items():
         if lower.startswith("orch_") and lower != "orch_default" and not _SLOT.match(lower):
             found.append(key + ": " + _REFUSE + "an orch_ key must be numbered (orch_<N>), or be orch_default")
-    for key, value in raw.items():
+    for key, value in raw:  # every line: automation stops at the first unclosed quote, even on a key repeated later
         if value[:1] in quoted and (len(value) < 2 or value[-1] != value[0]):
             found.append(key + ": " + _REFUSE + "its quote is not closed")
     owners: Dict[str, str] = {}
@@ -178,10 +188,10 @@ def _check(name: str, env: Mapping[str, str], validators: Set[str], timeout: flo
     try:
         try:
             versions = client.get("/gms/versions")
-            release = str((versions.get("current") if isinstance(versions, dict) else None) or "?")
+            release = _server_text((versions.get("current") if isinstance(versions, dict) else None) or "?", env, name)
         except PermissionDeniedError:  # a key without that right still lists appliances (cli.py list)
             release = ""
-        server_id = orchestrator_identity(client)["serial"] or ""
+        server_id = _server_text(orchestrator_identity(client)["serial"] or "", env, name)
     except ServerError as error:
         if error.status == 429:  # preconfig's client reports 429 as a server error
             return Status(name, url, AMBER, "Orchestrator is busy (HTTP 429); check again shortly", **gui)
