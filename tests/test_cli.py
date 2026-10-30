@@ -586,8 +586,9 @@ class ValidateRowsAdvice(unittest.TestCase):
             with self.subTest(code=code), mock.patch.object(cli, "check_validator"), mock.patch.object(render, "main", return_value=code), \
                     contextlib.redirect_stdout(io.StringIO()) as out:
                 self.assertEqual(cli.validate_rows(Path("site"), Path("site/sites.csv"), {"validator": "lab", "orchestrator": "lab"}, None), code)
+            lines = out.getvalue().splitlines()
             for text in ("rows that passed are in", "fix the FAIL rows in"):
-                self.assertEqual(text in out.getvalue(), text == advice, out.getvalue())
+                self.assertEqual(any(line.startswith(text) for line in lines), text == advice, out.getvalue())
 
 
 def renamed(host="br-2", change=None):
