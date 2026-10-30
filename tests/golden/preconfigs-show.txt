@@ -1,0 +1,17 @@
+$ edgeconnect-preconfig preconfigs --orchestrator lab --show br-1
+exit 0
+--- stdout
+# preconfig br-1 (id 7) on lab, secrets redacted as <SECRET:path>
+applianceInfo:
+  hostname: br-1
+  adminPassword: <SECRET:$.applianceInfo.adminPassword>
+banners:
+  loginBanner: 'lab use only; password: <SECRET:text>'
+ikeConfig:
+  presharedKey: <SECRET:$.ikeConfig.presharedKey>
+nac:
+  server:
+  - host: 10.0.0.5
+    key: <SECRET:$.nac.server[0].key>
+--- stderr
+--- files

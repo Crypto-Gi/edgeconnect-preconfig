@@ -1,0 +1,14 @@
+$ edgeconnect-preconfig preconfigs --orchestrator lab
+exit 0
+--- stdout
++------+--------------+------+---------------+----+
+| Name | Serial       | Tag  | Last change   | Id |
++------+--------------+------+---------------+----+
+| br-1 | 001BBC000001 | east | 1761782400000 | 7  |
+| br-2 |              |      | 1761868800000 | 8  |
+| br-3 | 001BBC000003 | west |               | 9  |
+| br-4 |              |      |               | 10 |
++------+--------------+------+---------------+----+
+4 preconfig(s) on lab; print one with: edgeconnect-preconfig preconfigs --orchestrator lab --show NAME|ID
+--- stderr
+--- files

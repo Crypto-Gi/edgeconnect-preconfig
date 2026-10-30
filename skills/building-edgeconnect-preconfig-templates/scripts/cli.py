@@ -2,6 +2,8 @@
 """edgeconnect-preconfig: build preconfig templates from a working appliance, without an AI.
 
   list       --orchestrator NICK [--search TEXT]       test the Orchestrator profile, list its appliances
+  preconfigs --orchestrator NICK [--show NAME|ID]      list the preconfigs on the Orchestrator, or print one as YAML
+                                                       with its secrets redacted
   build      --orchestrator NICK --appliance NAME       read one appliance, write a validated YAML, template and CSV
              [--out DIR] [--validate-on NICK]
   variables  FOLDER [--pick top10|top20] [--set C,..]  choose the per-site settings: Top 10, Top 20 or all, by section
@@ -21,6 +23,8 @@ The pipeline stages still run by name: capture, cache-check, translate, generate
 validate and upload with their own options (edgeconnect-preconfig STAGE --help).
 """
 import argparse
+import base64
+import binascii
 import csv
 import io
 import json
@@ -34,7 +38,7 @@ from typing import Any, Callable, Dict, List, Optional
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT  # noqa: E402
-from common import DEFAULT_TEMPLATES_DIR, EdgeConnectError, PermissionDeniedError, captured_output, client_for, load_yaml, output_root, record, toolkit_version, utc_stamp, validators, work_dir, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
+from common import DEFAULT_TEMPLATES_DIR, EdgeConnectError, PermissionDeniedError, captured_output, client_for, load_yaml, output_root, parse_yaml, record, redact_secrets, toolkit_version, utc_stamp, validators, work_dir, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 
 PROG = "edgeconnect-preconfig"
 STATES = {1: "yes", 2: "NO", 3: "unsupported version", 4: "yes (out of sync)", 5: "yes (syncing)"}  # /appliance `state`
@@ -123,6 +127,54 @@ def cmd_list(argv: List[str]) -> int:
     print("{} appliance(s), {} reachable".format(len(rows), sum(1 for r in rows if r[5].startswith("yes"))))
     if client.write_requests:
         raise Fail("write counter is {}; list is read-only".format(client.write_requests))
+    return 0
+
+
+# ---------------------------------------------------------------- preconfigs
+
+LAST_CHANGE = "modifiedTime"  # shortcut: a field name the repo has never seen in a live list response; confirm it in the step 10 lab check
+
+
+def cmd_preconfigs(argv: List[str]) -> int:
+    p = argparse.ArgumentParser(prog=PROG + " preconfigs", description="List the preconfigs on an Orchestrator, or print one as YAML with its secrets redacted (GET only).")
+    p.add_argument("--orchestrator", required=True, help=".env profile nickname")
+    p.add_argument("--show", metavar="NAME|ID", help="print this preconfig's YAML, secrets as <SECRET:path>")
+    a = p.parse_args(argv)
+    from upload import fetch_existing_preconfigs
+    client = client_for(a.orchestrator)
+    items = fetch_existing_preconfigs(client)  # each item's configData is never printed or recorded as it came
+    if client.write_requests:
+        raise Fail("write counter is {}; preconfigs is read-only".format(client.write_requests))
+    if a.show is None:
+        rows = sorted(({"name": i.get("name"), "serial": i.get("serialNum"), "tag": i.get("tag"), "last_change": i.get(LAST_CHANGE), "id": i.get("id")} for i in items),
+                      key=lambda r: str(r["name"] or "").lower())
+        for r in rows:
+            record("preconfig", **r)
+        print(table(["Name", "Serial", "Tag", "Last change", "Id"], [[cell(v) for v in r.values()] for r in rows]) if rows else "no preconfigs")
+        print("{} preconfig(s) on {}; print one with: {} preconfigs --orchestrator {} --show NAME|ID".format(len(rows), a.orchestrator, PROG, a.orchestrator))
+        return 0
+    hits = [i for i in items if a.show in (str(i.get("id")), i.get("name"))]
+    if len(hits) != 1:
+        raise Fail("preconfig {!r}: {} matches by name or id on {}".format(a.show, len(hits), a.orchestrator))
+    item = hits[0]
+    label = "preconfig {} (id {})".format(item.get("name"), item.get("id"))
+    if not item.get("configData"):
+        raise Fail("{}: the list from GET /gms/appliance/preconfiguration holds no configData for it".format(label))
+    try:
+        text = base64.b64decode("".join(str(item["configData"]).split()), validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        raise Fail("{}: its configData is not base64 of UTF-8 text, so it is not shown".format(label))
+    try:
+        doc = parse_yaml(text)
+    except Exception as error:  # the parser's message quotes the line, which may hold a secret: only where it broke is shown
+        mark = getattr(error, "problem_mark", None)
+        raise Fail("{}: its YAML does not parse{}; its text is not shown, as it may hold a secret".format(label, " (line {}, column {})".format(mark.line + 1, mark.column + 1) if mark else ""))
+    if not isinstance(doc, dict):
+        raise Fail("{}: its YAML is not a mapping of sections, so it is not shown".format(label))
+    import yaml
+    shown = yaml.safe_dump(redact_secrets(doc, numbers=True)[0], sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)
+    record("preconfig-yaml", name=item.get("name"), id=item.get("id"), text=shown)
+    print("# {} on {}, secrets redacted as <SECRET:path>\n{}".format(label, a.orchestrator, shown), end="")
     return 0
 
 
@@ -663,7 +715,7 @@ def cmd_upload(argv: List[str]) -> int:
 
 # ---------------------------------------------------------------- dispatch
 
-VERBS: Dict[str, Callable[[List[str]], int]] = {"list": cmd_list, "build": cmd_build, "variables": cmd_variables,
+VERBS: Dict[str, Callable[[List[str]], int]] = {"list": cmd_list, "preconfigs": cmd_preconfigs, "build": cmd_build, "variables": cmd_variables,
                                                 "compare": cmd_compare, "validate": cmd_validate, "upload": cmd_upload}
 
 

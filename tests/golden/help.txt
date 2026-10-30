@@ -4,6 +4,8 @@ exit 0
 edgeconnect-preconfig: build preconfig templates from a working appliance, without an AI.
 
   list       --orchestrator NICK [--search TEXT]       test the Orchestrator profile, list its appliances
+  preconfigs --orchestrator NICK [--show NAME|ID]      list the preconfigs on the Orchestrator, or print one as YAML
+                                                       with its secrets redacted
   build      --orchestrator NICK --appliance NAME       read one appliance, write a validated YAML, template and CSV
              [--out DIR] [--validate-on NICK]
   variables  FOLDER [--pick top10|top20] [--set C,..]  choose the per-site settings: Top 10, Top 20 or all, by section

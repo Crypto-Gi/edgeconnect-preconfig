@@ -603,8 +603,11 @@ def find_default_template(release: str) -> Tuple[Optional[Path], str]:
     return None, "no default templates in {}".format(DEFAULT_TEMPLATES_DIR)
 
 
-def redact_secrets(value: Any, path: str = "$") -> Tuple[Any, List[str]]:
-    """Return (copy with secrets replaced by <SECRET:path>, list of redacted paths)."""
+def redact_secrets(value: Any, path: str = "$", numbers: bool = False) -> Tuple[Any, List[str]]:
+    """Return (copy with secrets replaced by <SECRET:path>, list of redacted paths).
+
+    numbers: a number under a secret key is a secret too (YAML reads an unquoted `presharedKey: 123456` as one); a capture keeps
+    its numeric fields as they are."""
     found: List[str] = []
 
     def walk(item: Any, where: str, secret_key: bool) -> Any:
@@ -613,6 +616,9 @@ def redact_secrets(value: Any, path: str = "$") -> Tuple[Any, List[str]]:
             return {k: walk(v, "{}.{}".format(where, k), bool(_SECRET_KEY.search(str(k))) or (k == "key" and server)) for k, v in item.items()}
         if isinstance(item, list):
             return [walk(v, "{}[{}]".format(where, i), secret_key) for i, v in enumerate(item)]
+        if numbers and secret_key and isinstance(item, (int, float)) and not isinstance(item, bool):
+            found.append(where)
+            return "<SECRET:{}>".format(where)
         if isinstance(item, str) and item:
             if secret_key:
                 found.append(where)
