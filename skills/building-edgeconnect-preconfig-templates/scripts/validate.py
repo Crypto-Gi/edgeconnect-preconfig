@@ -23,12 +23,13 @@ class Stop(Exception):
 
 
 def validator(nickname: str) -> Any:
+    nickname = nickname.lower()  # VALIDATORS holds lower-case names, as the verbs' check_validator compares
     if nickname not in VALIDATORS:
         raise Stop("{} is not a validator Orchestrator (allowed: {}). To allow it, add it to EC_VALIDATORS in .env "
                    "(comma-separated nicknames).".format(nickname, ", ".join(sorted(VALIDATORS)) or "none"))
     client = client_for(nickname)
     if "read_only" not in inspect.signature(client.request).parameters:
-        raise Stop("edgeconnect_automation ApiClient.request has no read_only flag; use a checkout that includes it (branch fix/safety-sweep)")
+        raise Stop("ApiClient.request has no read_only flag, so /validate cannot be sent as a read; reinstall the toolkit (setup.sh)")
     return client
 
 

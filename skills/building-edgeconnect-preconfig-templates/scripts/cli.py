@@ -25,8 +25,8 @@ import contextlib
 import csv
 import io
 import json
+import importlib
 import re
-import runpy
 import shutil
 import sys
 from pathlib import Path
@@ -660,12 +660,15 @@ def run_stage(name: str, argv: List[str]) -> int:
     if not re.fullmatch(r"[a-z][a-z_-]*", name) or name.replace("-", "_") in NOT_STAGES or not script.is_file():
         print("unknown command {!r}; run: {} --help".format(name, PROG), file=sys.stderr)
         return 2
+    stage = importlib.import_module(name.replace("-", "_"))  # imported, not run as __main__, so its Stop is the class main() catches
+    if not callable(getattr(stage, "main", None)):
+        print("unknown command {!r}; run: {} --help".format(name, PROG), file=sys.stderr)
+        return 2
     sys.argv = ["{} {}".format(PROG, name)] + argv
     try:
-        runpy.run_path(str(script), run_name="__main__")
+        return stage.main(argv)
     except SystemExit as done:
         return done.code if isinstance(done.code, int) else (0 if done.code is None else 1)
-    return 0
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -677,12 +680,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(toolkit_version())
         return 0
     verb, rest = argv[0], argv[1:]
-    if verb in ("validate", "upload") and rest and rest[0].startswith("--") and rest[0] not in ("--help", "-h"):
-        return run_stage(verb, rest)  # the stage form: validate --orchestrator X files..., upload --site-dir ...
-    if verb not in VERBS:
-        return run_stage(verb, rest)
     from validate import Stop as ValidatorStop  # 401/403/network on /validate: every row would fail the same way
     try:
+        if verb in ("validate", "upload") and rest and rest[0].startswith("--") and rest[0] not in ("--help", "-h"):
+            return run_stage(verb, rest)  # the stage form: validate --orchestrator X files..., upload --site-dir ...
+        if verb not in VERBS:
+            return run_stage(verb, rest)
         return VERBS[verb](rest)
     except (Fail, ValidatorStop) as fail:
         print("error: {}".format(fail), file=sys.stderr)

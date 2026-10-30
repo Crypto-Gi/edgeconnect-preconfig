@@ -308,12 +308,12 @@ def _load_env_map(dotenv_path: Optional[str] = None) -> Dict[str, str]:
 
 
 def configured_validators(dotenv_path: Optional[str] = None) -> Set[str]:
-    """Return allowed validator nicknames: exactly those listed in EC_VALIDATORS (or orch_validators) in .env, else none.
+    """Return allowed validator nicknames: exactly those listed in EC_VALIDATORS in .env, else none.
 
     No name pattern allows a profile by itself (docs/decisions/0011).
     """
     env = _load_env_map(dotenv_path)
-    explicit = env.get("ec_validators") or env.get("orch_validators") or ""
+    explicit = env.get("ec_validators") or ""  # no orch_validators alias: the automation CLI refuses unnumbered orch_ keys in a shared .env
     out: Set[str] = set()
     for part in explicit.split(","):
         if part.strip():

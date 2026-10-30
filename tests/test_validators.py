@@ -1,3 +1,4 @@
+import io
 import os
 import sys
 import tempfile
@@ -38,6 +39,45 @@ class ValidatorAllowList(unittest.TestCase):
             with self.assertRaises(cli.Fail) as fail:
                 cli.check_validator("prod_testbed")
         self.assertIn("(now: none)", str(fail.exception))
+
+    def test_the_old_orch_validators_alias_is_not_read(self):
+        # an unnumbered orch_ key breaks the automation CLI when the two tools share one .env
+        self.assertEqual(allowed(PROFILES + "orch_validators=lab\n"), set())
+
+    def test_the_stage_form_matches_the_nickname_in_any_case(self):
+        with mock.patch.object(validate, "VALIDATORS", {"lab"}), mock.patch.object(validate, "client_for", return_value=mock.Mock(request=lambda *a, read_only=False, **k: None)) as client_for:
+            validate.validator("LAB")
+        client_for.assert_called_once_with("lab")
+
+
+class StageErrors(unittest.TestCase):
+    """The stage form (validate --yaml ..., upload --yaml ...) ends in one error line, like the verbs."""
+
+    def run_cli(self, argv):
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(validate, "VALIDATORS", {"lab"}):
+            path = Path(directory) / "t.yml"
+            path.write_text('applianceInfo:\n  hostname: "t"\n', encoding="utf-8")
+            with mock.patch("sys.stderr", new_callable=io.StringIO) as err, mock.patch("sys.stdout", new_callable=io.StringIO):
+                code = cli.main(argv[:1] + ["--yaml", str(path)] + argv[1:])
+        return code, err.getvalue()
+
+    def test_validate_yaml_on_a_non_validator_is_one_line(self):
+        code, err = self.run_cli(["validate", "--orchestrator", "other"])
+        self.assertEqual(code, 2)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(err.count("\n"), 1)
+        self.assertIn("other is not a validator Orchestrator", err)
+
+    def test_upload_yaml_network_error_is_one_line(self):
+        import upload
+        from common import TransportError
+        broken = mock.Mock()
+        broken.get.side_effect = TransportError("transport error on GET /gms/appliance/preconfiguration: refused")
+        with mock.patch.object(upload, "client_for", return_value=broken):
+            code, err = self.run_cli(["upload", "--orchestrator", "lab"])
+        self.assertEqual(code, 2)
+        self.assertNotIn("Traceback", err)
+        self.assertIn("error: transport error", err)
 
 
 if __name__ == "__main__":
