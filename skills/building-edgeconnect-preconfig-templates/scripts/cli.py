@@ -474,7 +474,7 @@ class Picker:
         """Every row as the picker held it, the chosen columns and the folder written, for the run's recorder.
 
         A dry run writes no folder (None) and gives lines: each row then also has the lines of its value in reference.yaml.
-        compare gives sites, (hostname, sheet items) as typed: each row then has site_values, None where a site lacks it (cli-requests R10)."""
+        compare gives sites, (hostname, sheet items) as typed: each row then has site_values, None where a site lacks it, <SECRET:path> on a secret row (cli-requests R10)."""
         rows = []
         for r, sheet_row in zip(self.rows, self.sheet(reference)):
             secret = r["reason"].startswith("secret")
@@ -485,7 +485,7 @@ class Picker:
             if lines is not None:  # every row, ticked or not: the GUI highlights a row's lines on hover
                 rows[-1]["lines"] = lines.get(r["path"])
             if sites is not None:
-                rows[-1]["site_values"] = {n: "<SECRET>" if secret else cell(s[r["path"]]) if r["path"] in s else None for n, s in sites}
+                rows[-1]["site_values"] = {n: None if r["path"] not in s else "<SECRET:{}>".format(r["path"]) if secret else cell(s[r["path"]]) for n, s in sites}
         more = {"sites": [n for n, _ in sites], "no_row": no_row or {}} if sites is not None else {}
         record("picker", rows=rows, columns=self.columns(reference), folder=str(folder) if folder else None, **more)
 

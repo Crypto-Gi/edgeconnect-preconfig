@@ -579,17 +579,18 @@ class CompareForTheGui(unittest.TestCase):
         br2["radius"]["server"][0]["key"] = "real-secret-at-br-2"
         br3 = zoned("LAN", "br-3")
         br3["localRoutes"]["staticRoutes"].append({"routeIpSubnet": "198.51.100.0/25", "nextHop": "192.0.2.253"})  # a route only br-3 has: no row
+        del br3["radius"]["server"][0]["key"]  # a secret br-3 lacks: null, not <SECRET:...>
         for argv in (["--dry-run"], ["--yes", "--name", "br"]):
             with self.subTest(argv=argv):
-                code, out, _, results, _ = self.compare([br2, br3], argv)
+                code, out, _, results, _ = self.compare([br3, br2], argv)
                 self.assertEqual(code, 0, out)
                 picker = self.picked(results)
-                self.assertEqual(picker["sites"], ["br-2", "br-3"])  # as typed
+                self.assertEqual(picker["sites"], ["br-3", "br-2"])  # as typed
                 self.assertEqual(list(picker["no_row"]), ["br-3"])
                 self.assertIn("sites.csv gets no row for br-3", picker["no_row"]["br-3"])
                 rows = by_path(picker["rows"])
-                self.assertEqual(rows["deploymentInfo.deploymentInterfaces[0].zone"]["site_values"], {"br-2": "Guest", "br-3": "LAN"})
-                self.assertEqual(rows["radius.server[0].key"]["site_values"], {"br-2": "<SECRET>", "br-3": "<SECRET>"})  # as value is
+                self.assertEqual(list(rows["deploymentInfo.deploymentInterfaces[0].zone"]["site_values"].items()), [("br-3", "LAN"), ("br-2", "Guest")])
+                self.assertEqual(rows["radius.server[0].key"]["site_values"], {"br-2": "<SECRET:radius.server[0].key>", "br-3": None})
                 self.assertNotIn("real-secret-at-br-2", json.dumps(results))
                 self.assertEqual(rows["localRoutes.staticRoutes[1].nextHop"]["site_values"]["br-3"], "192.0.2.254")
 
