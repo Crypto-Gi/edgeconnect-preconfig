@@ -431,11 +431,13 @@ class Problem(str):
 
 
 def problem_data(row: Optional[int], problem: str, secrets: Any = ()) -> Dict[str, Any]:
-    """A problem as data: row, column and value when the message carries them, and the message; a secret column's value is
-    <SECRET> in both, so the record never holds a secret (the printed text may show fewer problems than are recorded)."""
+    """A problem as data: row, column and value when the message carries them, and the message; for a secret column the value
+    is <SECRET> and a message that could hold the cell is replaced, so the record never holds a secret (the printed text may
+    show fewer problems than are recorded)."""
     column, value, message = getattr(problem, "column", None), getattr(problem, "value", None), str(problem)
     if column in secrets:
-        message = message.replace(str(value), "<SECRET>") if value not in (None, "") else message
+        if value not in (None, "", "<SECRET>"):  # the message may quote the cell escaped or trimmed, so no replace() is safe
+            message = "{}: <SECRET> (a secret column's message is not recorded)".format(column)
         value = "<SECRET>"
     return {"row": row, "column": column, "value": value, "message": message}
 

@@ -203,21 +203,26 @@ class Recorded(Fixture):
         meta = {"columns": {"hostname": {"path": "applianceInfo.hostname", "type": "str", "optional": False, "example": "h1"},
                             "nac_key": {"path": "nac.key", "type": "str", "optional": False, "example": "", "secret": True}}}
         (self.tmp / "columns.json").write_text(json.dumps(meta), encoding="utf-8")
-        sheet = self.tmp / "s.csv"
-        sheet.write_text("hostname,nac_key\nh1,s3cr3t-value\n", encoding="utf-8")
-        code, _ = self.run_cli(["render", "--template", str(template), "--csv", str(sheet), "--columns", str(self.tmp / "columns.json"), "--out", str(self.tmp / "r")])
-        self.assertEqual(code, 1)
-        [row] = self.results("row")
-        self.assertEqual([(p["column"], p["value"]) for p in row["problems"]], [("nac_key", "<SECRET>")], row)
-        self.assertNotIn("s3cr3t-value", json.dumps(row))
-        self.assertIn("<SECRET>", row["problems"][0]["message"])
+        for secret in ("s3cr3t-value", "p\\q", "ab'c\"d", "abc "):  # repr escapes a backslash or both quotes; a trimmed value differs
+            with self.subTest(secret=secret):
+                sheet = self.tmp / "s.csv"
+                with sheet.open("w", newline="", encoding="utf-8") as f:
+                    csv.writer(f).writerows([["hostname", "nac_key"], ["h1", secret]])
+                code, _ = self.run_cli(["render", "--template", str(template), "--csv", str(sheet), "--columns", str(self.tmp / "columns.json"), "--out", str(self.tmp / "r")])
+                self.assertEqual(code, 1)
+                row = self.results("row")[-1]
+                self.assertEqual([(p["column"], p["value"]) for p in row["problems"]], [("nac_key", "<SECRET>")], row)
+                recorded = "\n".join(map(str, [*row.values(), *(v for problem in row["problems"] for v in problem.values())]))
+                for leak in (secret, secret.strip(), repr(secret)[1:-1], json.dumps(secret)[1:-1]):
+                    self.assertNotIn(leak, recorded)
+                self.assertIn("<SECRET>", row["problems"][0]["message"])
 
     def test_problem_data(self):
         problem = common.Problem("secret column k is empty", "k", "<SECRET>")
         self.assertEqual(problem, "secret column k is empty")
-        self.assertEqual(common.problem_data(3, problem), {"row": 3, "column": "k", "value": "<SECRET>", "message": "secret column k is empty"})
+        self.assertEqual(common.problem_data(3, problem, {"k"}), {"row": 3, "column": "k", "value": "<SECRET>", "message": "secret column k is empty"})
         self.assertEqual(common.problem_data(3, "plain"), {"row": 3, "column": None, "value": None, "message": "plain"})
-        self.assertEqual(common.problem_data(3, common.Problem("k: 'x1' bad", "k", "x1"), {"k"})["message"], "k: '<SECRET>' bad")
+        self.assertEqual(common.problem_data(3, common.Problem("k: 'x1' bad", "k", "x1"), {"k"})["message"], "k: <SECRET> (a secret column's message is not recorded)")
 
 
 class RecordedUploads(Fixture):
