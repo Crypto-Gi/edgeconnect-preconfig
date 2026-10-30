@@ -250,6 +250,13 @@ value, message, fix), per-row outcomes, counts, the files written, the command's
 approving it takes. Thin helpers build the argv for each action (list, build, variables, compare, validate, upload, validate
 --yaml, upload --yaml, preconfigs).
 Done when: golden outputs are unchanged and every Result field has a test.
+Built as: `toolkit/gui/engine.py`: `run(argv, approver, **RunContext fields)` returns a `Result` (`exit_code`, `status` done / failed /
+rejected, `issues`, `rows` with the run log's outcome words, `counts`, `files`, `text`, `approval`, `outputs`), and `approve()` returns
+the approver for the upload run. Before the CLI runs, the engine refuses an upload with `--approve` and no approver, and any upload
+whose own `--orchestrator` lacks `<nickname>_gui_preconfig_uploads=on` in the run's .env. Each run reads an empty stdin through a
+per-thread stand-in, and secret values from the CSV, `columns.json` or `--yaml` files are scrubbed from every string. Helpers cover
+list, build, variables, validate, upload, validate / upload --yaml and render; compare and preconfigs wait for R6 and R7.
+Tested in `tests/test_gui_engine.py` through `cli.main` with a fake Orchestrator.
 
 ## Step 4: Orchestrator status and identity (fleet.py)
 `check_all()` as in automation, over preconfig's own `.env` reader (so the GUI sees exactly what the CLI sees): every profile in
