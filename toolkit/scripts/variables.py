@@ -5,7 +5,7 @@ classify() proposes a decision and a reason for every scalar leaf; write_sheet()
 Replaces the per-section modes in decisions.py, which still work with `translate.py --decisions`.
 
 Rules, first match wins: secret, hostname, the site's own interface address, an address equal to or inside the site's own
-interface addresses (linked to that interface); then in applianceInfo and deploymentInfo (the Deployment page and the
+interface addresses (linked to that interface; outside applianceInfo and deploymentInfo, one inside its subnets that is equal at every compared site stays fixed); then in applianceInfo and deploymentInfo (the Deployment page and the
 appliance's initial settings) interface names, labels, types, zones, segments, firewall and deployment mode are fixed and every
 other value is a variable (owner, docs/decisions/0006), except that a label, zone, segment or firewall mode that differs at the
 other sites given is a variable the user may untick (owner, docs/decisions/0018); then, when other sites of the same type are given (`others`), what they
@@ -195,7 +195,9 @@ def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Op
             target = next(columns[v] for v, a in own.values() if str(a.ip) == value)
             row(path, value, "variable", "the host part of this site's interface address", target, target)
         elif addr is not None and str(value).lower() not in ANY and any(addr.ip in n for n in nets if n.version == addr.version):
-            if value in local_cols:
+            if seen_at and section not in ALWAYS_SECTIONS and all(path in o and o[path] == value for o in seen_at):  # compare: same at every site (0006 still wins)
+                row(path, value, "fixed", "same at every site you gave")
+            elif value in local_cols:
                 row(path, value, "variable", "same address as {}".format(local_cols[value]), local_cols[value], local_cols[value])
             else:
                 local_cols[value] = unique(column_name(reference, path))

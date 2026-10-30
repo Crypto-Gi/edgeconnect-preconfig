@@ -482,6 +482,25 @@ class CompareShape(unittest.TestCase):
         self.assertIn("br-2 uses DHCP relay on lan0, br-1 uses server", notes[0])
 
 
+class CompareEqualAddresses(unittest.TestCase):
+    def test_an_in_subnet_address_equal_at_every_site_stays_fixed(self):
+        hop, peer = "localRoutes.staticRoutes[1].nextHop", "bgpSystemConfig.neighbors[0].peerIpAddress"  # both 192.0.2.254, inside lan0's subnet
+        same = by_path(sheet_rows(others=[renamed(), renamed("br-3")]))
+        self.assertEqual([(same[p]["decision"], same[p]["reason"]) for p in (hop, peer)], [("fixed", "same at every site you gave")] * 2)
+        self.assertEqual(same["deploymentInfo.deploymentInterfaces[0].ipAddressMask"]["decision"], "variable")  # its own address stays a column
+
+        def dhcp_start(o):
+            o["deploymentInfo"]["dhcpInfo"][0]["startIpAddress"] = "192.0.2.10"
+        deployment = by_path(sheet_rows(renamed("br-1", dhcp_start), others=[renamed(change=dhcp_start)]))
+        self.assertEqual(deployment["deploymentInfo.dhcpInfo[0].startIpAddress"]["decision"], "variable")  # Deployment page: always per site (0006)
+
+        def moved(o):
+            o["localRoutes"]["staticRoutes"][1]["nextHop"] = "192.0.2.253"
+        differs = by_path(sheet_rows(others=[renamed(), renamed("br-3", moved)]))
+        self.assertEqual(differs[hop]["decision"], "variable")
+        self.assertEqual(by_path(sheet_rows())[hop]["decision"], "variable")  # one site: the address rule as before
+
+
 class ListLogin(unittest.TestCase):
     def client(self, versions_error=None):
         client = mock.Mock(write_requests=0, config=mock.Mock(base_url="https://orch.example.com/gms/rest"))
