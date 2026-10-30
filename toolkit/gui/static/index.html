@@ -1,0 +1,106 @@
+<!doctype html>
+<!-- EdgeConnect Preconfig GUI. Design and shell copied from edgeconnect-orchestrator-automation 7af5e9d (static/index.html). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EdgeConnect Preconfig</title>
+<link rel="preload" href="ibm-plex-sans-latin-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="bar" id="bar">
+  <div class="wrap bar-row">
+    <a class="brand" href="#/">EdgeConnect <b>Preconfig</b></a>
+    <div class="switcher">
+      <label for="orch" class="sr-only">Orchestrator</label>
+      <span class="orch-swatch" id="orch-swatch" aria-hidden="true"></span>
+      <select id="orch"><option>Loading…</option></select>
+      <span class="status-word" id="orch-status" aria-live="polite"></span>
+    </div>
+    <button class="btn" id="palette-open" type="button" aria-keyshortcuts="Control+K Meta+K">Commands <kbd>Ctrl K</kbd></button>
+    <button class="btn" id="theme" type="button" aria-label="Switch between light and dark theme">Theme</button>
+  </div>
+</header>
+
+<main id="main" tabindex="-1">
+  <div class="wrap">
+    <section id="view-home" aria-labelledby="home-title">
+      <div class="eyebrow" id="home-orch"></div>
+      <h1 id="home-title">What do you want to do?</h1>
+      <p class="lede" id="home-writes"></p>
+      <ul class="intents" id="intents" aria-label="Tasks"></ul>
+
+      <div class="split">
+        <section class="panel" aria-labelledby="fleet-title">
+          <div class="panel-head">
+            <h2 id="fleet-title">Orchestrators</h2>
+            <button class="btn" id="fleet-refresh" type="button">Check again</button>
+          </div>
+          <ul class="fleet" id="fleet" aria-live="polite" aria-busy="true"><li class="muted">Checking every Orchestrator…</li></ul>
+          <p class="muted" id="fleet-note" hidden></p>
+          <div class="callout gate" id="fleet-warnings" hidden>
+            <p class="notes-title">The automation tools would refuse these .env keys</p>
+            <ul class="notes" id="fleet-warnings-list"></ul>
+          </div>
+        </section>
+        <section class="panel" aria-labelledby="tasks-title">
+          <div class="panel-head"><h2 id="tasks-title">Tasks in this session</h2></div>
+          <div class="table-wrap"><table>
+            <thead><tr><th scope="col">Task</th><th scope="col">Orchestrator</th><th scope="col">State</th><th scope="col">Message</th></tr></thead>
+            <tbody id="tasks"><tr><td colspan="4" class="muted">No tasks yet.</td></tr></tbody>
+          </table></div>
+        </section>
+      </div>
+
+      <section class="panel" aria-labelledby="builds-title">
+        <div class="panel-head">
+          <h2 id="builds-title">Earlier builds</h2>
+          <button class="btn" id="builds-refresh" type="button">Look again</button>
+        </div>
+        <p class="muted" id="builds-text" role="status"></p>
+        <div class="table-wrap"><table>
+          <caption class="sr-only">Earlier builds and their site types</caption>
+          <thead><tr><th scope="col">Appliance</th><th scope="col">Orchestrator</th><th scope="col">Built</th><th scope="col">Site types</th></tr></thead>
+          <tbody id="builds"><tr><td colspan="4" class="muted">Looking for earlier builds…</td></tr></tbody>
+        </table></div>
+      </section>
+    </section>
+
+    <section id="view-later" class="view" aria-labelledby="later-title" hidden>
+      <a class="back" href="#/">← All tasks</a>
+      <div class="eyebrow" id="later-orch"></div>
+      <h1 id="later-title"></h1>
+      <p class="lede" id="later-text"></p>
+      <section class="panel" aria-labelledby="later-cli-title">
+        <h2 id="later-cli-title">Not yet available here</h2>
+        <p id="later-cli-text"></p>
+        <ul class="notes" id="later-cli"></ul>
+      </section>
+    </section>
+  </div>
+</main>
+
+<dialog id="palette" aria-labelledby="palette-label">
+  <label id="palette-label" for="palette-input" class="sr-only">Type a command</label>
+  <input id="palette-input" type="text" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Type a command or a task…">
+  <ul id="palette-list" role="listbox" aria-label="Commands"></ul>
+  <p class="hint">↑ ↓ to move, Enter to run, Esc to close</p>
+</dialog>
+
+<dialog id="switch-dialog" aria-labelledby="switch-title" aria-describedby="switch-text">
+  <h2 id="switch-title">Switch Orchestrator?</h2>
+  <p id="switch-text"></p>
+  <div class="actions">
+    <button class="btn" id="switch-download" type="button">Download the loaded files</button>
+    <button class="btn danger" id="switch-confirm" type="button">Switch and start fresh</button>
+    <button class="btn" id="switch-cancel" type="button" autofocus>Stay here</button>
+  </div>
+</dialog>
+
+<footer class="wrap foot">Runs on this computer only. Fonts: IBM Plex and Bricolage Grotesque, <a href="OFL-IBM-Plex.txt">OFL</a> / <a href="OFL-Bricolage-Grotesque.txt">OFL</a>.</footer>
+<script src="app.js"></script>
+</body>
+</html>

@@ -298,6 +298,13 @@ in a response, and the page loads on macOS, Linux and WSL.
 The exact copy of the automation `static/` design (fonts, `app.css`, favicon style), the top bar with the Orchestrator switcher,
 colour stripe and label, the fleet panel, the home cards, the earlier-builds list, the command palette and reset on switch.
 Done when: usable with the keyboard only; `tests/test_gui_design.py` (copied) passes WCAG AA for every text pair in both themes.
+Built as: `toolkit/gui/static/`, the automation `static/` of 7af5e9d with fonts, licences, `app.css` and `favicon.svg` unchanged,
+and `index.html` / `app.js` cut to the home page: switcher with the colour stripe and label, fleet panel (`validator`, uploads,
+`note`, `warnings`), the seven cards (each opens a page that says the screen comes later and gives the CLI line), tasks of this
+session, earlier builds, palette, and reset on switch. Nothing is disabled. The script calls `GET /api/orchestrators` (the
+`Fleet` as `dataclasses.asdict`), `GET /api/tasks`, `POST /api/tasks/<id>/cancel` and `GET /api/builds`, which returns
+`{folder, builds: [{appliance, orchestrator, built, site_types: [{name, template_url, csv_url}]}]}`, newest first, the download
+URLs named by the server. `tests/test_gui_shell.py` pins that list and that every element the script uses is on the page.
 
 ## Step 7: Run log and tables
 The CLI writes the run log (format above); `source` is `cli` or `gui`. "See what changed": runs table (time, Orchestrator,
