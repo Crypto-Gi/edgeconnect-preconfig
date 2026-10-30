@@ -45,7 +45,8 @@ class Orchestrator:
         self.config = SimpleNamespace(base_url="https://orch.example.com/gms/rest")
 
     def get(self, path, query=None):
-        answers = {"/gms/versions": {"current": RELEASE}, "/appliance": APPLIANCES, "/gms/appliance/preconfiguration": self.existing}
+        answers = {"/gms/versions": {"current": RELEASE}, "/appliance": APPLIANCES, "/gms/appliance/preconfiguration": self.existing,
+                   "/gmsserver/info": {"serialNumber": "00-00-00-00-00-00"}}
         if path not in answers:
             raise AssertionError("unexpected GET " + path)
         return copy.deepcopy(answers[path])
