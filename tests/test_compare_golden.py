@@ -31,6 +31,7 @@ SCENARIOS = {  # name -> partner captures (typed as their hostnames), and the an
     "layout-differs-fixed": {"partners": ["zone"], "answers": ["edit", "6", "", "y"]},  # 6: deploymentInterfaces[lan0].zone in the tick list
     "partner-only-route": {"partners": ["partner-only"]},
     "base-only-route": {"partners": ["base-only"]},
+    "links-that-break": {"partners": ["links"]},  # gateway and a shared next hop that are linked at the base only
     "dhcp-relay-vs-server": {"partners": ["relay"]},
     "broken-partner": {"partners": ["broken"]},
     "base-as-partner": {"partners": [], "typed": ["branch-a"]},

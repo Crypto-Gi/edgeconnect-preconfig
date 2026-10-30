@@ -2,7 +2,7 @@
  "orchestrator": "example",
  "release": "9.7.1.42046",
  "appliance": {
-  "nePk": "8.NE",
+  "nePk": "9.NE",
   "hostName": "branch-b"
  }
 }

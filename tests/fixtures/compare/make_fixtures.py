@@ -27,7 +27,7 @@ BASE = {
                                  "vrfZonesMap": {"0": {"a": {"id": 0, "name": "Trusted"}, "b": {"id": 1, "name": "Guest"}}},
                                  "roles": [{"id": "0", "name": "default"}]},
                    "modeIfs": [{"ifName": "wan0", "applianceIPs": [WAN]}, {"ifName": "lan0", "applianceIPs": [LAN]}]},
-    "subnets": {"subnets": {"entries": [{"state": ROUTE}]}},
+    "subnets": {"subnets": {"entries": [{"state": ROUTE}, {"state": dict(ROUTE, prefix="192.0.2.192/26")}]}},  # both via 192.0.2.126
 }
 
 
@@ -61,6 +61,12 @@ def no_route(doc):
     doc["subnets"]["subnets"]["entries"] = []
 
 
+def links(doc):
+    lan(doc)["ip"] = "192.0.2.2"  # the DHCP gateway stays 192.0.2.1 (a VRRP-style address)
+    routes = doc["subnets"]["subnets"]["entries"]
+    routes[0]["state"]["nextHop"], routes[1]["state"]["nextHop"] = "192.0.2.124", "192.0.2.125"
+
+
 def relay(doc):
     lan(doc)["dhcpd"] = {"type": "relay", "relay": {"dhcpserver": ["198.51.100.67"], "option82": False, "option82_policy": "append"}}
 
@@ -72,6 +78,7 @@ CAPTURES = {
     "zone": partner("branch-b", "Example-B", "198.51.100.20", zone),
     "partner-only": partner("branch-b", "Example-B", "198.51.100.20", extra_route),
     "base-only": partner("branch-b", "Example-B", "198.51.100.20", no_route),
+    "links": partner("branch-b", "Example-B", "198.51.100.20", links),
     "relay": partner("branch-b", "Example-B", "198.51.100.20", relay),
     "broken": partner("branch-b", "Example-B", "198.51.100.20"),  # its capture-index.json is left out below
 }

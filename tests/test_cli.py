@@ -511,6 +511,28 @@ class CompareEqualAddresses(unittest.TestCase):
         self.assertEqual(by_path(sheet_rows())[hop]["decision"], "variable")  # one site: the address rule as before
 
 
+class CompareLinks(unittest.TestCase):
+    """A row linked to another column at this site follows it only when the link holds at every site given."""
+    def test_a_gateway_that_stays_while_the_interface_moves_gets_its_own_column(self):
+        def vrrp_style(o):
+            o["deploymentInfo"]["deploymentInterfaces"][0]["ipAddressMask"] = "192.0.2.2/24"  # the gateway stays 192.0.2.1
+        gw = by_path(sheet_rows(others=[renamed(change=vrrp_style)]))["deploymentInfo.dhcpInfo[0].gatewayIpAddress"]
+        self.assertEqual((gw["decision"], gw["linked_to"]), ("variable", ""))
+        self.assertNotEqual(gw["column"], "lan0_ip")
+        held = by_path(sheet_rows(others=[renamed()]))["deploymentInfo.dhcpInfo[0].gatewayIpAddress"]
+        self.assertEqual(held["linked_to"], "lan0_ip")  # the link holds at br-2: one column
+
+    def test_two_equal_next_hops_that_differ_at_another_site_are_two_columns(self):
+        def split(o):
+            o["localRoutes"]["staticRoutes"][1]["nextHop"] = "192.0.2.253"
+            o["bgpSystemConfig"]["neighbors"][0]["peerIpAddress"] = "192.0.2.252"
+        rows = by_path(sheet_rows(others=[renamed(change=split)]))
+        hop, peer = rows["localRoutes.staticRoutes[1].nextHop"], rows["bgpSystemConfig.neighbors[0].peerIpAddress"]
+        self.assertEqual((peer["decision"], hop["decision"]), ("variable", "variable"))
+        self.assertNotEqual(peer["column"], hop["column"])
+        self.assertEqual("", hop["linked_to"] + peer["linked_to"])
+
+
 class ListLogin(unittest.TestCase):
     def client(self, versions_error=None):
         client = mock.Mock(write_requests=0, config=mock.Mock(base_url="https://orch.example.com/gms/rest"))
