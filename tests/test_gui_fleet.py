@@ -181,6 +181,14 @@ class FleetTests(unittest.TestCase):
                          [("creds", "https://creds.invalid", "red", "fix the settings: the base URL must not hold a user name or password")])
         self.assertNotIn("pa55word", json.dumps(dataclasses.asdict(result)))
 
+    def test_a_base_url_that_cannot_be_parsed_is_red_and_the_others_are_still_checked(self):
+        result = self.check(dotenv("lab", "v6").replace("https://v6.invalid", "https://[abc"))
+        self.assertEqual([(s.name, s.url, s.status, s.reason) for s in result.values()], [
+            ("lab", "https://lab.invalid", "green", "connected (release 9.5.1)"),
+            ("v6", "", "red", "fix the settings: the base URL cannot be read as a URL"),
+        ])
+        self.assertEqual(fleet._origin("https://[abc"), "")
+
     def test_an_unexpected_error_in_one_check_is_red_for_that_one_only_and_its_text_is_not_shown(self):
         def factory(name):
             if name == "odd":

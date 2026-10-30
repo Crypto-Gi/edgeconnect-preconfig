@@ -161,7 +161,11 @@ def _check(name: str, env: Mapping[str, str], validators: Set[str], timeout: flo
     url = _origin(env.get("{}_base_url".format(name), ""))
     validator = name in validators
     try:
-        if "@" in urlsplit(env.get("{}_base_url".format(name), "").strip()).netloc:  # client_for keeps it, and urllib then fails naming it
+        try:
+            netloc = urlsplit(env.get("{}_base_url".format(name), "").strip()).netloc
+        except ValueError:
+            raise ConfigurationError("the base URL cannot be read as a URL") from None
+        if "@" in netloc:  # client_for keeps it, and urllib then fails naming it
             raise ConfigurationError("the base URL must not hold a user name or password")
         gui = _gui_settings(name, env)
         client = client_factory(name)
@@ -211,7 +215,10 @@ def _gui_settings(name: str, env: Mapping[str, str]) -> Dict[str, Any]:
 
 def _origin(base_url: str) -> str:
     """scheme://host[:port], without any user:password@ part of the URL."""
-    parts = urlsplit(base_url.strip())
+    try:
+        parts = urlsplit(base_url.strip())
+    except ValueError:  # for example an unclosed [ of an IPv6 address; never raises, as the error fallback calls it
+        return ""
     return "{}://{}".format(parts.scheme, parts.netloc.rpartition("@")[2]) if parts.netloc else ""
 
 
