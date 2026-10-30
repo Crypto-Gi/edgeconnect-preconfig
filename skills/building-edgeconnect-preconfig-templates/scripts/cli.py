@@ -17,7 +17,7 @@
 
 FOLDER is what build wrote (or a site-<name> folder inside it). Validation runs on the Orchestrator the appliance was read
 from, unless --validate-on names another; either way it must be listed in EC_VALIDATORS. Every Orchestrator read is a GET.
-The pipeline stages still run by name: capture, cache-check, translate, generate, render, check, cells, synth, options,
+The pipeline stages still run by name: capture, cache-check, translate, generate, render, check, options,
 validate and upload with their own options (edgeconnect-preconfig STAGE --help).
 """
 import argparse
@@ -39,7 +39,7 @@ from common import DEFAULT_TEMPLATES_DIR, VALIDATORS, WORK_DIR, EdgeConnectError
 
 PROG = "edgeconnect-preconfig"
 STATES = {1: "yes", 2: "NO", 3: "unsupported version", 4: "yes (out of sync)", 5: "yes (syncing)"}  # /appliance `state`
-NOT_STAGES = {"cli", "common", "decisions", "mappers", "variables"}  # libraries, not commands
+NOT_STAGES = {"cells", "cli", "common", "decisions", "mappers", "synth", "variables"}  # libraries, not commands
 INTERFACE_NAME_KEYS = ("interfaceName", "dhcpInterfaceName", "raInterfaceName")
 ADDRESS_REASONS = ("this site's own interface address", "inside one of this site's own subnets")
 

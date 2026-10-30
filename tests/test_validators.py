@@ -47,7 +47,7 @@ class ValidatorAllowList(unittest.TestCase):
     def test_the_stage_form_matches_the_nickname_in_any_case(self):
         with mock.patch.object(validate, "VALIDATORS", {"lab"}), mock.patch.object(validate, "client_for", return_value=mock.Mock(request=lambda *a, read_only=False, **k: None)) as client_for:
             validate.validator("LAB")
-        client_for.assert_called_once_with("lab")
+        client_for.assert_called_once_with("LAB")  # client_for normalises the case itself
 
 
 class StageErrors(unittest.TestCase):
@@ -77,6 +77,7 @@ class StageErrors(unittest.TestCase):
             code, err = self.run_cli(["upload", "--orchestrator", "lab"])
         self.assertEqual(code, 2)
         self.assertNotIn("Traceback", err)
+        self.assertEqual(err.count("\n"), 1)
         self.assertIn("error: transport error", err)
 
 

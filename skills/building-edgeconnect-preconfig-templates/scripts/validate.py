@@ -23,8 +23,7 @@ class Stop(Exception):
 
 
 def validator(nickname: str) -> Any:
-    nickname = nickname.lower()  # VALIDATORS holds lower-case names, as the verbs' check_validator compares
-    if nickname not in VALIDATORS:
+    if nickname.lower() not in VALIDATORS:  # VALIDATORS holds lower-case names, as the verbs' check_validator compares
         raise Stop("{} is not a validator Orchestrator (allowed: {}). To allow it, add it to EC_VALIDATORS in .env "
                    "(comma-separated nicknames).".format(nickname, ", ".join(sorted(VALIDATORS)) or "none"))
     client = client_for(nickname)
