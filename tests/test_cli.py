@@ -545,6 +545,12 @@ class CompareShape(unittest.TestCase):
         self.assertEqual(rows, ["br-2"])
         self.assertEqual(notes, ["Note: br-2's comment deploymentInfo.deploymentInterfaces[0].interfaceComment is left out of its row: br-1 has none there."])
 
+        def commented_with_a_route(o):
+            commented(o)
+            o["localRoutes"]["staticRoutes"].append({"routeIpSubnet": "198.51.100.0/25", "nextHop": "192.0.2.253"})
+        rows, notes = self.rows_and_notes(renamed(change=commented_with_a_route))
+        self.assertEqual((rows, len(notes)), ([], 1))  # a site with no row gets the one Note that says why
+
     def test_a_release_default_set_at_only_some_sites_is_a_ticked_column(self):
         ref = copy.deepcopy(REFERENCE)
         ref["idsIpsConfig"] = {"mode": "ids", "profile": "Default"}
