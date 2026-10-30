@@ -314,7 +314,11 @@ def configured_validators(dotenv_path: Optional[str] = None) -> Set[str]:
 
     No name pattern allows a profile by itself (docs/decisions/0011).
     """
-    env = _load_env_map(dotenv_path)
+    return validators_in(_load_env_map(dotenv_path))
+
+
+def validators_in(env: Mapping[str, str]) -> Set[str]:
+    """The EC_VALIDATORS nicknames of a parsed .env map (_load_env_map), lower-cased, with - and _ spellings."""
     explicit = env.get("ec_validators") or ""  # no orch_validators alias: the automation CLI refuses unnumbered orch_ keys in a shared .env
     out: Set[str] = set()
     for part in explicit.split(","):
@@ -336,6 +340,7 @@ class RunContext:
     and preconfig-output in the current folder. The values are read when a command needs them, as without a context.
     """
     dotenv: Optional[str] = None           # .env path
+    env: Optional[Dict[str, str]] = None   # that .env parsed (_load_env_map); None: read from the file when needed, as without a context
     validators: Optional[Set[str]] = None  # lower-case nicknames /validate may run on; None: EC_VALIDATORS of that .env
     work_dir: Optional[Path] = None        # where captures and downloaded default templates are kept
     out_dir: Optional[Path] = None         # the folder whose preconfig-output/ is the default output
@@ -368,12 +373,20 @@ def run_dotenv() -> Optional[str]:
     return context.dotenv if context else None
 
 
+def env_map(dotenv_path: Optional[str] = None) -> Dict[str, str]:
+    """The parsed .env: the one given, else the run's map or file, else the one found as always."""
+    context = _RUN.get()
+    if dotenv_path is None and context and context.env is not None:
+        return context.env
+    return _load_env_map(dotenv_path or run_dotenv())
+
+
 def validators() -> Set[str]:
     context = _RUN.get()
     if context is None:
         return VALIDATORS
     if context.validators is None:
-        context.validators = configured_validators(context.dotenv) if context.dotenv else VALIDATORS
+        context.validators = validators_in(env_map()) if context.dotenv or context.env is not None else VALIDATORS
     return context.validators
 
 
@@ -390,7 +403,7 @@ def output_root() -> Path:
 
 def client_for(nickname: str, dotenv_path: Optional[str] = None) -> ApiClient:
     """Build an ApiClient for a named Orchestrator profile in .env (the run's, unless one is given)."""
-    env = _load_env_map(dotenv_path or run_dotenv())
+    env = env_map(dotenv_path)
     norm = nickname.strip().lower().replace("-", "_")
     base_url = env.get("{}_base_url".format(norm))
     api_key = env.get("{}_api_key".format(norm))

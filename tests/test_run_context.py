@@ -83,6 +83,17 @@ class NoContext(unittest.TestCase):
             self.assertEqual(common.validators(), {"other"})
 
 
+class ParsedEnvMap(unittest.TestCase):
+    def test_a_parsed_map_in_the_context_is_used_without_reading_a_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = common._load_env_map(dotenv(tmp, "lab_c"))
+        with mock.patch.object(common, "_load_env_map", side_effect=AssertionError("the file was read")), running(RunContext(env=env)):
+            self.assertIn("lab_c", common.validators())
+            self.assertTrue(common.client_for("lab_c").config.base_url.startswith("https://lab_c.example.com"))
+            with self.assertRaises(cli.Fail):
+                cli.check_validator("lab")
+
+
 class BuildReadsTheContext(unittest.TestCase):
     def test_build_keeps_the_read_in_the_context_work_folder_and_writes_to_its_out_dir(self):
         with tempfile.TemporaryDirectory() as tmp:

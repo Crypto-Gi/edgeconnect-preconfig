@@ -89,14 +89,14 @@ class Golden(unittest.TestCase):
         cls.cwd = os.getcwd()
         os.chdir(str(cls.tmp))  # stage defaults (./preconfig-output) land in the temp folder
         cls.capture = mock.patch("capture.capture", return_value=cls.cap)
-        cls.patches = [mock.patch("common.VALIDATORS", {"lab"}), mock.patch("common.VALIDATORS", {"lab"}),
+        cls.patches = [mock.patch("common.VALIDATORS", {"lab"}),
                        mock.patch.object(cli, "client_for", return_value=cls.orch), mock.patch.object(validate, "client_for", return_value=cls.orch),
                        mock.patch.object(upload, "client_for", return_value=cls.orch), cls.capture]
         cls.read = [p.start() for p in cls.patches][-1]
 
     @classmethod
     def tearDownClass(cls):
-        for p in cls.patches:
+        for p in reversed(cls.patches):
             p.stop()
         os.chdir(cls.cwd)
         shutil.rmtree(str(cls.tmp), ignore_errors=True)
@@ -298,6 +298,14 @@ class Golden(unittest.TestCase):
 
     def test_unknown_command(self):
         self.check("unknown-command", ["nope"], code=2)
+
+
+class PatchesUndone(unittest.TestCase):
+    def test_the_golden_fixture_leaves_the_validators_as_it_found_them(self):
+        before = common.VALIDATORS
+        Golden.setUpClass()
+        Golden.tearDownClass()
+        self.assertIs(common.VALIDATORS, before)
 
 
 if __name__ == "__main__":
