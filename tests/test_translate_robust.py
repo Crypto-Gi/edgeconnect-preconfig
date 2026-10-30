@@ -580,5 +580,27 @@ class TemplateGroupsAndSummaryLines(unittest.TestCase):
         build(cap, ledger)
         self.assertFalse(any(e["item"] == "system-info" and e["disposition"] == "not-readable" for e in ledger))
 
+class CapturedWhileUnreachable(unittest.TestCase):
+    """A capture taken while the appliance was unreachable, with no Orchestrator cache of its deployment, says so in one line."""
+
+    def test_the_message_names_the_unreachable_capture_and_what_to_do(self):
+        from translate import NothingToConvert
+        cap = FakeCap(DATA, failed=("deployment",))
+        cap.run["reachable"] = False
+        with self.assertRaises(NothingToConvert) as caught:
+            build(cap, [])
+        message = str(caught.exception)
+        self.assertIn("lacks appliance or deployment.sysConfig data", message)
+        self.assertIn("captured while the appliance was unreachable", message)
+        self.assertIn("capture it again while it is reachable", message)
+        self.assertNotIn("may be offline", message)
+
+    def test_a_reachable_capture_keeps_the_old_wording(self):
+        from translate import NothingToConvert
+        with self.assertRaises(NothingToConvert) as caught:
+            build(FakeCap(DATA, failed=("deployment",)), [])
+        self.assertIn("(appliance may be offline with no Orchestrator cache)", str(caught.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
