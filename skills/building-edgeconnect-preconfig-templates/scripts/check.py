@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stage 8 checks for one site type folder (output of translate.py or generate.py), plus optional /validate.
 
-1 headers match   2 renders and parses   4 variables flow through   5 mutation (one column at a time)
+1 headers match   2 renders and parses   4 variables flow through (and multicast on has an RP)   5 mutation (one column at a time)
 8 example row reproduces reference.yaml   10 validation recorded (with --validate)   7 no secrets in the example row
 Reads <site>.jinja2, <site>.csv, example.csv, columns.json, reference.yaml. Writes checks.json and rendered/.
 Extra rows (--rows CSV) are rendered and checked the same way.
@@ -29,6 +29,13 @@ def mutate(value: str, meta: Dict[str, Any]) -> Optional[str]:
         head, _, last = value.rpartition(",")
         return (head + "," if head else "") + last + "-m"
     return value + "-m"
+
+
+def no_rp(doc: Any) -> List[str]:
+    """Orchestrator /validate refuses multicast enable true without rpAddresses; say so offline."""
+    entries = doc.get("multicast") if isinstance(doc, dict) else None
+    return ["multicast[{}] (segment {}): enable true without rpAddresses; Orchestrator /validate rejects it, set the RP".format(i, e.get("segment"))
+            for i, e in enumerate(entries if isinstance(entries, list) else []) if isinstance(e, dict) and str(e.get("enable")).lower() == "true" and e.get("rpAddresses") in (None, "", [])]
 
 
 def run(site_dir: Path, site: str, extra_rows: Optional[Path], validate: Optional[str], substitute: bool = False) -> Dict[str, Any]:
@@ -72,6 +79,7 @@ def run(site_dir: Path, site: str, extra_rows: Optional[Path], validate: Optiona
             text = render_row(template, row)
             doc = parse_yaml(text)
             row_problems.extend(flow_through(doc, columns, row))
+            row_problems.extend(no_rp(doc))
         except Exception as error:
             row_problems.append(str(error)[:150])
             text, doc, norm_serial = "", None, None

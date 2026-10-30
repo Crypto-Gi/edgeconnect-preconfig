@@ -177,6 +177,25 @@ class MutationCheck(unittest.TestCase):
             checks = run(site, "t", None, None)["checks"]
             self.assertTrue(checks["5 mutation: one column changes only its field"]["ok"], checks["5 mutation: one column changes only its field"])
 
+    def test_multicast_on_without_an_rp_fails_offline(self):
+        import json
+        from check import run
+        with tempfile.TemporaryDirectory() as tmp:
+            site = Path(tmp)
+            (site / "t.jinja2").write_text("applianceInfo:\n  hostname: {{ data['hostname'] | tojson }}\nmulticast:\n- segment: Default\n  enable: 'true'\n  rpAddresses: {{ (data['rp'] or none) | tojson }}\n  pim: []\n")
+            col = {"type": "string", "secret": False, "had_value": True}
+            (site / "columns.json").write_text(json.dumps({"site_type": "t", "runner_columns": [], "columns": {
+                "hostname": dict(col, path="applianceInfo.hostname", optional=False), "rp": dict(col, path="multicast[0].rpAddresses", optional=True)}}))
+            (site / "t.csv").write_text("hostname,rp\n")
+            (site / "example.csv").write_text("hostname,rp\nbr-1,192.0.2.9\n")
+            (site / "rows.csv").write_text("hostname,rp\nbr-2,\n")
+            result = run(site, "t", site / "rows.csv", None)
+            problems = result["checks"]["4 variables flow through"]["detail"]
+            self.assertEqual(len(problems), 1, problems)
+            self.assertIn("br-2", problems[0])
+            self.assertIn("multicast[0] (segment Default): enable true without rpAddresses", problems[0])
+            self.assertFalse(result["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()
