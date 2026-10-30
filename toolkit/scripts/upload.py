@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cells import cell_problems, interface_addresses, option_limits, subnet_problems  # noqa: E402
-from common import EdgeConnectError, client_for, normalize_serial, parse_yaml, resolve_output_filename, utc_stamp, write_json  # noqa: E402
+from common import EdgeConnectError, client_for, normalize_serial, output_root, parse_yaml, resolve_output_filename, utc_stamp, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 from render import flow_through, read_rows, render_row  # noqa: E402
 from validate import Stop, validate_text  # noqa: E402
 
@@ -375,7 +375,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         csv_path = args.csv
         meta = json.loads(args.columns.read_text(encoding="utf-8")) if args.columns and args.columns.exists() else {}
         columns, release = meta.get("columns"), meta.get("release")
-        out_dir = args.out or (Path.cwd() / "preconfig-output" / template_path.stem)
+        out_dir = args.out or (output_root() / template_path.stem)
 
     if not csv_path:
         parser.error("--csv is required: the CSV of sites to upload (pass example.csv explicitly only to upload the source appliance's own values)")

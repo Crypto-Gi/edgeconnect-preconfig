@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased (gui branch)
+
+- **Run context** (for the GUI, no change to what the commands print or write): a run now reads its `.env`, its validator list, its work folder and its default output folder (`./preconfig-output`) from a run context (`common.RunContext`, set with `common.running(...)`) instead of values fixed when the scripts are imported, and `translate --ignore-template-ownership` holds for that run only. Without a context every value is what it was. Two runs in one process, each with its own context, no longer see each other's validators or folders.
+- **Golden outputs**: `tests/test_golden.py` pins what each command prints and writes (except `compare`); `EDGECONNECT_UPDATE_GOLDEN=1` regenerates them.
+
 ## 1.3.3 (2026-10-30)
 
 - **The stage form ends in one error line**: `validate --yaml`, `upload --yaml` and the other stage commands (`validate --orchestrator ...`, `render`, `upload --site-dir ...`) now print a refused validator or a network error as one line and exit 2, as the verbs do. A non-validator Orchestrator used to print a Python traceback before the message, because the stage ran as `__main__` and its `Stop` was not the class the caller caught.

@@ -11,6 +11,7 @@ Every section in mappers.MAPPERS is translated; anything else in the capture is 
 Mapping assumptions are labelled `assumption` in the ledger and need the owner's confirmation.
 """
 import argparse
+import dataclasses
 import json
 import re
 import sys
@@ -18,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, WORK_DIR, find_default_template, load_yaml, toolkit_version, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
+from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, RunContext, find_default_template, load_yaml, output_root, run_context, running, toolkit_version, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 from generate import generate  # noqa: E402
 from decisions import list_mode, make_decide, propose  # noqa: E402
 from variables import classify, read_sheet, sheet_items, write_sheet  # noqa: E402
@@ -49,7 +50,6 @@ class Capture:
         return None
 
 
-IGNORE_OWNERSHIP = False  # set by --ignore-template-ownership (mapper testing on appliances whose groups provide the section)
 
 
 TEMPLATE_SECTION = {"peerPriorityList": "peerPriority"}  # template names that differ from the preconfig section they provide
@@ -237,6 +237,8 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
         ledger.append({"item": item, "disposition": disposition, "target": target, "note": why})
 
     di_notes: List[Dict[str, Any]] = []  # deploymentInfo lines written before it is known whether deploymentInfo is written
+    run = run_context()
+    ignore_ownership = bool(run and run.ignore_ownership)  # translate --ignore-template-ownership, for this run
 
     def di_note(*args: str) -> None:
         note(*args)
@@ -675,7 +677,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
         note("deployment.dhcpFailover", "runtime", "deploymentInfo.dhcpInfo[].dhcpHA",
              "{}: failover settings kept by the appliance but no DHCP server there has failover enabled".format(", ".join(sorted(set(failover) - fo_wanted))))
     try:
-        owned_fields = {} if IGNORE_OWNERSHIP else template_fields(cap)
+        owned_fields = {} if ignore_ownership else template_fields(cap)
     except ITEM_ERRORS as err:  # every field template then counts as providing its whole section, which is not written
         item_failed(ctx, "template-groups templates", ", ".join(s for name in sorted(selected_templates(cap) & set(FIELD_TEMPLATES)) for s in FIELD_TEMPLATES[name]["sections"]), err)
         owned_fields = {}
@@ -683,19 +685,19 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
     else:
         template_owned = set()
     try:
-        nac_owned = None if IGNORE_OWNERSHIP else nac_merge_owned(cap)
+        nac_owned = None if ignore_ownership else nac_merge_owned(cap)
     except ITEM_ERRORS as err:
         item_failed(ctx, "template-groups nac", "nac", err)
         nac_owned = None
     template_owned |= selected_templates(cap) - set(owned_fields) - ({"nac"} if nac_owned is not None else set())
     # association unread: a section some template group selects may come from a template, so it is not written from the appliance
-    maybe_owned = set() if isinstance(template_groups, list) or IGNORE_OWNERSHIP else {
+    maybe_owned = set() if isinstance(template_groups, list) or ignore_ownership else {
         TEMPLATE_SECTION.get(t, t) for g in (group_reads if isinstance(group_reads, list) else []) if isinstance(g, dict) for t in selected_names(g)}
     maybe_owned |= {s for name in maybe_owned & set(FIELD_TEMPLATES) for s in FIELD_TEMPLATES[name]["sections"]}
-    if groups_unknown and not IGNORE_OWNERSHIP:  # as with an unread association: any section might come from a template
+    if groups_unknown and not ignore_ownership:  # as with an unread association: any section might come from a template
         maybe_owned |= set(MAPPERS)
     for section, mapper in MAPPERS.items():
-        if section in template_owned and not IGNORE_OWNERSHIP:
+        if section in template_owned and not ignore_ownership:
             note("template " + section, "template-group", section, "template '{}' is selected in an associated template group: the section is not written".format(section))
             continue
         if section in maybe_owned:
@@ -938,7 +940,6 @@ def ecos_arg(value: str) -> str:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    import yaml
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--capture", required=True, type=Path)
     parser.add_argument("--site-type", required=True)
@@ -957,9 +958,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(template_why, file=sys.stderr)
         return 2
     default_doc = load_yaml(template)
-    out = args.out or (Path.cwd() / "preconfig-output" / args.site_type)
-    global IGNORE_OWNERSHIP
-    IGNORE_OWNERSHIP = args.ignore_template_ownership
+    out = args.out or (output_root() / args.site_type)
+    if not args.ignore_template_ownership:
+        return convert(args, template, template_why, default_doc, out)
+    with running(dataclasses.replace(run_context() or RunContext(), ignore_ownership=True)):  # this run only, not the process
+        return convert(args, template, template_why, default_doc, out)
+
+
+def convert(args: argparse.Namespace, template: Path, template_why: str, default_doc: Dict[str, Any], out: Path) -> int:
+    import yaml
     cap = Capture(args.capture)
     ledger: List[Dict[str, Any]] = [{"item": "default template", "disposition": "context", "target": template.name, "note": template_why}]
     try:

@@ -35,7 +35,7 @@ from typing import Any, Callable, Dict, List, Optional
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT  # noqa: E402
-from common import DEFAULT_TEMPLATES_DIR, VALIDATORS, WORK_DIR, EdgeConnectError, PermissionDeniedError, client_for, load_yaml, toolkit_version, utc_stamp, write_json  # noqa: E402
+from common import DEFAULT_TEMPLATES_DIR, EdgeConnectError, PermissionDeniedError, client_for, load_yaml, output_root, toolkit_version, utc_stamp, validators, work_dir, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 
 PROG = "edgeconnect-preconfig"
 STATES = {1: "yes", 2: "NO", 3: "unsupported version", 4: "yes (out of sync)", 5: "yes (syncing)"}  # /appliance `state`
@@ -68,10 +68,10 @@ def safe_name(text: str) -> str:
 
 
 def check_validator(nick: str) -> None:
-    if nick.lower() not in VALIDATORS:
+    if nick.lower() not in validators():
         raise Fail("{} is not a validator Orchestrator: /validate runs only on the ones listed in EC_VALIDATORS in .env "
                    "(now: {}). Add it there (comma-separated nicknames) if /validate may run on it, or pass --validate-on <lab profile>."
-                   .format(nick, ", ".join(sorted(VALIDATORS)) or "none"))
+                   .format(nick, ", ".join(sorted(validators())) or "none"))
 
 
 def load_build(folder: Path) -> Dict[str, Any]:
@@ -111,7 +111,7 @@ def cmd_list(argv: List[str]) -> int:
     except PermissionDeniedError:  # a key without that right still lists appliances
         release = "unknown (GET /gms/versions refused)"
     listing = client.get("/appliance")
-    validates = "yes" if a.orchestrator.lower() in VALIDATORS else "no (not in EC_VALIDATORS)"
+    validates = "yes" if a.orchestrator.lower() in validators() else "no (not in EC_VALIDATORS)"
     print("Orchestrator {}: {} | release {} | login OK | /validate allowed: {}".format(a.orchestrator, client.config.base_url, release, validates))
     rows = []
     for item in listing if isinstance(listing, list) else []:
@@ -157,18 +157,19 @@ def cmd_build(argv: List[str]) -> int:
     p = argparse.ArgumentParser(prog=PROG + " build", description="Read one appliance (GET only), convert it, and keep the result only if Orchestrator /validate accepts it.")
     p.add_argument("--orchestrator", required=True, help=".env profile nickname to read the appliance from")
     p.add_argument("--appliance", required=True, help="hostname or nePk (e.g. 12.NE)")
-    p.add_argument("--out", type=Path, default=Path.cwd() / "preconfig-output", help="parent folder (default ./preconfig-output)")
+    p.add_argument("--out", type=Path, help="parent folder (default ./preconfig-output)")
     p.add_argument("--validate-on", metavar="NICK", help="validate on this Orchestrator instead of the source one")
     p.add_argument("--target-release", help="the validator's Orchestrator release, when its key may not read it")
     from translate import ecos_arg
     p.add_argument("--target-ecos", type=ecos_arg, help="ECOS release of the appliances the preconfig is for, e.g. 9.6.2.1 (unknown by default)")
     a = p.parse_args(argv)
+    a.out = a.out or output_root()
     validator = a.validate_on or a.orchestrator
     check_validator(validator)
     from capture import Stop, capture
     print("reading {} from {} (GET only) ...".format(a.appliance, a.orchestrator), flush=True)
     try:
-        cap = capture(a.orchestrator, a.appliance, "reference", 0.2, WORK_DIR / "reference" / a.orchestrator)
+        cap = capture(a.orchestrator, a.appliance, "reference", 0.2, work_dir() / "reference" / a.orchestrator)
     except Stop as stop:
         raise Fail(str(stop))
     run = json.loads((cap / "run.json").read_text(encoding="utf-8"))
@@ -554,7 +555,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     for site in a.sites:
         print("reading {} from {} (GET only) ...".format(site, info["orchestrator"]), flush=True)
         try:
-            caps.append(capture(info["orchestrator"], site, "sample", 0.2, WORK_DIR / "samples" / info["orchestrator"]))
+            caps.append(capture(info["orchestrator"], site, "sample", 0.2, work_dir() / "samples" / info["orchestrator"]))
         except Stop as stop:
             raise Fail(str(stop))
     allowed = allowed_paths(info["target_release"])

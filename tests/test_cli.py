@@ -305,14 +305,14 @@ class Build(unittest.TestCase):
         return mock.patch("capture.capture", return_value=cap)
 
     def test_refuses_a_non_validator_before_reading_anything(self):
-        with mock.patch.object(cli, "VALIDATORS", {"lab"}), mock.patch("capture.capture") as cap:
+        with mock.patch("common.VALIDATORS", {"lab"}), mock.patch("capture.capture") as cap:
             with self.assertRaises(cli.Fail) as stop:
                 cli.cmd_build(["--orchestrator", "fieldref", "--appliance", "x"])
         self.assertIn("EC_VALIDATORS", str(stop.exception))
         cap.assert_not_called()
 
     def test_nothing_is_kept_when_validation_fails(self):
-        with tempfile.TemporaryDirectory() as tmp, self.fake_capture(tmp), mock.patch.object(cli, "VALIDATORS", {"lab"}), \
+        with tempfile.TemporaryDirectory() as tmp, self.fake_capture(tmp), mock.patch("common.VALIDATORS", {"lab"}), \
                 mock.patch.object(cli, "translate_into", return_value="verdict: Complete for preconfig."), \
                 mock.patch.object(cli, "checked", return_value=["10 validation recorded: rejected"]), contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaises(cli.Fail):
@@ -324,7 +324,7 @@ class Build(unittest.TestCase):
             out.mkdir(parents=True)
             (out / "reference.yaml").write_text("applianceInfo: {}\n")
             return "verdict: Complete for preconfig."
-        with tempfile.TemporaryDirectory() as tmp, self.fake_capture(tmp), mock.patch.object(cli, "VALIDATORS", {"lab"}), \
+        with tempfile.TemporaryDirectory() as tmp, self.fake_capture(tmp), mock.patch("common.VALIDATORS", {"lab"}), \
                 mock.patch.object(cli, "translate_into", side_effect=translate_into), mock.patch.object(cli, "checked", return_value=[]), \
                 contextlib.redirect_stdout(io.StringIO()):
             out = Path(tmp) / "out"
@@ -336,7 +336,7 @@ class Build(unittest.TestCase):
             self.assertEqual(list(out.glob(".building-*")), [])
 
     def test_build_rejects_a_malformed_target_ecos_before_reading(self):
-        with mock.patch.object(cli, "VALIDATORS", {"lab"}), mock.patch("capture.capture", side_effect=SystemExit("read")) as cap, contextlib.redirect_stderr(io.StringIO()) as err:
+        with mock.patch("common.VALIDATORS", {"lab"}), mock.patch("capture.capture", side_effect=SystemExit("read")) as cap, contextlib.redirect_stderr(io.StringIO()) as err:
             for bad in ("abc", "", "latest", "9"):
                 with self.assertRaises(SystemExit, msg=bad):
                     cli.cmd_build(["--orchestrator", "lab", "--appliance", "x", "--target-ecos", bad])
@@ -381,7 +381,7 @@ class Build(unittest.TestCase):
             calls.append(extra)
             out.mkdir(parents=True)
             return "verdict: Complete for preconfig."
-        with tempfile.TemporaryDirectory() as tmp, self.fake_capture(tmp), mock.patch.object(cli, "VALIDATORS", {"lab"}), \
+        with tempfile.TemporaryDirectory() as tmp, self.fake_capture(tmp), mock.patch("common.VALIDATORS", {"lab"}), \
                 mock.patch.object(cli, "translate_into", side_effect=translate_into), mock.patch.object(cli, "checked", return_value=[]), \
                 contextlib.redirect_stdout(io.StringIO()):
             out = Path(tmp) / "out"
@@ -394,7 +394,7 @@ class Build(unittest.TestCase):
         def translate_into(out, capture, site, release, extra):
             out.mkdir(parents=True)
             return "verdict: Complete for preconfig."
-        with tempfile.TemporaryDirectory() as tmp, self.fake_capture(tmp), mock.patch.object(cli, "VALIDATORS", {"lab"}), \
+        with tempfile.TemporaryDirectory() as tmp, self.fake_capture(tmp), mock.patch("common.VALIDATORS", {"lab"}), \
                 mock.patch.object(cli, "translate_into", side_effect=translate_into), mock.patch.object(cli, "checked", return_value=[]), \
                 contextlib.redirect_stdout(io.StringIO()) as printed:
             cli.cmd_build(["--orchestrator", "lab", "--appliance", "Br 1", "--out", str(Path(tmp) / "out")])

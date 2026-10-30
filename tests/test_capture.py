@@ -502,7 +502,7 @@ class DefaultTemplateTest(unittest.TestCase):
         bundled, work = Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())
         capture.client_for = lambda nickname: client
         err = io.StringIO()
-        with mock.patch.object(capture, "DEFAULT_TEMPLATES_DIR", bundled), mock.patch.object(capture, "WORK_DIR", work), contextlib.redirect_stderr(err):
+        with mock.patch.object(capture, "DEFAULT_TEMPLATES_DIR", bundled), mock.patch("common.WORK_DIR", work), contextlib.redirect_stderr(err):
             capture.capture("lab", "lab-a", "reference", 0, Path(tempfile.mkdtemp()))
         self.assertEqual(list(bundled.iterdir()), [])  # the toolkit folder stays clean: a downloaded template goes to the work folder
         return work / "reference" / "default-templates" / "orchestrator-10.0.0.99999.yml", err.getvalue()

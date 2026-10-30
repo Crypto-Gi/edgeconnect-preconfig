@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, WORK_DIR, client_for, load_yaml, parse_yaml, redact_secrets, utc_stamp, write_json  # noqa: E402
+from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, client_for, load_yaml, parse_yaml, redact_secrets, utc_stamp, work_dir, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 
 MUST_READ = {"/subnets": "routes", "/subnets/all": "segment routes"}  # a refused read here would silently drop the site's routes
 STOP_ERRORS = ("AuthenticationError", "TransportError")  # 401, redirect, TLS, network; a 403 is one read the key may not make
@@ -76,7 +76,7 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
 
         versions = reader.get("/gms/versions")  # a 403 comes back as not ok: no release, the rest of the capture goes on
         release = versions["data"].get("current") if versions["ok"] and isinstance(versions["data"], dict) else None
-        cache = WORK_DIR / "reference" / "default-templates"  # downloaded templates live in the work folder; the toolkit keeps only bundled ones
+        cache = work_dir() / "reference" / "default-templates"  # downloaded templates live in the work folder; the toolkit keeps only bundled ones
         name = "orchestrator-{}.yml".format(release)
         if release and not only and not (DEFAULT_TEMPLATES_DIR / name).is_file() and not (cache / name).is_file():
             def_tmpl = reader.get("/gms/appliance/preconfiguration/default")
@@ -196,7 +196,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--reuse-orchestrator-reads", action="store_true",
                         help="sample role: reuse Orchestrator-scope reads from captures of the last hour (bulk corpus runs; never after an apply)")
     args = parser.parse_args(argv)
-    out_root = WORK_DIR / ("reference" if args.role == "reference" else "samples") / args.orchestrator
+    out_root = work_dir() / ("reference" if args.role == "reference" else "samples") / args.orchestrator
     try:
         final = capture(args.orchestrator, args.appliance, args.role, args.pause, out_root, args.only, args.reuse_orchestrator_reads)
     except Stop as stop:

@@ -1,4 +1,6 @@
 """Self-contained shared helpers: Orchestrator HTTP client, .env profile loader, serial/filename helpers, secret redaction, YAML 1.2 parser."""
+import contextlib
+import contextvars
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
@@ -11,7 +13,7 @@ import re
 import ssl
 import subprocess
 import sys
-from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Set, Tuple
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
@@ -312,7 +314,11 @@ def configured_validators(dotenv_path: Optional[str] = None) -> Set[str]:
 
     No name pattern allows a profile by itself (docs/decisions/0011).
     """
-    env = _load_env_map(dotenv_path)
+    return validators_in(_load_env_map(dotenv_path))
+
+
+def validators_in(env: Mapping[str, str]) -> Set[str]:
+    """The EC_VALIDATORS nicknames of a parsed .env map (_load_env_map), lower-cased, with - and _ spellings."""
     explicit = env.get("ec_validators") or ""  # no orch_validators alias: the automation CLI refuses unnumbered orch_ keys in a shared .env
     out: Set[str] = set()
     for part in explicit.split(","):
@@ -326,9 +332,78 @@ def configured_validators(dotenv_path: Optional[str] = None) -> Set[str]:
 VALIDATORS = configured_validators()
 
 
+@dataclass
+class RunContext:
+    """What one command run reads instead of module values, so runs sharing a process (the GUI) each keep their own.
+
+    A field left None means what a run without a context gets: the .env found as always, EC_VALIDATORS from it, WORK_DIR,
+    and preconfig-output in the current folder. The values are read when a command needs them, as without a context.
+    """
+    dotenv: Optional[str] = None           # .env path
+    env: Optional[Dict[str, str]] = None   # that .env parsed (_load_env_map); None: read from the file when needed, as without a context
+    validators: Optional[Set[str]] = None  # lower-case nicknames /validate may run on; None: EC_VALIDATORS of that .env
+    work_dir: Optional[Path] = None        # where captures and downloaded default templates are kept
+    out_dir: Optional[Path] = None         # the folder whose preconfig-output/ is the default output
+    ignore_ownership: bool = False         # translate --ignore-template-ownership
+    recorder: Any = None                   # structured results of the run (cli-requests R1)
+    approver: Optional[Callable[..., Any]] = None  # upload approval hook (cli-requests R2)
+    source: str = "cli"
+
+
+_RUN: "contextvars.ContextVar[Optional[RunContext]]" = contextvars.ContextVar("edgeconnect_preconfig_run", default=None)
+
+
+@contextlib.contextmanager
+def running(context: RunContext) -> Iterator[RunContext]:
+    """Run the block (and the threads' own code inside it) with this context; a thread starts with none."""
+    token = _RUN.set(context)
+    try:
+        yield context
+    finally:
+        _RUN.reset(token)
+
+
+def run_context() -> Optional[RunContext]:
+    return _RUN.get()
+
+
+def run_dotenv() -> Optional[str]:
+    """The run's .env, or None to find it as always."""
+    context = _RUN.get()
+    return context.dotenv if context else None
+
+
+def env_map(dotenv_path: Optional[str] = None) -> Dict[str, str]:
+    """The parsed .env: the one given, else the run's map or file, else the one found as always."""
+    context = _RUN.get()
+    if dotenv_path is None and context and context.env is not None:
+        return context.env
+    return _load_env_map(dotenv_path or run_dotenv())
+
+
+def validators() -> Set[str]:
+    context = _RUN.get()
+    if context is None:
+        return VALIDATORS
+    if context.validators is None:
+        context.validators = validators_in(env_map()) if context.dotenv or context.env is not None else VALIDATORS
+    return context.validators
+
+
+def work_dir() -> Path:
+    context = _RUN.get()
+    return context.work_dir if context and context.work_dir else WORK_DIR
+
+
+def output_root() -> Path:
+    """The default output parent: preconfig-output/ in the current folder, or in the run's out_dir."""
+    context = _RUN.get()
+    return (context.out_dir if context and context.out_dir else Path.cwd()) / "preconfig-output"
+
+
 def client_for(nickname: str, dotenv_path: Optional[str] = None) -> ApiClient:
-    """Build an ApiClient for a named Orchestrator profile in .env."""
-    env = _load_env_map(dotenv_path)
+    """Build an ApiClient for a named Orchestrator profile in .env (the run's, unless one is given)."""
+    env = env_map(dotenv_path)
     norm = nickname.strip().lower().replace("-", "_")
     base_url = env.get("{}_base_url".format(norm))
     api_key = env.get("{}_api_key".format(norm))
@@ -398,7 +473,7 @@ def find_default_template(release: str) -> Tuple[Optional[Path], str]:
     """(template, why) for an Orchestrator release (docs/decisions/0014): the exact build, else the newest template of the same
     major.minor, else the nearest older release, else the nearest newer; never None only because the exact build is missing."""
     have: Dict[str, Path] = {}
-    for folder in (WORK_DIR / "reference" / "default-templates", DEFAULT_TEMPLATES_DIR):  # bundled wins
+    for folder in (work_dir() / "reference" / "default-templates", DEFAULT_TEMPLATES_DIR):  # bundled wins
         for p in folder.glob("orchestrator-*.yml"):
             have[p.stem[len("orchestrator-"):]] = p
     if release in have:
