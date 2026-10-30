@@ -133,6 +133,9 @@ def sheet_items(reference: Dict[str, Any]) -> List[Tuple[str, Any]]:
     return items
 
 
+RELEASE_DEFAULTS = re.compile(r"(^|\.)redistToSDwanFabricRouteMap$|^idsIpsConfig\.(mode|profile)$")  # owner 2026-10-30: per site, never a reason for no row (docs/decisions/0019)
+
+
 def only_at(mine: Dict[str, Any], theirs: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     """Non-blank sheet paths (sheet_items of each site) only the other site has, and those only this site has."""
     return sorted(p for p in set(theirs) - set(mine) if theirs[p] not in (None, "")), sorted(p for p in set(mine) - set(theirs) if mine[p] not in (None, ""))
@@ -223,6 +226,8 @@ def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Op
             seen = [o[path] for o in seen_at if path in o]
             if any(v != value for v in seen):  # before the check below: a site that has it must get its own value
                 row(path, value, "variable", "differs between the sites you gave", unique(column_name(reference, path)))
+            elif len(seen) < len(seen_at) and RELEASE_DEFAULTS.search(path):  # owner, docs/decisions/0019
+                row(path, value, "variable", "set at only some of the sites you gave: per site, a blank cell where a site has none", unique(column_name(reference, path)))
             elif len(seen) < len(seen_at):
                 row(path, value, "fixed", "only {} of the {} other sites have this field: different site type? (check)".format(len(seen), len(seen_at)), flag=True)
             else:

@@ -37,7 +37,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT, LAYOUT_COMPARED, LAYOUT_DIFFERS, LAYOUT_KEYS  # noqa: E402  guard-ok: imported after the sys.path insert
+from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT, LAYOUT_COMPARED, LAYOUT_DIFFERS, LAYOUT_KEYS, RELEASE_DEFAULTS  # noqa: E402  guard-ok: imported after the sys.path insert
 from common import DEFAULT_TEMPLATES_DIR, EdgeConnectError, PermissionDeniedError, captured_output, client_for, load_yaml, output_root, parse_yaml, record, redact_secrets, toolkit_version, utc_stamp, validators, work_dir, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 
 PROG = "edgeconnect-preconfig"
@@ -584,6 +584,7 @@ def shape_note(mine: Dict[str, Any], theirs: Dict[str, Any], site: str, base: st
     from variables import only_at
     extra, missing = only_at(mine, theirs)
     extra = [p for p in extra if not COMMENT.search(p)]
+    missing = [p for p in missing if not RELEASE_DEFAULTS.search(p)]  # a column with a blank cell for that site (docs/decisions/0019)
     parts = ["{} uses DHCP {} on {}, {} uses {}".format(site, theirs[p], mine.get(p[:-len("dhcpType")] + "dhcpInterfaceName"), base, v)
              for p, v in mine.items() if p.endswith(".dhcpType") and theirs.get(p, v) != v]
     for paths, what in ((extra, "{} has {} setting(s) {} lacks"), (missing, "{} lacks {} setting(s) {} has")):
@@ -779,9 +780,13 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         print("{} settings exist only at some of the sites and are left fixed.".format(only))
     for n, _, s in zip(names, others, seen):
         comments = [p for p in only_at(mine, s)[0] if COMMENT.search(p)]
+        unset = [p for p in only_at(mine, s)[1] if RELEASE_DEFAULTS.search(p)]
         if n in notes:
             print(notes[n])
-        elif comments:
+            continue
+        if unset:
+            print("Note: {} has no {} in its capture: those cells of its row are blank; fill them in (or untick to give it {}'s value).".format(n, ", ".join(unset), base_host))
+        if comments:
             print("Note: {}'s comment{} {} {} left out of its row: {} has none there.".format(
                 n, "s" if len(comments) > 1 else "", ", ".join(comments[:3]) + (" ..." if len(comments) > 3 else ""), "are" if len(comments) > 1 else "is", base_host))
     if not a.yes:

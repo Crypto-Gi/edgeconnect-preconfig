@@ -545,6 +545,24 @@ class CompareShape(unittest.TestCase):
         self.assertEqual(rows, ["br-2"])
         self.assertEqual(notes, ["Note: br-2's comment deploymentInfo.deploymentInterfaces[0].interfaceComment is left out of its row: br-1 has none there."])
 
+    def test_a_release_default_set_at_only_some_sites_is_a_ticked_column(self):
+        ref = copy.deepcopy(REFERENCE)
+        ref["idsIpsConfig"] = {"mode": "ids", "profile": "Default"}
+        ref["segmentLocalRoutes"] = [{"segment": "Default", "redistToSDwanFabricRouteMap": "default_map"}]
+        unset = copy.deepcopy(ref)
+        unset["applianceInfo"]["hostname"] = "br-2"
+        del unset["idsIpsConfig"]
+        del unset["segmentLocalRoutes"][0]["redistToSDwanFabricRouteMap"]  # not in br-2's capture
+        other = copy.deepcopy(ref)
+        other["applianceInfo"]["hostname"] = "br-3"
+        other["idsIpsConfig"]["profile"] = "Strict"
+        code, out, built = run_compare(ref, [unset, other])
+        self.assertEqual([r["hostname"] for r in built["rows_for"]], ["br-2", "br-3"])
+        for path in ("idsIpsConfig.mode", "idsIpsConfig.profile", "segmentLocalRoutes[0].redistToSDwanFabricRouteMap"):
+            self.assertEqual(built["sheet"][path]["decision"], "variable", path)
+        self.assertIn("Note: br-2 has no idsIpsConfig.mode, idsIpsConfig.profile, segmentLocalRoutes[0].redistToSDwanFabricRouteMap in its capture: "
+                      "those cells of its row are blank; fill them in", out)
+
     def test_dhcp_relay_against_server_is_named(self):
         def relay(o):
             o["deploymentInfo"]["dhcpInfo"][0] = {"dhcpInterfaceName": "lan0", "dhcpType": "relay", "dhcpProxyServers": ["192.0.2.50"]}
