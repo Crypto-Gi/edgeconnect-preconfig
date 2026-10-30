@@ -403,6 +403,44 @@ class CompareLayoutChoice(unittest.TestCase):
         self.assertIn("Warning: deploymentInterfaces[lan0].zone stays fixed: br-2 gets br-1's value LAN", out)
 
 
+def renamed(host="br-2", change=None):
+    other = copy.deepcopy(REFERENCE)
+    other["applianceInfo"]["hostname"] = host
+    if change:
+        change(other)
+    return other
+
+
+class CompareShape(unittest.TestCase):
+    """A site with settings the base lacks, or without the base's settings, gets no sites.csv row and a Note naming it."""
+    def rows_and_notes(self, *others):
+        code, out, built = run_compare(REFERENCE, list(others))
+        self.assertEqual(code, 0)
+        return [r["hostname"] for r in built["rows_for"]], [line for line in out.splitlines() if line.startswith("Note:")]
+
+    def test_an_equal_shape_gets_a_row(self):
+        self.assertEqual(self.rows_and_notes(renamed()), (["br-2"], []))
+
+    def test_a_partner_only_route_means_no_row(self):
+        extra = renamed(change=lambda o: o["localRoutes"]["staticRoutes"].append({"routeIpSubnet": "198.51.100.0/25", "nextHop": "192.0.2.253"}))
+        rows, notes = self.rows_and_notes(extra, renamed("br-3"))
+        self.assertEqual(rows, ["br-3"])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("br-2 has 2 setting(s) br-1 lacks: localRoutes.staticRoutes[2].nextHop, localRoutes.staticRoutes[2].routeIpSubnet", notes[0])
+        self.assertIn("sites.csv gets no row for br-2", notes[0])
+
+    def test_a_missing_base_setting_means_no_row_unless_it_is_blank(self):
+        def drop(o):
+            del o["bgpSystemConfig"]["neighbors"]
+        rows, notes = self.rows_and_notes(renamed(change=drop))
+        self.assertEqual(rows, [])
+        self.assertIn("br-2 lacks 1 setting(s) br-1 has: bgpSystemConfig.neighbors[0].peerIpAddress", notes[0])
+
+        def blank_wan(o):
+            del o["deploymentInfo"]["deploymentInterfaces"][2]["ipAddressMask"]  # blank (None) at the base: nothing would be copied
+        self.assertEqual(self.rows_and_notes(renamed(change=blank_wan)), (["br-2"], []))
+
+
 class ListLogin(unittest.TestCase):
     def client(self, versions_error=None):
         client = mock.Mock(write_requests=0, config=mock.Mock(base_url="https://orch.example.com/gms/rest"))

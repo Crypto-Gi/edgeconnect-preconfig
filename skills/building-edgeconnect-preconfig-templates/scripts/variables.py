@@ -133,6 +133,11 @@ def sheet_items(reference: Dict[str, Any]) -> List[Tuple[str, Any]]:
     return items
 
 
+def only_at(mine: Dict[str, Any], theirs: Dict[str, Any]) -> Tuple[List[str], List[str]]:
+    """Sheet paths (sheet_items of each site) only the other site has, and non-blank ones only this site has."""
+    return sorted(set(theirs) - set(mine)), sorted(p for p in set(mine) - set(theirs) if mine[p] not in (None, ""))
+
+
 def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Optional[Set[str]] = None,
              others: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
     """One row per scalar leaf: decision, column, linked_to, value, path, reason (`flag` marks rows needing a human look).

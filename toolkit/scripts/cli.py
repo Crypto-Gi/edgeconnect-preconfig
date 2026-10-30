@@ -568,6 +568,19 @@ def layout_differences(reference: Dict[str, Any], other: Dict[str, Any]) -> List
     return out
 
 
+def shape_note(mine: Dict[str, Any], theirs: Dict[str, Any], site: str, base: str) -> str:
+    """Why `site` cannot be a row of the base's template (sheet items of each), or '' when it fits.
+
+    The template holds the base's settings only: a row would drop the site's own extra settings and give it the base's."""
+    from variables import only_at
+    extra, missing = only_at(mine, theirs)
+    parts = []
+    for paths, what in ((extra, "{} has {} setting(s) {} lacks"), (missing, "{} lacks {} setting(s) {} has")):
+        if paths:
+            parts.append(what.format(site, len(paths), base) + ": " + ", ".join(paths[:3]) + (" ..." if len(paths) > 3 else ""))
+    return "; ".join(parts)
+
+
 def write_rows(site_dir: Path, name: str, others: List[Dict[str, Any]]) -> None:
     """sites.csv: the example row, then one row per compared site with its own values (secrets and serial left blank)."""
     meta = json.loads((site_dir / "columns.json").read_text(encoding="utf-8"))
@@ -705,6 +718,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     probe.find_secrets(reference)
     rows = [{k: cell(v) for k, v in r.items()} for r in classify(reference, probe.secret_paths, None, others)]
     names = [o["applianceInfo"]["hostname"] for o in others]
+    base_host = info["appliance"].get("hostName")
     seen = [dict(sheet_items(o)) for o in others]
     picker = Picker(reference, rows, {}, seen)
     differ = [r for r in picker.free if picker.on[r["path"]]]
@@ -719,10 +733,17 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     if only:
         print("{} settings exist only at some of the sites and are left fixed.".format(only))
     misfits = {n: layout_differences(reference, o) for n, o in zip(names, others)}
-    for n, diffs in misfits.items():
+    mine = dict(sheet_items(reference))
+    for n, s in zip(names, seen):
+        diffs = misfits[n]
+        why = "" if diffs else shape_note(mine, s, n, base_host)
         if diffs:
             print("Note: {} lists its items differently ({}{}). Its values would land on the wrong interfaces, so sites.csv gets no row for it; "
                   "build a separate template for that design.".format(n, ", ".join(diffs[:4]), " ..." if len(diffs) > 4 else ""))
+        elif why:
+            misfits[n] = [why]
+            print("Note: {}. sites.csv gets no row for {}: the template holds {}'s settings only. Run compare with {} as the base "
+                  "(build it first), or build a separate template for that design.".format(misfits[n][0], n, base_host, n))
     if not a.yes:
         answer = read("Build the template with these settings per site? [Y/n/edit] ").strip().lower()
         if answer in ("n", "no"):
@@ -731,13 +752,14 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
         if answer in ("e", "edit") and not interact(picker, "all", read):
             print("nothing written")
             return 1
+    kept = [n for n in names if not misfits[n]]
     for r in picker.free:
-        if r["reason"] == LAYOUT_DIFFERS and not picker.on[r["path"]]:
-            print("Warning: {} stays fixed: {} gets {}'s value {}".format(r["label"], ", ".join(names), info["appliance"].get("hostName"), r["value"] or '""'))
+        if r["reason"] == LAYOUT_DIFFERS and not picker.on[r["path"]] and kept:
+            print("Warning: {} stays fixed: {} gets {}'s value {}".format(r["label"], ", ".join(kept), base_host, r["value"] or '""'))
     name = finish(picker, reference, info["site_type"], a.name, a.yes, read)
     if not name:
         return 1
-    rows_for = [{"hostname": n, "items": s} for n, s in zip(names, seen) if not misfits[n]]
+    rows_for = [{"hostname": n, "items": s} for n, s in zip(names, seen) if n in kept]
     target = build_site(a.folder, info, name, picker.sheet(reference), rows_for)
     ensure_sites_csv(target)  # every other site may have been left out: sites.csv still holds this site's row
     picker.record(reference, target)
