@@ -345,7 +345,11 @@ document.addEventListener("keydown", (event) => {
     openPalette();
   }
 });
-window.addEventListener("hashchange", () => { render(); $("main").focus(); });
+window.addEventListener("hashchange", () => {
+  for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close();  // a dialog belongs to the page it was opened on
+  render();
+  $("main").focus();
+});
 
 document.addEventListener("DOMContentLoaded", render);  // after the screens' own scripts have added themselves to SCREENS
 loadFleet();
