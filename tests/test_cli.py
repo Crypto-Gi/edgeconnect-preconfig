@@ -383,9 +383,10 @@ class CompareLayout(unittest.TestCase):
         self.assertIn("error: BR-2 is given twice", out)
 
     def test_a_toolkit_bug_is_not_reported_as_a_bad_capture(self):
-        with mock.patch("translate.build", side_effect=TypeError("unhashable type: 'list'")):
-            code, err = self.broken(lambda cap: None)
-        self.assertEqual((code, err), (2, "error: br-2: toolkit error TypeError: unhashable type: 'list' (please report it)\n"))
+        for error in (TypeError("unhashable type: 'list'"), ValueError("unhashable type: 'list'")):
+            with mock.patch("translate.build", side_effect=error):
+                code, err = self.broken(lambda cap: None)
+            self.assertEqual((code, err), (2, "error: br-2: toolkit error {}: unhashable type: 'list' (please report it)\n".format(type(error).__name__)))
 
     def test_the_base_appliance_is_refused_as_its_own_partner(self):
         for typed in ("br-1", "BR-1", "1.NE"):
@@ -581,6 +582,26 @@ class CompareLinks(unittest.TestCase):
         self.assertNotEqual(gw["column"], "lan0_ip")
         held = by_path(sheet_rows(others=[renamed()]))["deploymentInfo.dhcpInfo[0].gatewayIpAddress"]
         self.assertEqual(held["linked_to"], "lan0_ip")  # the link holds at br-2: one column
+
+    def test_a_copy_of_an_interface_address_that_differs_at_another_site_gets_its_own_column(self):
+        ref = copy.deepcopy(REFERENCE)
+        ref["sse"] = {"sourceAddress": "198.51.100.1/24"}  # equals lan0.71's address with its mask
+        other = copy.deepcopy(ref)
+        other["deploymentInfo"]["deploymentInterfaces"][1]["ipAddressMask"] = "198.51.100.2/24"
+        row = by_path(sheet_rows(ref, others=[other]))["sse.sourceAddress"]
+        self.assertEqual((row["decision"], row["linked_to"]), ("fixed", ""))  # not linked; the same value at both sites
+        self.assertEqual(by_path(sheet_rows(ref, others=[copy.deepcopy(ref)]))["sse.sourceAddress"]["linked_to"], "lan0_71_ip")
+
+    def test_a_third_equal_address_links_to_the_first_column_it_matches_everywhere(self):
+        ref = copy.deepcopy(REFERENCE)
+        ref["localRoutes"]["staticRoutes"].append({"routeIpSubnet": "203.0.113.128/26", "nextHop": "192.0.2.254"})  # three rows with 192.0.2.254
+        other = copy.deepcopy(ref)
+        other["localRoutes"]["staticRoutes"][1]["nextHop"] = "192.0.2.250"
+        other["localRoutes"]["staticRoutes"][2]["nextHop"] = "192.0.2.249"  # the second breaks away: its own column ...
+        other["bgpSystemConfig"]["neighbors"][0]["peerIpAddress"] = "192.0.2.250"  # ... the third (the BGP peer) still equals the first
+        rows = by_path(sheet_rows(ref, others=[other]))
+        first, second, third = (rows[p] for p in ("localRoutes.staticRoutes[1].nextHop", "localRoutes.staticRoutes[2].nextHop", "bgpSystemConfig.neighbors[0].peerIpAddress"))
+        self.assertEqual((second["linked_to"], third["linked_to"]), ("", first["column"]))
 
     def test_two_equal_next_hops_that_differ_at_another_site_are_two_columns(self):
         def split(o):
