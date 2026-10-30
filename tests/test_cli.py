@@ -511,6 +511,18 @@ class DistinctLabels(unittest.TestCase):
         self.assertEqual(labels, ["localRoutes.routes[lan0 10.1.0.0/16].nextHop", "localRoutes.routes[1].nextHop",
                                   "localRoutes.routes[2].nextHop", "localRoutes.routes[wan0].nextHop"])  # same prefix twice: the position
 
+    def test_a_long_label_keeps_its_field_name_on_the_terminal(self):
+        fields = ("advertise", "advertiseToBgp", "advertiseToOspf")
+        reference = {"localRoutes": {"routes": [{"interfaceName": "lan0", "routeIpSubnet": "198.51.100.128/25", **{f: True for f in fields}},
+                                                {"interfaceName": "lan0", "routeIpSubnet": "192.0.2.192/26", **{f: True for f in fields}}]}}
+        rows = [{"path": "localRoutes.routes[{}].{}".format(n, f), "column": "c{}{}".format(n, f), "decision": "variable", "reason": "", "value": "true"}
+                for n in range(2) for f in fields]
+        picker = cli.Picker(reference, rows, {})
+        shown = [picker.line(r) for r in picker.free]
+        labels = [s[7:59].rstrip() for s in shown]  # the Setting column
+        self.assertEqual(len(set(labels)), len(shown), shown)  # [:52] printed all three as ...].advertise
+        self.assertTrue(all(label.endswith(r["path"].rsplit(".", 1)[1]) for label, r in zip(labels, picker.free)), shown)
+
 
 class CompareForTheGui(unittest.TestCase):
     """compare --dry-run, --set/--fix, --captures and the saved-with-failures outcome (cli-requests R6)."""
@@ -619,7 +631,7 @@ class CompareForTheGui(unittest.TestCase):
         self.assertEqual([r for r in results if r["kind"] == "saved"][0]["validated"], False)
         code, out, _, results, _ = self.compare([zoned("Guest", "br-2")], ["--yes", "--name", "br"], validated=2)  # render STOPPED
         self.assertEqual(code, 2)
-        self.assertIn("site-br is saved, but validation stopped (see STOPPED above): rows validated before it are in", out)
+        self.assertIn("site-br is saved, but validation stopped (see STOPPED above): rows that passed before it are in", out)
         self.assertNotIn("failed validation", out)
         code, out, _, results, _ = self.compare([zoned("Guest", "br-2")], ["--yes", "--name", "br"])
         self.assertEqual(code, 0)

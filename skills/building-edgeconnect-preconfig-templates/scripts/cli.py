@@ -273,6 +273,11 @@ def cmd_build(argv: List[str]) -> int:
 
 # ---------------------------------------------------------------- variables
 
+def fit(label: str, width: int) -> str:
+    """label cut to width from the middle, so the field name at its end still shows (two routes' .advertise and .advertiseToBgp differ)."""
+    return label if len(label) <= width else label[:width - 3 - width // 2] + "..." + label[-(width // 2):]
+
+
 class Picker:
     """The per-site choice for every sheet row of a build, shown as Top N or section by section.
 
@@ -334,14 +339,14 @@ class Picker:
         pick = "VARIABLE" if r["locked"] or self.on.get(r["path"]) else "fixed"
         pct = "{}%".format(r["pct"]) if r.get("pct") is not None else ""
         extra = "  ".join(self.value_at(o, r) for o in self.others)
-        return " {:>4}  {:<52} {:<30} {:>5}  {}{}".format(num, r["label"][:52], self.value(r), pct, pick, ("   " + extra) if extra else "")
+        return " {:>4}  {:<52} {:<30} {:>5}  {}{}".format(num, fit(r["label"], 52), self.value(r), pct, pick, ("   " + extra) if extra else "")
 
     @staticmethod
     def value_at(other: Dict[str, Any], r: Dict[str, str]) -> str:
         return "| " + (cell(other[r["path"]]) if r["path"] in other else "-")[:20]
 
     def follower_lines(self, r: Dict[str, str]) -> List[str]:
-        return ["        {:<52} follows {}".format(f["label"][:52], "#{}".format(r["n"]) if "n" in r else "the line above") for f in self.rows if f["follows"] is r]
+        return ["        {:<52} follows {}".format(fit(f["label"], 52), "#{}".format(r["n"]) if "n" in r else "the line above") for f in self.rows if f["follows"] is r]
 
     def show(self, rows: List[Dict[str, str]], title: str) -> List[str]:
         out = ["  -- {} {}".format(title, "-" * max(0, 60 - len(title)))]
@@ -881,7 +886,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
     if code == 1:
         print("{} is saved: only the rows that failed validation need fixing, in {} (nothing has to be compared again)".format(target, target / "sites.csv"))
     elif code:  # render STOPPED (validator refused, network), maybe after some rows
-        print("{} is saved, but validation stopped (see STOPPED above): rows validated before it are in {}; run validate on it when the validator answers".format(
+        print("{} is saved, but validation stopped (see STOPPED above): rows that passed before it are in {}; run validate on it when the validator answers".format(
             target, target / "rendered"))
     return code
 
@@ -896,7 +901,7 @@ def validate_rows(folder: Path, csv_path: Path, info: Dict[str, Any], orchestrat
     args = ["--site-dir", str(folder), "--csv", str(csv_path), "--validate", nick] + (["--substitute"] if nick != info["orchestrator"] else [])
     code = render.main(args)
     if code == 2:  # render STOPPED (validator refused, network) and said why: there are no FAIL rows to fix
-        print("validation stopped (see STOPPED above); rows validated before it are in {}".format(folder / "rendered"))
+        print("validation stopped (see STOPPED above); rows that passed before it are in {}".format(folder / "rendered"))
     else:
         print("rows that passed are in {}".format(folder / "rendered") if code == 0 else "fix the FAIL rows in {} and run validate again; the rows that passed are in {}".format(csv_path, folder / "rendered"))
     return code
