@@ -63,7 +63,7 @@ def orchestrator_identity(client: Any) -> Dict[str, Optional[str]]:
     """Who this run talks to, for the approval fingerprint: the Orchestrator's serial (the placeholder counts as none) and base URL."""
     try:
         info = client.get("/gmsserver/info")
-    except EdgeConnectError:  # the fingerprint still names the URL; a run that reads the serial gets another one, so it is refused, never sent
+    except (EdgeConnectError, ValueError):  # the fingerprint still names the URL; a run that reads the serial gets another one, so it is refused, never sent
         info = None
     serial = str(info.get("serialNumber") or "").strip() if isinstance(info, dict) else ""
     return {"serial": None if serial in ("", PLACEHOLDER_SERIAL) else serial, "base_url": getattr(getattr(client, "config", None), "base_url", None)}

@@ -33,6 +33,8 @@ class Client:
         raise AssertionError("unexpected GET " + path)
 
     def request(self, method, path, query=None, json_body=None, expected_status=(200,), expect_json=True, read_only=False):
+        if not read_only:
+            self.write_requests += 1
         if path == "/gms/appliance/preconfiguration" and method == "POST":
             self.posts.append(json_body)
             self.existing.append({"id": len(self.posts), "name": json_body["name"]})
@@ -50,11 +52,11 @@ class Fingerprint(unittest.TestCase):
         self.columns = meta["columns"]
         self.sheet(["br-2", "br-3"])
 
-    def sheet(self, names, hostname=None):
+    def sheet(self, names, hostname=None, note=""):
         with (self.tmp / "rows.csv").open("w", newline="", encoding="utf-8") as handle:
-            w = csv.DictWriter(handle, fieldnames=["hostname", "preconfig_name", "serial_number"])
+            w = csv.DictWriter(handle, fieldnames=["hostname", "preconfig_name", "serial_number", "note"])
             w.writeheader()
-            w.writerows({"hostname": hostname or n, "preconfig_name": n, "serial_number": ""} for n in names)
+            w.writerows({"hostname": hostname or n, "preconfig_name": n, "serial_number": "", "note": note} for n in names)
 
     def run_upload(self, client, approve=False, approver=None):
         recorder, err = Recorder(), io.StringIO()
@@ -78,6 +80,8 @@ class Fingerprint(unittest.TestCase):
     def test_each_input_changes_it(self):
         base = self.fingerprint()
         self.sheet(["br-2", "br-3"], hostname="other")  # a CSV cell
+        self.assertNotEqual(self.fingerprint(), base)
+        self.sheet(["br-2", "br-3"], note="x")  # a cell no YAML shows: only the CSV bytes change
         self.assertNotEqual(self.fingerprint(), base)
         self.sheet(["br-2", "br-3"])
         self.assertEqual(self.fingerprint(), base)
