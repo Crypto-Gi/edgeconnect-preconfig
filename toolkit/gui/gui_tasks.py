@@ -103,6 +103,7 @@ class TaskManager:
         self._ids = itertools.count(1)
         self._lock = threading.Lock()
         self._locks: Dict[str, threading.Lock] = {}
+        self.closing = False
 
     # ------------------------------------------------------------ the browser's calls
 
@@ -183,6 +184,24 @@ class TaskManager:
         if which not in ("template", "csv") or not path.is_file():
             raise TaskError("not found", 404)
         return path
+
+    def close(self) -> None:
+        """Ctrl+C: from now on no task starts uploading (it ends cancelled), and an upload already sending is waited for."""
+        with self._lock:
+            self.closing = True
+        for task in self.list():
+            with task.changed:
+                while task.state == "uploading":
+                    task.changed.wait(1)
+
+    def _start_upload(self, task: Task) -> bool:
+        """Move to uploading, unless the GUI is closing; under the lock close() takes, so close() waits for every upload it lets start."""
+        with self._lock:
+            if self.closing:
+                task.set("cancelled", "the GUI is closing; nothing was uploaded")
+                return False
+            task.set("uploading")
+            return True
 
     def paths(self) -> Dict[str, str]:
         return {"dotenv": self.dotenv, "output": str(self.out_root), "work": self.work_dir}
@@ -268,6 +287,9 @@ class TaskManager:
             appliance = hostname or nepk
             if not appliance:
                 raise TaskError("hostname or nepk is required")
+            for value in (hostname, nepk):  # capture.py and the build name folders after them
+                if value and (not _NAME.match(value) or ".." in value):
+                    raise TaskError("{!r} is not an appliance hostname or nePk as the appliance list shows it".format(value))
             keys = ["appliance:{}:{}:{}".format(orch, kind, value.lower()) for kind, value in (("host", hostname), ("ne", nepk)) if value]
             validate_on = self._orchestrator(opt("validate_on"), required=False) or None
             return self._read(task, keys + ["appliance:" + cli.safe_name(appliance).lower()], lambda: engine.build(
@@ -281,9 +303,12 @@ class TaskManager:
             save = request.get("save") is True
             name = opt("name") if save else None
             return self._read(task, [self._key(build)], lambda: engine.variables(build, pick, settings, name=name, yes=save, fixed=fixed, dry_run=not save, **context))
-        if action == "validate":
+        if action == "validate":  # `validate SITE --csv` as cli.validate_rows runs it, its rows written into the task's folder
             site, csv = self._site(request), self._save(task.folder, "sites.csv", self._text(request, "csv_text"))
-            return self._read(task, [self._key(site.parent)], lambda: engine.validate(site, csv, orch or None, **context))
+            built = self._built(site.parent)
+            nick = orch or str(built.get("validator") or "")
+            return self._read(task, [self._key(site.parent)], lambda: engine.render_site(
+                site, csv, task.folder / "rendered", nick or None, substitute=nick != built.get("orchestrator"), **context))
         if action == "render":
             template = self._save(task.folder, "template.jinja2", self._text(request, "template_text"))
             csv = self._save(task.folder, "sites.csv", self._text(request, "csv_text"))
@@ -302,7 +327,7 @@ class TaskManager:
             keys = []
         else:
             site = self._site(request)
-            source, keys = {"folder": site}, [self._key(site.parent)]
+            source, keys = {"site_dir": site, "out": task.folder}, [self._key(site.parent)]
         csv = self._save(task.folder, "sites.csv", self._text(request, "csv_text"))
         return self._locked(task, keys + ["orchestrator:" + orch], lambda: self._upload(
             task, lambda approver: engine.upload(csv, orch, approver=approver, **source, **context)))
@@ -313,6 +338,15 @@ class TaskManager:
         if not isinstance(value, list) or not all(isinstance(item, str) and item and "," not in item for item in value):
             raise TaskError("{} must list column names or paths".format(key))
         return value
+
+    @staticmethod
+    def _built(build_folder: Path) -> Dict[str, Any]:
+        """The build's build.json: which Orchestrator it was read from and validated on."""
+        try:
+            info = json.loads((build_folder / "build.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            raise TaskError("{} has no readable build.json".format(build_folder)) from None
+        return info if isinstance(info, dict) else {}
 
     @staticmethod
     def _key(build_folder: Path) -> str:
@@ -362,7 +396,8 @@ class TaskManager:
         return self._locked(task, keys, body)
 
     def _upload_yaml(self, task: Task, call: Callable[[], engine.Result]) -> None:
-        task.set("uploading")
+        if not self._start_upload(task):
+            return
         result = self._sealed(task, call())
         task.set(result.status, _summary(result), result)
 
@@ -389,7 +424,8 @@ class TaskManager:
             approver = engine.approve(self.approvals, check.approval, answers)
         except ApprovalError as error:
             return task.set("rejected", "{}; nothing was uploaded".format(error))
-        task.set("uploading")
+        if not self._start_upload(task):
+            return
         result = self._sealed(task, call(approver))
         task.set(result.status, _summary(result), result)
 

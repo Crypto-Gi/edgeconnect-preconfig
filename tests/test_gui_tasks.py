@@ -119,9 +119,8 @@ class TaskTests(Fixture):
         self.assertEqual((task.state, task.message, task.view()["deadline"]), ("done", "2 CREATED", None))
         self.assertEqual([e["name"] for e in self.orch.existing[1:]], ["site-x", "site-y"])
         self.assertEqual([e["state"] for e in task.events if "state" in e], ["queued", "running", "awaiting_approval", "uploading", "done"])
-        lines = [e["line"] for e in task.events if "line" in e]
-        self.assertIn("uploading sites.csv on lab ...", lines)
-        self.assertLess(lines.index("uploading sites.csv on lab ..."), [i for i, e in enumerate(task.events) if e.get("state") == "done"][0])
+        sent = [i for i, e in enumerate(task.events) if e.get("line", "").startswith("UPLOADED | site-x")]
+        self.assertLess(sent[0], [i for i, e in enumerate(task.events) if e.get("state") == "done"][0])  # streamed before the end
 
     def test_the_upload_lock_queues_a_second_upload_and_reads_still_run(self):
         tasks = self.manager()
@@ -288,6 +287,58 @@ class TaskTests(Fixture):
         self.assertEqual({stat.S_IMODE((task.folder / n).stat().st_mode) for n in names}, {0o600})
         self.assertEqual(task.result.files, [str(task.folder / "rendered" / "r-1.yml")])
         self.assertFalse((self.tmp / "outside.csv").exists())
+
+    def test_site_folder_runs_write_only_into_their_own_folder_at_0600(self):
+        def snapshot():
+            return {str(p.relative_to(self.build)): (p.stat().st_mtime_ns, p.stat().st_size) for p in self.build.rglob("*")}
+        before = snapshot()
+        tasks = self.manager()
+        check = self.wait(tasks.create({"action": "validate", "build": "h1", "site": "t", "csv_text": self.csv_text([("w-1", {}), ("w-2", {"site": "REJECT"})])}),
+                          "done", "failed")
+        sent = self.wait(self.upload(tasks, "w-3"), "awaiting_approval")
+        tasks.approve(sent.id, ["lab"])
+        self.wait(sent, "done", "failed", "rejected")
+        self.assertEqual((check.state, check.result.counts, sent.state), ("failed", {"VALID": 1, "INVALID": 1}, "done"))
+        self.assertEqual(snapshot(), before)  # nothing written, changed or removed under the build folder
+        for task, written in ((check, ["rendered/w-1.yml", "sites.csv"]), (sent, ["rendered/w-3.yml", "sites.csv", "upload-report.json"])):
+            files = sorted(str(p.relative_to(task.folder)) for p in task.folder.rglob("*") if p.is_file())
+            self.assertEqual(files, written)
+            self.assertEqual({stat.S_IMODE((task.folder / n).stat().st_mode) for n in files}, {0o600})
+        self.assertEqual(check.result.files, [str(check.folder / "rendered" / "w-1.yml")])
+
+    def test_a_hostname_or_nepk_that_is_not_a_plain_name_is_refused(self):
+        tasks = self.manager()
+        for card in ({"hostname": "../h1", "nepk": "9.NE"}, {"hostname": "h1", "nepk": "9/NE"}, {"hostname": ".h1", "nepk": ""},
+                     {"hostname": "", "nepk": ".."}, {"hostname": "a..b", "nepk": ""}, {"hostname": "a\\b", "nepk": ""}, {"hostname": "h 1", "nepk": ""}):
+            with self.assertRaisesRegex(TaskError, "is not an appliance hostname or nePk as the appliance list shows it"):
+                tasks.create(dict(card, action="build", orchestrator="lab"))
+        self.assertEqual((tasks.list(), self.orch.calls), ([], []))
+
+    def test_once_the_gui_is_closing_no_upload_starts_and_one_sending_is_waited_for(self):
+        tasks = self.manager()
+        waiting = self.wait(self.upload(tasks, "site-z"), "awaiting_approval")
+        release, real = threading.Event(), engine.upload_yaml
+
+        def slow(*args, **kwargs):
+            release.wait(10)
+            return real(*args, **kwargs)
+        text = (self.site / "rendered" / "h1_preconfig.yml").read_text(encoding="utf-8")
+        with mock.patch.object(engine, "upload_yaml", slow):
+            other = self.manager(self.dotenv("both-closing.env", ENV + "lab_gui_preconfig_uploads=on\nother_gui_preconfig_uploads=on\n"))
+            sending = self.wait(other.create({"action": "upload_yaml", "orchestrator": "other", "files": [text]}), "uploading")
+            closing = threading.Thread(target=other.close)
+            closing.start()
+            time.sleep(0.3)
+            self.assertTrue(closing.is_alive())  # Ctrl+C waits for the upload that is sending
+            late = other.create({"action": "upload_yaml", "orchestrator": "lab", "files": [text]})
+            self.assertEqual((self.wait(late, "cancelled").message), "the GUI is closing; nothing was uploaded")
+            release.set()
+            closing.join(10)
+            self.assertFalse(closing.is_alive())
+            self.assertEqual(sending.state, "done")
+        tasks.close()
+        tasks.approve(waiting.id, ["lab"])  # approved after the GUI began closing
+        self.assertEqual((self.wait(waiting, "cancelled").message, len(self.orch.posts())), ("the GUI is closing; nothing was uploaded", 1))
 
     def test_requests_are_checked_before_anything_runs(self):
         tasks = self.manager()

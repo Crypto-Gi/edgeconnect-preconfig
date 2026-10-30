@@ -283,12 +283,9 @@ def serve(port: int = 0, browser: bool = True) -> int:
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        for task in tasks.list():  # an upload that is sending finishes; nothing new starts once the server is closed
-            with task.changed:
-                if task.state == "uploading":
-                    print("waiting for {} to finish uploading ...".format(task.id), file=sys.stderr, flush=True)
-                while task.state == "uploading":
-                    task.changed.wait(1)
+        if any(task.state == "uploading" for task in tasks.list()):
+            print("waiting for the upload that is sending to finish ...", file=sys.stderr, flush=True)
+        tasks.close()  # no other task starts uploading
         print("GUI stopped.", file=sys.stderr)
     finally:
         server.server_close()

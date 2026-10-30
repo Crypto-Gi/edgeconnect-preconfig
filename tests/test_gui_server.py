@@ -115,7 +115,7 @@ class ServerTests(ServerCase):
         self.assertEqual(self.request("POST", "/api/tasks/{}/approve".format(task.id), {"answers": ["lab"]})[0].status, 202)
         events = self.events(task)
         self.assertEqual([e["state"] for e in events if "state" in e], ["queued", "running", "awaiting_approval", "uploading", "done"])
-        self.assertIn("uploading sites.csv on lab ...", [e["line"] for e in events if "line" in e])
+        self.assertTrue([e for e in events if e.get("line", "").startswith("UPLOADED | site-h")], events)
         self.assertEqual(events[-1]["task"]["state"], "done")
         self.assertEqual(json.loads(self.request("GET", "/api/tasks/{}/result".format(task.id))[1])["result"]["counts"], {"CREATED": 1})
         self.assertEqual(self.request("POST", "/api/tasks/{}/cancel".format(task.id), {})[0].status, 409)

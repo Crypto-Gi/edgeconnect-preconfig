@@ -99,7 +99,7 @@ class _Line(argparse.ArgumentParser):
 def _line(argv: Sequence[str]) -> argparse.Namespace:
     """The options the gates and the secret scrub read, parsed as argparse reads them (abbreviations included, so --appr counts)."""
     parser = _Line(add_help=False)
-    for option in ("--orchestrator", "--csv", "--columns", "--site-dir", "--template"):
+    for option in ("--orchestrator", "--csv", "--columns", "--site-dir", "--template", "--out"):
         parser.add_argument(option)
     parser.add_argument("--approve", action="store_true")
     parser.add_argument("--yaml", nargs="*")
@@ -115,7 +115,7 @@ def _refusal(argv: Sequence[str], approver: Optional[Callable[..., Any]]) -> Opt
         return "the GUI could not read this command line ({})".format(error)
     if line is None or not _built_here(argv, line):  # every other verb or stage reads inputs the secret scrub does not know
         return ("the GUI runs only the command lines it builds (list, build, variables, validate FOLDER --csv, upload FOLDER --csv, "
-                "upload --template --csv, render --template --csv, validate --yaml, upload --yaml); for existing YAML files use "
+                "upload --template --csv, render --template --csv, upload or render --site-dir --csv --out, validate --yaml, upload --yaml); for existing YAML files use "
                 "validate --yaml or upload --yaml, which parse each file first")
     if argv[0] != "upload":
         return None
@@ -134,12 +134,14 @@ def _built_here(argv: Sequence[str], line: argparse.Namespace) -> bool:
     verb, stage = argv[0], len(argv) > 1 and argv[1].startswith("-")  # cli.main: validate/upload with an option first run the stage
     if verb in ("list", "build", "variables"):
         return True
+    # a saved site folder with --out: what it writes goes to the run's own folder, never into the build folder
+    site_out = line.site_dir is not None and line.out is not None
     if verb == "render":
-        return line.template is not None and line.csv is not None
+        return (line.template is not None or site_out) and line.csv is not None
     if verb in ("validate", "upload") and not stage:  # FOLDER --csv
         return line.csv is not None
-    if verb in ("validate", "upload"):  # the stage only with --yaml (validate's own file arguments go out unparsed) or upload --template --csv
-        return line.yaml is not None or (verb == "upload" and line.template is not None and line.csv is not None)
+    if verb in ("validate", "upload"):  # the stage only with --yaml (validate's own file arguments go out unparsed) or upload --template/--site-dir --csv
+        return line.yaml is not None or (verb == "upload" and (line.template is not None or site_out) and line.csv is not None)
     return False
 
 
@@ -437,9 +439,13 @@ def validate(folder: Any, csv_path: Any, orchestrator: Optional[str] = None, **c
 
 
 def upload(csv_path: Any, orchestrator: str, folder: Any = None, template: Any = None, out: Any = None,
-           approver: Optional[Callable[[str], Any]] = None, **context: Any) -> Result:
-    """A CSV upload: a check without an approver (its Result.approval is what approving takes), uploaded with one from approve()."""
-    source = [_abs(folder)] if folder is not None else ["--template", _abs(template)] + _opt("--out", out and _abs(out))
+           approver: Optional[Callable[[str], Any]] = None, site_dir: Any = None, **context: Any) -> Result:
+    """A CSV upload: a check without an approver (its Result.approval is what approving takes), uploaded with one from approve().
+    folder: `upload FOLDER`, which writes into it; site_dir: the stage `upload --site-dir S --out OUT`, which writes into out."""
+    if site_dir is not None:
+        source = ["--site-dir", _abs(site_dir), "--out", _abs(out)]
+    else:
+        source = [_abs(folder)] if folder is not None else ["--template", _abs(template)] + _opt("--out", out and _abs(out))
     return run(["upload"] + source + ["--csv", _abs(csv_path), "--orchestrator", orchestrator] + (["--approve"] if approver else []), approver, **context)
 
 
@@ -455,6 +461,12 @@ def upload_yaml(paths: Sequence[Any], orchestrator: str, name: Optional[str] = N
 def render(template: Any, csv_path: Any, out: Any, validate_on: Optional[str] = None, substitute: bool = False, **context: Any) -> Result:
     """The render stage: one YAML per row into out; with validate_on each row through /validate there (a validator only)."""
     return run(["render", "--template", _abs(template), "--csv", _abs(csv_path), "--out", _abs(out)] + _opt("--validate", validate_on)
+               + (["--substitute"] if substitute else []), **context)
+
+
+def render_site(site_dir: Any, csv_path: Any, out: Any, validate_on: Optional[str] = None, substitute: bool = False, **context: Any) -> Result:
+    """`validate SITE --csv` (render --site-dir --validate, as cli.validate_rows runs it) with the rows written into out instead of SITE/rendered."""
+    return run(["render", "--site-dir", _abs(site_dir), "--csv", _abs(csv_path), "--out", _abs(out)] + _opt("--validate", validate_on)
                + (["--substitute"] if substitute else []), **context)
 
 

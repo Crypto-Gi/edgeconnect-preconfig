@@ -381,6 +381,29 @@ class EngineTests(unittest.TestCase):
                 self.assertIn("refused, nothing sent: the GUI runs only the command lines it builds", result.text)
                 self.assertFalse((self.site / "rendered" / "site-z.yml").exists())
 
+    def test_a_site_folder_with_out_writes_only_there_with_its_checks_scrub_and_gate(self):
+        site = self.build / "site-out"
+        shutil.rmtree(str(site), ignore_errors=True)
+        shutil.copytree(str(self.site), str(site))
+        meta = json.loads((site / "columns.json").read_text(encoding="utf-8"))
+        meta["columns"]["contact_name"]["secret"] = True
+        (site / "columns.json").write_text(json.dumps(meta), encoding="utf-8")
+        shutil.rmtree(str(site / "rendered"), ignore_errors=True)
+        sheet = self.sheet("out.csv", [self.row("o-1", contact_name="Hunter'2 Out", site="REJECT"), self.row("o-2", lan0_ip="bad"), self.row("o-3")])
+        checked = engine.render_site(site, sheet, self.tmp / "run-out" / "rendered", "lab", **self.context(self.on))
+        self.assertEqual((checked.counts, checked.files), ({"INVALID": 2, "VALID": 1}, [str(self.tmp / "run-out" / "rendered" / "o-3.yml")]))
+        self.assertEqual([i["column"] for i in checked.issues if i["row"] == 2], ["lan0_ip"])  # the cell checks of columns.json ran
+        self.assertIn("<SECRET:contact_name>", checked.text)
+        self.assertNotIn("Hunter", shown(checked))
+        result = engine.run(["upload", "--site-dir", str(site), "--csv", str(sheet), "--orchestrator", "lab", "--out", str(self.tmp / "run-out"), "--approve"],
+                            **self.context(self.on))
+        self.assertEqual((result.status, self.orch.posts()), ("rejected", []))
+        self.assertIn("refused, nothing sent: an upload with --approve needs the GUI's approval", result.text)
+        upload_check = engine.upload(sheet, "lab", site_dir=site, out=self.tmp / "run-out", **self.context(self.on))
+        self.assertEqual((upload_check.counts, upload_check.approval["orchestrator"]), ({"INVALID": 2, "PLANNED": 1}, "lab"))
+        self.assertNotIn("Hunter", shown(upload_check))
+        self.assertFalse((site / "rendered").exists())  # nothing written into the site folder
+
     def test_files_named_without_yaml_are_scanned_too(self):
         other = self.tmp / "other.yml"
         other.write_text("applianceInfo:\n  site: S1\n", encoding="utf-8")
