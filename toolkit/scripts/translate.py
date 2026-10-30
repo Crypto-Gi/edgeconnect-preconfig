@@ -959,9 +959,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     default_doc = load_yaml(template)
     out = args.out or (output_root() / args.site_type)
-    if not args.ignore_template_ownership:
+    run = run_context()
+    if bool(run and run.ignore_ownership) == args.ignore_template_ownership:
         return convert(args, template, template_why, default_doc, out)
-    with running(dataclasses.replace(run_context() or RunContext(), ignore_ownership=True)):  # this run only, not the process
+    with running(dataclasses.replace(run or RunContext(), ignore_ownership=args.ignore_template_ownership)):  # this run only, as the flag says
         return convert(args, template, template_why, default_doc, out)
 
 

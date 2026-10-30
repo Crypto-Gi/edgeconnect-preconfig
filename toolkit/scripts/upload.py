@@ -21,7 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cells import cell_problems, interface_addresses, option_limits, subnet_problems  # noqa: E402
-from common import EdgeConnectError, client_for, normalize_serial, output_root, parse_yaml, resolve_output_filename, utc_stamp, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
+from common import EdgeConnectError, Problem, client_for, normalize_serial, output_root, parse_yaml, problem_data, record, resolve_output_filename, utc_stamp, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 from render import flow_through, read_rows, render_row  # noqa: E402
 from validate import Stop, validate_text  # noqa: E402
 
@@ -111,79 +111,99 @@ def run_batch(
     seen_serials: Dict[str, int] = {}
     row_results: List[Dict[str, Any]] = []
     ready_to_upload: List[Dict[str, Any]] = []
+    problems_of: Dict[int, List[str]] = {}  # for the run's recorder: the entries keep only the joined detail
 
-    for idx, row in enumerate(read_rows(csv_path), 1):
-        problems: List[str] = []
-        pcfg_name, fname = ("row_{}".format(idx), "")
-        try:
-            pcfg_name, fname = resolve_output_filename(row, idx)
-            if fname in seen_files:
-                problems.append("duplicate preconfig_name/filename {!r} (already used by row {})".format(fname, seen_files[fname]))
-            else:
-                seen_files[fname] = idx
-        except ValueError as err:
-            problems.append(str(err))
-
-        norm_serial = None
-        if row.get("serial_number"):
+    secrets = {n for n, m in (columns or {}).items() if m.get("secret")}
+    uploaded_count = 0
+    try:
+        for idx, row in enumerate(read_rows(csv_path), 1):
+            problems: List[str] = []
+            pcfg_name, fname = ("row_{}".format(idx), "")
             try:
-                norm_serial = normalize_serial(row.get("serial_number"))
-                if norm_serial in seen_serials:
-                    problems.append("duplicate serial_number {!r} (already used by row {})".format(norm_serial, seen_serials[norm_serial]))
-                elif norm_serial:
-                    seen_serials[norm_serial] = idx
+                pcfg_name, fname = resolve_output_filename(row, idx)
+                if fname in seen_files:
+                    problems.append(Problem("duplicate preconfig_name/filename {!r} (already used by row {})".format(fname, seen_files[fname]), "preconfig_name", pcfg_name))
+                else:
+                    seen_files[fname] = idx
             except ValueError as err:
                 problems.append(str(err))
 
-        text = ""
-        if columns and not problems:
-            problems.extend(cell_problems(columns, row, limits) + subnet_problems(columns, row))
-            for address in interface_addresses(columns, row):
-                if address in seen_addresses and seen_addresses[address] != idx:
-                    print("WARN {}: interface address {} is also used by row {} (fine for private LANs, a mistake for WAN addresses)".format(pcfg_name, address, seen_addresses[address]), flush=True)
-                seen_addresses.setdefault(address, idx)
-        if not problems:
-            try:
-                text = render_row(template_path, row)
-                doc = parse_yaml(text)
-                if columns:
-                    problems.extend(flow_through(doc, columns, row))
-            except Exception as err:
-                problems.append(str(err))
+            norm_serial = None
+            if row.get("serial_number"):
+                try:
+                    norm_serial = normalize_serial(row.get("serial_number"))
+                    if norm_serial in seen_serials:
+                        problems.append(Problem("duplicate serial_number {!r} (already used by row {})".format(norm_serial, seen_serials[norm_serial]), "serial_number", norm_serial))
+                    elif norm_serial:
+                        seen_serials[norm_serial] = idx
+                except ValueError as err:
+                    problems.append(str(err))
 
-        if not problems:
-            verdict = validate_text(client, text, norm_serial)
-            if not verdict["accepted"]:
-                problems.append("Orchestrator /validate rejected: {}".format(verdict["error"]))
+            text = ""
+            if columns and not problems:
+                problems.extend(cell_problems(columns, row, limits) + subnet_problems(columns, row))
+                for address in interface_addresses(columns, row):
+                    if address in seen_addresses and seen_addresses[address] != idx:
+                        print("WARN {}: interface address {} is also used by row {} (fine for private LANs, a mistake for WAN addresses)".format(pcfg_name, address, seen_addresses[address]), flush=True)
+                    seen_addresses.setdefault(address, idx)
+            if not problems:
+                try:
+                    text = render_row(template_path, row)
+                    doc = parse_yaml(text)
+                    if columns:
+                        problems.extend(flow_through(doc, columns, row))
+                except Exception as err:
+                    problems.append(str(err))
 
-        if problems:
-            if fname and (rendered_dir / fname).exists() and seen_files.get(fname) == idx:
-                (rendered_dir / fname).unlink()
-            entry = {
-                "row": idx,
-                "preconfig_name": pcfg_name,
-                "hostname": row.get("hostname") or "",
-                "serial_number": norm_serial or row.get("serial_number") or "",
-                "validated": False,
-                "yaml_file": None,
-                "status": "invalid",
-                "detail": "; ".join(problems),
-            }
-            row_results.append(entry)
-            print("ROW {:2d} | INVALID  | {:<24} | skipped (no .yml written): {}".format(idx, pcfg_name, entry["detail"]), flush=True)
-            continue
+            if not problems:
+                verdict = validate_text(client, text, norm_serial)
+                if not verdict["accepted"]:
+                    problems.append("Orchestrator /validate rejected: {}".format(verdict["error"]))
 
-        # Immediately emit the validated YAML file to disk right away!
-        yml_path = rendered_dir / fname
-        yml_path.write_text(text, encoding="utf-8")
+            if problems:
+                if fname and (rendered_dir / fname).exists() and seen_files.get(fname) == idx:
+                    (rendered_dir / fname).unlink()
+                entry = {
+                    "row": idx,
+                    "preconfig_name": pcfg_name,
+                    "hostname": row.get("hostname") or "",
+                    "serial_number": norm_serial or row.get("serial_number") or "",
+                    "validated": False,
+                    "yaml_file": None,
+                    "status": "invalid",
+                    "detail": "; ".join(problems),
+                }
+                row_results.append(entry)
+                problems_of[idx] = problems
+                print("ROW {:2d} | INVALID  | {:<24} | skipped (no .yml written): {}".format(idx, pcfg_name, entry["detail"]), flush=True)
+                continue
 
-        conflicts = []
-        if pcfg_name in existing_names:
-            conflicts.append("preconfig_name {!r} already exists on Orchestrator".format(pcfg_name))
-        if norm_serial and norm_serial in existing_serials:
-            conflicts.append("serial_number {!r} already exists on Orchestrator".format(norm_serial))
+            # Immediately emit the validated YAML file to disk right away!
+            yml_path = rendered_dir / fname
+            yml_path.write_text(text, encoding="utf-8")
 
-        if conflicts:
+            conflicts = []
+            if pcfg_name in existing_names:
+                conflicts.append(Problem("preconfig_name {!r} already exists on Orchestrator".format(pcfg_name), "preconfig_name", pcfg_name))
+            if norm_serial and norm_serial in existing_serials:
+                conflicts.append(Problem("serial_number {!r} already exists on Orchestrator".format(norm_serial), "serial_number", norm_serial))
+
+            if conflicts:
+                entry = {
+                    "row": idx,
+                    "preconfig_name": pcfg_name,
+                    "hostname": row.get("hostname") or "",
+                    "serial_number": norm_serial or "",
+                    "validated": True,
+                    "yaml_file": str(yml_path),
+                    "status": "conflict",
+                    "detail": "; ".join(conflicts),
+                }
+                row_results.append(entry)
+                problems_of[idx] = conflicts
+                print("ROW {:2d} | CONFLICT | {:<24} | .yml written ({}), upload skipped: {}".format(idx, pcfg_name, yml_path.name, entry["detail"]), flush=True)
+                continue
+
             entry = {
                 "row": idx,
                 "preconfig_name": pcfg_name,
@@ -191,28 +211,19 @@ def run_batch(
                 "serial_number": norm_serial or "",
                 "validated": True,
                 "yaml_file": str(yml_path),
-                "status": "conflict",
-                "detail": "; ".join(conflicts),
+                "status": "ready",
+                "detail": "validated and written to {}".format(yml_path.name),
             }
             row_results.append(entry)
-            print("ROW {:2d} | CONFLICT | {:<24} | .yml written ({}), upload skipped: {}".format(idx, pcfg_name, yml_path.name, entry["detail"]), flush=True)
-            continue
+            ready_to_upload.append({"entry": entry, "text": text})
+            print("ROW {:2d} | VALID    | {:<24} | .yml written immediately -> {}".format(idx, pcfg_name, yml_path), flush=True)
 
-        entry = {
-            "row": idx,
-            "preconfig_name": pcfg_name,
-            "hostname": row.get("hostname") or "",
-            "serial_number": norm_serial or "",
-            "validated": True,
-            "yaml_file": str(yml_path),
-            "status": "ready",
-            "detail": "validated and written to {}".format(yml_path.name),
-        }
-        row_results.append(entry)
-        ready_to_upload.append({"entry": entry, "text": text})
-        print("ROW {:2d} | VALID    | {:<24} | .yml written immediately -> {}".format(idx, pcfg_name, yml_path), flush=True)
-
-    uploaded_count = upload_ready(client, ready_to_upload) if approve and ready_to_upload else 0
+        uploaded_count = upload_ready(client, ready_to_upload) if approve and ready_to_upload else 0
+    finally:  # recorded also when /validate stops the batch: the rows before it have their .yml written
+        for entry in row_results:
+            problems = problems_of.get(entry["row"], []) + ([entry["detail"]] if entry["status"] == "upload-failed" else [])
+            record("row", index=entry["row"], preconfig_name=entry["preconfig_name"], status=entry["status"], file=entry["yaml_file"],
+                   problems=[problem_data(entry["row"], p, secrets) for p in problems])
 
     report = {
         "timestamp": utc_stamp(),
@@ -336,6 +347,7 @@ def yaml_main(parser: argparse.ArgumentParser, paths: List[Path], nick: str, nam
     print("", flush=True)
     for r in results:
         print("{:<30} {:<24} {}{}".format(r["status"], Path(r["file"]).name, r["preconfig_name"], ": " + r["detail"] if r["detail"] else ""), flush=True)
+        record("file", status=r["status"], name=r["preconfig_name"], file=r["file"], detail=r["detail"])
     print("\n{} file(s): {} {}".format(len(results), sum(1 for r in results if r["status"] in ("uploaded", "passed")), "uploaded" if send else "passed"), flush=True)
     return 0 if all(r["status"] in ("uploaded", "passed") or r["status"].startswith("skipped") for r in results) else 1
 

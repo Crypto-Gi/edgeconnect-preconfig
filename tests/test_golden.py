@@ -222,6 +222,9 @@ class Golden(unittest.TestCase):
         self.check("variables-asked", ["variables", str(self.built())], answers=["1", "l", "1", "", "gask", "y"])
         self.check("variables-asked-default-name", ["variables", str(self.built())], answers=["1", "", "", "y"])
 
+    def test_variables_at_end_of_input(self):
+        self.check("variables-end-of-input", ["variables", str(self.built())], code=1)
+
     def test_variables_quit(self):
         self.check("variables-quit", ["variables", str(self.built())], answers=["2", "q"], code=1)
 

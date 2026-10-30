@@ -3,6 +3,7 @@
 ## Unreleased (gui branch)
 
 - **Run context** (for the GUI, no change to what the commands print or write): a run now reads its `.env`, its validator list, its work folder and its default output folder (`./preconfig-output`) from a run context (`common.RunContext`, set with `common.running(...)`) instead of values fixed when the scripts are imported, and `translate --ignore-template-ownership` holds for that run only. Without a context every value is what it was. Two runs in one process, each with its own context, no longer see each other's validators or folders.
+- **Per-run output, prompts and results** (for the GUI): `quiet()` captures only its own run's lines (`common.captured_output`, a thread-aware `sys.stdout`/`sys.stderr`), so a parallel run's output no longer lands in it. A prompt that reads the end of stdin (Ctrl-D, or a GUI's empty stdin) ends the command with `nothing written` and exit 1 instead of a traceback. A run with a `common.Recorder` in its context keeps each command's structured results: the build (folder, verdict, summary, validator, release), the picker rows and chosen columns of `variables`/`compare`, each CSV row of `validate`/`render`/`upload` (index, name, status, file, problems), and each file of a `--yaml` run. CSV cell problems carry their column and value (a secret's value is recorded as `<SECRET>`); the printed text is unchanged.
 - **Golden outputs**: `tests/test_golden.py` pins what each command prints and writes (except `compare`); `EDGECONNECT_UPDATE_GOLDEN=1` regenerates them.
 
 ## 1.3.3 (2026-10-30)
