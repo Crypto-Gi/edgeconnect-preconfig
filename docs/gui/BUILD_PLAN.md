@@ -5,7 +5,8 @@ branch. Each step starts only after the previous one is merged there. `main` sta
 merge `gui` into it. This file lands as `docs/gui/BUILD_PLAN.md` in the step 0 pull request, the same name and shape as
 the automation repo's, and each step gets a "Built as" note when it is merged.
 
-Decision numbers (D1...) refer to the owner's rulings of 29 and 30 Oct 2026.
+Decision numbers (D1...) refer to the owner's rulings of 29 and 30 Oct 2026; D9 is one ruling that accepted a group of
+recommendations, so it is cited for several of them. Numbered decisions (0006, 0017...) are the records in `docs/decisions/`.
 
 ## Decided
 
@@ -148,16 +149,16 @@ Inventory (D8)
   when no folder matches); Jinja, YAML and `/validate` error text included. The `preconfigs` verb never returns `configData`
   in its list and never prints the raw text of a YAML that does not parse. Test: a secret holding `"` that breaks YAML parsing
   never appears in any response.
-- No hidden prompts. The GUI always passes `--pick` and `--yes`; `--dry-run` never asks.
-- Long runs. A build reads about 114 endpoints with a 0.2 s pause (about a minute); a four-site compare several minutes. The
+- No hidden prompts. The GUI always passes `--pick`, adds `--yes` to every run that writes, and `--dry-run` never asks.
+- Long runs. A build reads every endpoint in the catalogue with a 0.2 s pause between requests (about a minute); a four-site compare several minutes. The
   page shows progress from the capture's own request log. A running read cannot be stopped midway (as in automation); a
   cancelled one is not offered as finished. Ctrl+C waits for an upload that is sending.
 - Fleet panel versus the CLI. Profiles are the `orch_N` nicknames (a profile without an `orch_N` line is not listed, and the
   panel says so). Green: connected and the key works (a 403 on `/gms/versions` is still green, as `list` treats it); amber:
   slow (over 2 s) or busy (HTTP 429, which preconfig's client reports as a server error with status 429); red: the rest.
   Each check uses a 5 s timeout. A refused `GET /gmsserver/info` means "identity unknown, known by its address".
-- The shared `.env`. The two repos read it differently (automation refuses an unnumbered `orch_` key such as preconfig's
-  documented `orch_validators`, and nicknames with `-`; unterminated quotes; `_verify_tls` only in preconfig; a global CA
+- The shared `.env`. The two repos read it differently (automation refuses an unnumbered `orch_` key such as the
+  `orch_validators` alias preconfig documented up to 1.3.2, and nicknames with `-`; unterminated quotes; `_verify_tls` only in preconfig; a global CA
   bundle only in automation). Step 4 adds a table of these to `.env.example` and a test that one fixture `.env` gives the same
   profiles in both readers; the GUI warns about a key the automation tools would refuse.
 - Run log. Workflows are named `preconfig <verb>` and logged to `reports/preconfig.jsonl`, with automation's full record
@@ -196,7 +197,7 @@ itself (`toolkit/gui/`, its tests, CI and docs). A GUI step that needs a CLI add
 
 Text printed by every existing command stays byte-identical.
 
-## Existing CLI bugs found in the gap review (fixed as 1.3.3, PR #8, commit 404df30; golden copies are recorded after it merges)
+## Existing CLI bugs found in the gap review (being fixed as 1.3.3 in PR #8, not merged yet; golden copies are recorded after it merges)
 
 1. `validate --yaml` / `upload --yaml` on an Orchestrator not in `EC_VALIDATORS` crash with a traceback instead of the
    one-line refusal: the stage runs as `__main__`, so it raises `__main__.Stop`, which `upload.yaml_main` (catching
@@ -204,7 +205,7 @@ Text printed by every existing command stays byte-identical.
 2. The stage form's validator check is case-sensitive (`render ... --validate LAB` is refused while `lab` is allowed);
    the verbs lower-case the nickname.
 3. The documented `orch_validators=` key in the shared `.env` makes every `edgeconnect-auto` command refuse to start
-   ("Orchestrator slots must be numbered"). Either preconfig stops documenting it, or automation ignores it.
+   ("Orchestrator slots must be numbered"). 1.3.3 drops the alias, so `EC_VALIDATORS` is the only key.
 4. The validator refusal names a stale requirement ("edgeconnect_automation ApiClient.request has no read_only flag ...").
 
 ## Step 0: CI and the gui branch
@@ -218,11 +219,11 @@ compare, validate with valid and invalid rows, upload with and without `--approv
 files. Then replace the module values the commands share (`VALIDATORS` read at import, the `.env` path, the work folder)
 with a run context passed through, holding a recorder that keeps each command's structured result (the build folder and
 verdict, the picker rows, the per-row results `upload.run_batch` already builds).
-How (from the gap review): the run context is a `contextvars` value, because `run_stage` re-runs stage scripts with runpy;
+How (from the gap review): the run context is a `contextvars` value, because stage scripts run inside the same process as the verbs;
 the GUI installs one thread-routing `sys.stdout`/`sys.stderr` so each run's printed lines go to that run only (today's
 `quiet()` swaps the whole process's stdout); module values read at import (`VALIDATORS`, `WORK_DIR`,
 `translate.IGNORE_OWNERSHIP`) and current-folder defaults are read from the context; `sys.stdin` is an empty stream in the
-GUI, so a prompt fails at once instead of hanging. Since 1.3.3 (PR #8) `run_stage` imports the stage module and calls its `main(argv)`, so stage runs no longer touch
+GUI, so a prompt fails at once instead of hanging. Once 1.3.3 (PR #8) is merged, `run_stage` imports the stage module and calls its `main(argv)`, so stage runs no longer touch
 `sys.argv` or `sys.modules['__main__']`; stage modules are imported once per process, so their import-time state (`VALIDATORS`
 from `.env`) must move into the run context like the verbs'.
 Golden outputs mask timestamps, absolute paths and the toolkit commit.
