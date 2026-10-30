@@ -10,9 +10,9 @@ STATIC = Path(__file__).resolve().parents[1] / "toolkit" / "gui" / "static"
 # The server (gui_server.py) answers these, under automation's names; /api/builds is preconfig's own. "/api/runs/" is
 # followed by the run ID.
 ENDPOINTS = {"/api/orchestrators", "/api/tasks", "/api/tasks/<id>/cancel", "/api/builds", "/api/runs", "/api/runs.csv", "/api/runs/", "/api/runs/<id>/rows.csv",
-             "/api/tasks/<id>/events", "/api/tasks/<id>/result",  # pick.js and build.js follow their tasks (step 8)
+             "/api/tasks/<id>/events", "/api/tasks/<id>/result",  # pick.js and build.js follow their tasks (step 8), and so does the Inventory (step 10)
              "/api/builds/<id>/reference", "/api/builds/<id>/summary", "/api/builds/<id>/<id>/template", "/api/builds/<id>/<id>/csv"}
-SCRIPTS = ("app.js", "tables.js", "runs.js", "pick.js", "build.js")  # in the order index.html loads them
+SCRIPTS = ("app.js", "tables.js", "runs.js", "pick.js", "build.js", "inventory.js")  # in the order index.html loads them
 
 
 class ShellTests(unittest.TestCase):

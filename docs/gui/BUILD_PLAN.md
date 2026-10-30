@@ -354,6 +354,16 @@ nickname, expired, reused, other Orchestrator); a lab upload matches the CLI's.
 ## Step 10: Inventory
 Appliances and the preconfigs on the Orchestrator, with the read-only YAML viewer; the CLI gains `preconfigs`.
 Done when: secrets in a fixture preconfig never reach the page unredacted, and a read-only lab check passes.
+Built as: `engine.preconfigs(orchestrator, show=None)` runs `preconfigs --orchestrator N [--show NAME|ID]`, and `run` allows exactly
+those two shapes; the CLI redacts what it prints and records (`preconfig` rows without `configData`, `preconfig-yaml` text), and a
+YAML that does not parse ends failed with the CLI's one line naming where it broke. The appliances are the `appliance` results `list`
+records (R8, #23), never its printed table. The `preconfigs` task (with `show`) joins the reads in `gui_tasks.py`. The screen is
+`static/inventory.js`, loaded last, which adds `#/inventory` to step 7's `SCREENS`: appliances with `list --search` and 50 rows a page
+in the browser (`PagedTable` pages a server endpoint, and these rows are one task's result), the preconfigs (name, serial, tag, last
+change, id), and the clicked one's YAML as text in a `<pre>`, read only, fetched by its id.
+Tested in `tests/test_gui_inventory.py` over HTTP with the golden preconfigs (list, show and task JSON, the event stream, the YAML whose
+`"` breaks parsing), and `tests/test_gui_shell.py`. Not yet: the read-only lab check (which also confirms the `modifiedTime` field
+name, `cli.LAST_CHANGE`).
 
 ## Step 11: Polish and release
 Accessibility pass (axe-core on every screen, both themes), a Playwright smoke test in its own CI job (from an appliance to

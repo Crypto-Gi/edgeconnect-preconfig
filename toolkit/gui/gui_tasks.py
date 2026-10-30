@@ -1,6 +1,6 @@
 """GUI tasks (docs/gui/BUILD_PLAN.md step 5): each action is one engine call in its own thread, as a task the browser follows.
 
-  list, build, variables, validate, render, validate_yaml:  queued -> running -> done | failed | rejected
+  list, preconfigs, build, variables, validate, render, validate_yaml:  queued -> running -> done | failed | rejected
   upload (a sites CSV):  queued -> running (the check) -> awaiting_approval -> uploading -> done | failed | rejected
                                   \\-> done | failed | rejected     \\-> rejected | expired | cancelled
   upload_yaml:           queued -> uploading -> done | failed | rejected   (no approval: decision 0017)
@@ -33,9 +33,9 @@ import engine
 from approval import APPROVAL_SECONDS, ApprovalError, GuiApprovals
 from fleet import profiles
 
-READS = {"list", "build", "variables", "validate", "render", "validate_yaml"}
+READS = {"list", "preconfigs", "build", "variables", "validate", "render", "validate_yaml"}
 UPLOADS = {"upload", "upload_yaml"}
-# compare and preconfigs join READS with their engine helpers (R6 pending; preconfigs is step 10).
+# compare joins READS with its engine helper (R6 pending).
 FINAL = {"done", "failed", "rejected", "expired", "cancelled"}
 _OPEN = {"queued", "running", "awaiting_approval"}
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")  # a build or site type folder name as the GUI lists it: no path in it
@@ -298,6 +298,8 @@ class TaskManager:
         opt, action, orch = (lambda key: self._optional(request, key)), task.action, task.orchestrator
         if action == "list":
             return self._read(task, [], lambda: engine.list_appliances(orch, opt("search"), **context))
+        if action == "preconfigs":  # the list, or with show (a name or id from it) one preconfig's YAML, redacted by the CLI
+            return self._read(task, [], lambda: engine.preconfigs(orch, opt("show"), **context))
         if action == "build":
             # The card sends both fields from `list`; the CLI is given `hostname or nepk`, and names the folder `hostName or nePk`.
             # Both come from `list`: nepk always, hostname empty only for a box without one. One box sent once by hostname and once
