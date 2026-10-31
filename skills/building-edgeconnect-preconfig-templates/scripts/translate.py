@@ -49,6 +49,12 @@ class Capture:
                 return json.loads((self.folder / item["file"]).read_text())["data"]
         return None
 
+    def reads(self):
+        """(read id, data) of every read that succeeded: live, cached, orchestrator and backup copies alike."""
+        for item in self.index:
+            if item["status"] == "ok":
+                yield item["id"], json.loads((self.folder / item["file"]).read_text())["data"]
+
 
 
 
@@ -433,8 +439,10 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
             if_name, ips = mode_if["ifName"], mode_if["applianceIPs"]
             if not isinstance(ips, list):
                 raise TypeError("applianceIPs is {}, not a list".format(type(ips).__name__))
+            if not isinstance(if_name, str) or not if_name:
+                raise TypeError("ifName is {!r}, not an interface name".format(if_name))
         except ITEM_ERRORS as err:
-            item_failed(ctx, "deployment.modeIfs[{}]".format(mode_if.get("ifName", i) if isinstance(mode_if, dict) else i), "deploymentInfo.deploymentInterfaces", err)
+            item_failed(ctx, "deployment.modeIfs[{}]".format(mode_if.get("ifName", i) if isinstance(mode_if, dict) and isinstance(mode_if.get("ifName"), str) else i), "deploymentInfo.deploymentInterfaces", err)
             if_failed = True
             if isinstance(mode_if, dict) and isinstance(mode_if.get("ifName"), str):
                 fo_wanted.add(mode_if["ifName"])  # unknown entries may have wanted failover: no "no server has failover" claim
@@ -801,6 +809,55 @@ def observed_paths() -> set:
     return set(doc.get("observed") or []) | set(doc.get("verified") or [])
 
 
+KNOWN_SOURCE = DEFAULT_TEMPLATES_DIR.parent / "known-source-fields.yaml"
+SOURCE_KEY = re.compile(r"^[a-z][a-zA-Z_]*$")  # any other key is a name, address or id: site data, compared as "*"
+# reads of Orchestrator objects and state, not appliance settings: their fields are not compared
+NOT_SETTINGS = {"template-groups", "appliances-all", "cluster-state", "groups", "overlay-config", "overlay-association", "zscaler-association", "netskope-association",
+                "axis-association", "region-associations", "regions", "segments", "zones", "interface-labels", "cluster-profiles", "cluster-profile-mapping",
+                "template-association", "appexpress-group-association", "ha-groups", "ids-state", "ids-profile-state", "network-role-and-site", "extra-info", "appliance"}
+
+
+def _record_map(value: Any) -> bool:
+    """Two or more non-empty objects with the same keys, keyed by name or id."""
+    return (isinstance(value, dict) and len(value) >= 2 and all(isinstance(v, dict) and v for v in value.values())
+            and len({tuple(sorted(v)) for v in value.values()}) == 1)
+
+
+def source_paths(value: Any, maps: set, prefix: str = "") -> set:
+    """Field paths of a read's data, the way known-source-fields.yaml writes them: "[]" for a list entry, "*" for a record-map key or a
+    key that is site data; maps holds the paths that are record maps on some appliance."""
+    if isinstance(value, dict):
+        star = prefix in maps or _record_map(value)
+        return set().union(set(), *(source_paths(v, maps, "{}.{}".format(prefix, k) if prefix else k)
+                                    for k, v in ((("*" if star or not SOURCE_KEY.match(str(k)) else str(k)), v) for k, v in value.items())))
+    if isinstance(value, list):
+        return set().union(set(), *(source_paths(v, maps, prefix + "[]") for v in value))
+    return {prefix}
+
+
+def new_source_fields(cap: "Capture") -> Dict[str, List[str]]:
+    """Read id -> fields its data holds that no capture of known-source-fields.yaml had, from every ok read (live, cached, orchestrator, backup)."""
+    known = load_yaml(KNOWN_SOURCE) or {}
+    fields, maps = known.get("fields") or {}, known.get("record_maps") or {}
+    found: Dict[str, set] = {}
+    for ident, data in cap.reads():
+        if ident in NOT_SETTINGS:
+            continue
+        new = source_paths(data, set(maps.get(ident) or [])) - set(fields.get(ident) or [])
+        if new:
+            found.setdefault(ident, set()).update(new)
+    return {ident: sorted(paths) for ident, paths in found.items()}
+
+
+def tag_new_source_fields(cap: "Capture", ledger: List[Dict[str, Any]]) -> None:
+    """One check-by-hand line per read holding fields never seen in any capture: no mapper was written with them in view."""
+    for ident, paths in sorted(new_source_fields(cap).items()):
+        shown = ", ".join(p or "(the whole read)" for p in paths[:12]) + (" ..." if len(paths) > 12 else "")
+        ledger.append({"item": ident, "disposition": "new-source-field", "target": "",
+                       "note": "{} field(s) no earlier capture had, so no converter rule was written with them in view: {}; check by hand what they set "
+                               "and whether the YAML needs it, and report them so the converter can learn them".format(len(paths), shown)})
+
+
 # sections where a field never seen in the field is never written, whatever its value: management access, interfaces and licensing can lock a box out
 NO_UNSEEN = {"deploymentInfo", "managementIp", "managementRoutes", "ipAllowList", "interfaceConfig", "linkAggregation", "bridgeGroups", "pppoe", "usblte", "ecLicensing"}
 
@@ -911,6 +968,7 @@ REPORT_GROUPS = [
     ("Gaps: the preconfig format has a place for it, but the value was not carried", {"unresolved", "unmapped-source-key"}),
     ("Not readable: the format has a place for it, but a GET cannot read it; check it by hand", {"not-readable"}),
     ("Written, not yet seen in the field: the value looks right, but no validated build has used the field; check it after /validate", {"unverified"}),
+    ("New settings: the appliance holds fields no earlier capture had, so no converter rule covers them; check them by hand", {"new-source-field"}),
     ("Outside preconfig: the format has no place for it; set it another way", {"outside-preconfig", "release-gated"}),  # release-gated: ledgers written before 1.3.0
     ("Owned elsewhere: comes from template groups or Orchestrator, as intended", {"template-group", "orchestrator-managed"}),
 ]
@@ -933,7 +991,7 @@ def verdict(ledger: List[Dict[str, Any]]) -> str:
     known = set().union(*(d for _, d in REPORT_GROUPS)) | QUIET
     errors = sum(1 for e in ledger if e["disposition"] == "toolkit-error")
     gaps = sum(1 for e in ledger if e["disposition"] in ("unresolved", "unmapped-source-key") or e["disposition"] not in known)
-    by_hand = sum(1 for e in ledger if e["disposition"] in ("not-readable", "unverified"))
+    by_hand = sum(1 for e in ledger if e["disposition"] in ("not-readable", "unverified", "new-source-field"))
     if errors or gaps:
         return "Incomplete for preconfig: {} gap(s), {} toolkit error(s).".format(gaps, errors)
     return "Complete for preconfig" + ("; {} item(s) to check by hand.".format(by_hand) if by_hand else ".")
@@ -1090,6 +1148,7 @@ def convert(args: argparse.Namespace, template: Path, template_why: str, default
     if unseen:
         ledger.append({"item": "release fit", "disposition": "context", "target": "", "note": "{} key paths are not shown in the default template {} (valid optional keys or unverified for that release): {}".format(len(unseen), template.name, ", ".join(unseen[:12]) + (" ..." if len(unseen) > 12 else ""))})
     tag_unmapped(cap, ledger)
+    tag_new_source_fields(cap, ledger)
     scope_by_template(ledger, set(default_doc))
     out.mkdir(parents=True, exist_ok=True)
     decisions_in = load_yaml(args.decisions) if args.decisions else {}

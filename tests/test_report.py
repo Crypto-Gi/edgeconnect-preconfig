@@ -19,6 +19,9 @@ class FakeCap:
     def data(self, ident, prefer="live"):
         return {"appliance": APP, "deployment": DEP}.get(ident)
 
+    def reads(self):
+        return iter(())
+
 
 def entry(disposition, target="", item="x", note="n"):
     return {"item": item, "disposition": disposition, "target": target, "note": note}

@@ -36,5 +36,5 @@ d6af6260ab8bf77e  <tmp>/out/branch-a/site-identical/ledger.json
 1d95583f6638fb83  <tmp>/out/branch-a/site-identical/rendered/branch-a_preconfig.yml
 ab457198bf6c3d59  <tmp>/out/branch-a/site-identical/rendered/branch-b_preconfig.yml
 78391ffe748379ea  <tmp>/out/branch-a/site-identical/sites.csv
-2be4ea34c1c4c558  <tmp>/out/branch-a/site-identical/summary.md
+e0d59cce82ea3822  <tmp>/out/branch-a/site-identical/summary.md
 91affb8d7d3f0445  <tmp>/out/branch-a/site-identical/variables.csv

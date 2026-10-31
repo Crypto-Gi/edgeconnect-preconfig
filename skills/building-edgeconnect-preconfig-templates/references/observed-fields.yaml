@@ -1,4 +1,4 @@
-# Key paths seen in the field (translate.observed_paths, docs/decisions/0018).
+# Key paths seen in the field (translate.observed_paths, docs/decisions/0020).
 # observed: written by a build of a real capture that a real /validate accepted (corpus of 98 captures from 6 Orchestrators,
 #   ECOS 9.3 to 9.7.2, targets 9.6.4, 9.7.1 and 10.0; 2026-10-31). Generated; field names only, never values.
 # verified: added by hand after a site with the field validated; give the date and the evidence in a comment.
@@ -457,4 +457,37 @@ observed:
   - vxlan.vniVrfMaps.vni
   - vxlan.vniVrfMaps.zone
   - vxlan.vtepSrcInterface
-verified: []
+verified:
+  # 2026-10-31: IPv6 router advertisement, applied live 23 times on the virtual lab with no post-apply diff (prefix_id in 6 of them)
+  - deploymentInfo.raInfo
+  - deploymentInfo.raInfo.hoplimit
+  - deploymentInfo.raInfo.linkmtu
+  - deploymentInfo.raInfo.managedflag
+  - deploymentInfo.raInfo.maxinterval
+  - deploymentInfo.raInfo.mininterval
+  - deploymentInfo.raInfo.otherconfigflag
+  - deploymentInfo.raInfo.prefix_id
+  - deploymentInfo.raInfo.prefix_id.autonomous
+  - deploymentInfo.raInfo.prefix_id.id
+  - deploymentInfo.raInfo.prefix_id.onlink
+  - deploymentInfo.raInfo.prefix_id.prefix
+  - deploymentInfo.raInfo.prefix_id.prefixvalidlifetime
+  - deploymentInfo.raInfo.prefix_id.prfrdlifetime
+  - deploymentInfo.raInfo.raInterfaceName
+  - deploymentInfo.raInfo.reachabletime
+  - deploymentInfo.raInfo.retranstimer
+  - deploymentInfo.raInfo.routerdeflifetime
+  - deploymentInfo.raInfo.routerpreference
+  - deploymentInfo.raInfo.sendadv
+  # 2026-10-31: top-level static routes (pre-segment layout), applied live 45 times on the virtual lab, 44 completed
+  - localRoutes.routes.advertise
+  - localRoutes.routes.advertiseToBgp
+  - localRoutes.routes.advertiseToOspf
+  - localRoutes.routes.comment
+  - localRoutes.routes.interfaceName
+  - localRoutes.routes.metric
+  - localRoutes.routes.nextHop
+  - localRoutes.routes.routeIpSubnet
+  - localRoutes.routes.routeLabel
+  - localRoutes.routes.tag
+  - localRoutes.routes.zone
