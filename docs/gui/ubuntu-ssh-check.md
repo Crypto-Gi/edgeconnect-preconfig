@@ -6,7 +6,7 @@ Open two Mac terminals.
 - **Terminal 1** holds the SSH session to Ubuntu: blocks 1 to 4 run there.
 - **Terminal 2** is only for the tunnel.
 
-The blocks clone the `gui` branch (1.4.0-rc.1) into a scratch folder on Ubuntu, and do not touch any toolkit install. Uploads stay off, so nothing is uploaded to any Orchestrator. The build in check 4 reads one appliance with GET only, and asks your validator's `/validate`, which changes nothing.
+The blocks clone the `gui` branch (1.4.0-rc.1 when this check was written) into a scratch folder on Ubuntu, and do not touch any toolkit install. Uploads stay off, so nothing is uploaded to any Orchestrator. The build in check 4 reads one appliance with GET only, and asks your validator's `/validate`, which changes nothing.
 
 If block 1 says `ensurepip is not available`, run `sudo apt install -y python3-venv` and then run block 1 again.
 
@@ -25,7 +25,7 @@ python -c "import sys; print(sys.version.split()[0])"
 
 Expected:
 - the commit line;
-- `1.4.0-rc.1`;
+- the version of the `gui` branch you cloned, such as `1.4.0-rc.2`;
 - a Python version of 3.9 or later.
 
 ## Block 2: give it your Orchestrators
