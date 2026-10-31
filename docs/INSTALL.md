@@ -67,7 +67,7 @@ Every key, its default and the values it accepts: [`.env.example`](../.env.examp
 
 ## The local web GUI
 
-The GUI (1.4.0-rc.1, a pre-release) is on the `gui` branch; `setup.sh` installs `main`, which does not have it yet. Switch the clone `setup.sh` made to `gui` once; later `setup.sh` runs keep it on `gui` and update it, and the `edgeconnect-preconfig` command it installed then has the `gui` command:
+The GUI (new in 1.4.0-rc.1; the latest pre-release is 1.4.0-rc.2) is on the `gui` branch; `setup.sh` installs `main`, which does not have it yet. Switch the clone `setup.sh` made to `gui` once; later `setup.sh` runs keep it on `gui` and update it, and the `edgeconnect-preconfig` command it installed then has the `gui` command:
 
 ```bash
 git -C <install folder>/edgeconnect-preconfig checkout gui
