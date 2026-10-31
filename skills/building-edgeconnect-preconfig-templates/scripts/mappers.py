@@ -1042,10 +1042,13 @@ def m_multicast(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
             vlan = int(a.get("vlan") or 0)
             known |= {"{}.{}".format(m["ifName"], vlan) if vlan > 0 else m["ifName"], m["ifName"], ctx.label(a["label"])}
     known |= set((ctx.data("loopbacks") or {}).keys())
-    out = []
+    out, defaults = [], 0
     for seg in source:
         try:
             enabled = flags.get(str(seg["vrf_id"]))
+            if enabled is False and not any(seg.get(k) for k in ("rp", "pim", "igmp", "filter_name")):  # the factory default every 9.7 appliance reports
+                defaults += 1
+                continue
             if enabled is True and nul(seg.get("rp")) is None:  # Orchestrator /validate: "rpAddresses required when multicast enabled" (9.7.1)
                 ctx.note("multicast-config", "unresolved", "multicast", "segment {}: multicast is enabled without an RP address; Orchestrator requires rpAddresses when enable is true; "
                          "not written, set the RP by hand if this site needs multicast{}".format(
@@ -1064,7 +1067,9 @@ def m_multicast(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         except ITEM_ERRORS as err:
             item_failed(ctx, "multicast-config[{}]".format(seg.get("vrf_id") if isinstance(seg, dict) else seg), "multicast", err)
             continue
-    if source and not out:  # every segment failed (ledgered above); an empty source list is written as before
+    if defaults:
+        ctx.note("multicast-config", "default-omitted", "multicast", "{} segment(s) with multicast disabled and not configured, not written".format(defaults))
+    if source and not out:  # every segment failed (ledgered above) or is the default; an empty source list is written as before
         return None
     ctx.note("multicast-config", "mapped", "multicast", "{} segment(s); igmpEnable true when the interface is listed under igmp (assumption); enable written as a string true/false/none".format(len(out)))
     if one:

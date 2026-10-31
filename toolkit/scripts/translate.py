@@ -764,8 +764,34 @@ def allowed_paths(target: str) -> set:
     return flat_paths(load_yaml(find_default_template(target)[0])) | TEMPLATE_OMISSIONS
 
 
-def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = "") -> Any:
-    """Drop every key path not in `allowed`, one ledger line per path: an appliance can report keys the target's format rejects (ECOS 9.5.x NAC)."""
+def template_types(target: str) -> Dict[str, type]:
+    """The value type of each leaf path in the target release's default template: bool, int (numbers) or str; blank or mixed leaves are left out."""
+    seen: Dict[str, set] = {}
+
+    def walk(value: Any, prefix: str) -> None:
+        if isinstance(value, dict):
+            for k, v in value.items():
+                walk(v, "{}.{}".format(prefix, k) if prefix else str(k))
+        elif isinstance(value, list):
+            for v in value:
+                walk(v, prefix)
+        elif value is not None:
+            seen.setdefault(prefix, set()).add(bool if isinstance(value, bool) else int if isinstance(value, (int, float)) else str)
+    walk(load_yaml(find_default_template(target)[0]), "")
+    return {p: next(iter(t)) for p, t in seen.items() if len(t) == 1}
+
+
+def _fits(value: Any, expected: type) -> bool:
+    if expected is bool:
+        return isinstance(value, bool)
+    if expected is int:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return not isinstance(value, (dict, list))  # text: any scalar or null (/validate accepts a null text field)
+
+
+def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = "", types: Optional[Dict[str, type]] = None) -> Any:
+    """Drop every key path not in `allowed`, one ledger line per path: an appliance can report keys the target's format rejects (ECOS 9.5.x NAC).
+    With `types` (template_types), also drop a value of another type than the template's yes/no, number or text leaf: /validate rejects a null flag."""
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
@@ -775,10 +801,24 @@ def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = 
                     ledger.append({"item": "source key", "disposition": "outside-preconfig", "target": p,
                                    "note": "not in the target release's preconfig format (its default template), so not written; the target keeps its own setting"})
                 continue
-            out[k] = prune(v, allowed, ledger, p)
+            if types and p in types and isinstance(v, list):  # a list of yes/no, numbers or text: check each item
+                bad = [x for x in v if not _fits(x, types[p]) or x is None]
+                if bad and not any(e["target"] == p for e in ledger):
+                    ledger.append({"item": "source value", "disposition": "unresolved", "target": p,
+                                   "note": "the appliance reported {} item(s) that are not a {} as the target release's format needs ({!r}), so not written; check it by hand".format(
+                                       len(bad), {bool: "true/false", int: "number", str: "text"}[types[p]], bad[0] if not isinstance(bad[0], (dict, list)) else type(bad[0]).__name__)})
+                out[k] = [x for x in v if _fits(x, types[p]) and x is not None]
+                continue
+            if types and p in types and not _fits(v, types[p]):
+                if not any(e["target"] == p for e in ledger):
+                    ledger.append({"item": "source value", "disposition": "unresolved", "target": p,
+                                   "note": "the appliance reported {!r}, not a {} as the target release's format needs, so not written; check it by hand".format(
+                                       v if not isinstance(v, (dict, list)) else type(v).__name__, {bool: "true/false", int: "number", str: "text"}[types[p]])})
+                continue
+            out[k] = prune(v, allowed, ledger, p, types)
         return out
     if isinstance(value, list):
-        return [prune(v, allowed, ledger, prefix) for v in value]
+        return [prune(v, allowed, ledger, prefix, types) for v in value]
     return value
 
 
@@ -974,7 +1014,7 @@ def convert(args: argparse.Namespace, template: Path, template_why: str, default
     cap = Capture(args.capture)
     ledger: List[Dict[str, Any]] = [{"item": "default template", "disposition": "context", "target": template.name, "note": template_why}]
     try:
-        reference = prune(build(cap, ledger, args.target_ecos), allowed_paths(args.target_release), ledger)
+        reference = prune(build(cap, ledger, args.target_ecos), allowed_paths(args.target_release), ledger, types=template_types(args.target_release))
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2
@@ -998,7 +1038,7 @@ def convert(args: argparse.Namespace, template: Path, template_why: str, default
     order = list(default_doc)
     reference = {k: reference[k] for k in sorted(reference, key=lambda x: order.index(x) if x in order else 999)}
     try:
-        others = [] if section_modes else [prune(build(Capture(folder), [], args.target_ecos), allowed_paths(args.target_release), []) for folder in args.compare or []]
+        others = [] if section_modes else [prune(build(Capture(folder), [], args.target_ecos), allowed_paths(args.target_release), [], types=template_types(args.target_release)) for folder in args.compare or []]
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2

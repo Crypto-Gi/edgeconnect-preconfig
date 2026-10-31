@@ -203,6 +203,26 @@ class Release(unittest.TestCase):
         self.assertEqual(out, {"a": {"keep": 1}, "l": [{"x": 2}, {}]})
         self.assertEqual([(e["target"], e["disposition"]) for e in ledger], [("a.extra", "outside-preconfig"), ("l.extra", "outside-preconfig")])
 
+    def test_prune_drops_a_value_of_the_wrong_type_for_the_target_template(self):
+        # a null or wrong type in a yes/no or number field fails /validate (10.0 flowProcess); a null in a text field is accepted
+        types = {"a.flag": bool, "a.n": int, "a.text": str, "l.name": str}
+        ledger = []
+        out = prune({"a": {"flag": None, "n": "x", "text": None}, "l": [{"name": {"x": 1}}, {"name": "ok"}]},
+                    {"a", "a.flag", "a.n", "a.text", "l", "l.name"}, ledger, types=types)
+        self.assertEqual(out, {"a": {"text": None}, "l": [{}, {"name": "ok"}]})
+        self.assertEqual([(e["target"], e["disposition"]) for e in ledger], [("a.flag", "unresolved"), ("a.n", "unresolved"), ("l.name", "unresolved")])
+        ok = prune({"a": {"flag": False, "n": 0, "text": "t"}}, {"a", "a.flag", "a.n", "a.text"}, ledger, types=types)
+        self.assertEqual(ok, {"a": {"flag": False, "n": 0, "text": "t"}})
+        names = []  # a list of text (template groups, DNS servers): each item is checked, a null item dropped
+        self.assertEqual(prune({"g": ["a", None, "b"], "d": ["8.8.8.8"]}, {"g", "d"}, names, types={"g": str, "d": str}), {"g": ["a", "b"], "d": ["8.8.8.8"]})
+        self.assertEqual([(e["target"], e["disposition"]) for e in names], [("g", "unresolved")])
+
+    def test_template_types_reads_the_target_template(self):
+        from translate import template_types
+        types = template_types("10.0.0.40860")
+        self.assertIs(types["secureWebServicesConfig.urlClassificationConfig.flowProcess"], bool)
+        self.assertNotIn("multicast.filterName", types)  # blank in the template: any value
+
     def test_allowed_paths_follow_the_target_template_plus_known_omissions(self):
         allowed = allowed_paths("9.7.1.42046")
         self.assertIn("nac.aaaProfile.dot1x_server_group", allowed)
@@ -1282,6 +1302,14 @@ class ReviewRoundTwo(unittest.TestCase):
         m_vxlan(c)
         self.assertEqual([n["disposition"] for n in notes if n["item"] == "vxlan-vni-map"], ["unresolved"])
 
+    def test_multicast_disabled_and_not_configured_is_left_out(self):
+        off = {"vrf_id": 0, "rp": "", "pim": {}, "igmp": {}, "filter_name": None}
+        c, notes = ctx({"deployment": DEP, "multicast-enable": [{"vrf_id": 0, "enable": False}], "multicast-config": [off]})
+        self.assertIsNone(m_multicast(c))
+        self.assertEqual([(n["disposition"], n["target"]) for n in notes if n["item"].startswith("multicast")], [("default-omitted", "multicast")])
+        c, _ = ctx({"deployment": DEP3, "multicast-enable": [{"vrf_id": 0, "enable": False}, {"vrf_id": 1, "enable": None}], "multicast-config": [off, dict(off, vrf_id=1)]})
+        self.assertEqual([m["enable"] for m in m_multicast(c)], ["none"])  # an unknown enable is still written
+
     def test_empty_multicast_list_kept(self):
         c, notes = ctx({"deployment": DEP, "multicast-config": []})
         self.assertEqual(m_multicast(c), [])
@@ -1610,8 +1638,9 @@ class MulticastOneObject(unittest.TestCase):
                         "multicast-config": [{"vrf_id": 0, "rp": "192.0.2.9", "pim": {}, "igmp": {}, "filter_name": None},
                                              {"vrf_id": 1, "rp": "", "pim": {}, "igmp": {}, "filter_name": None},
                                              {"vrf_id": 2, "rp": "", "pim": {}, "igmp": {}, "filter_name": None}]})
-        self.assertEqual([(o["segment"], o["enable"], o["rpAddresses"]) for o in m_multicast(c)], [("Default", "true", "192.0.2.9"), ("guest", "false", None)])
+        self.assertEqual([(o["segment"], o["enable"], o["rpAddresses"]) for o in m_multicast(c)], [("Default", "true", "192.0.2.9")])  # guest: disabled and not configured
         self.assertEqual(len([n for n in notes if n["disposition"] == "unresolved" and "without an RP address" in n["note"]]), 1, notes)
+        self.assertIn(("default-omitted", "multicast"), [(n["disposition"], n["target"]) for n in notes])
 
 
 class ManagedBgpNeighbors(unittest.TestCase):
