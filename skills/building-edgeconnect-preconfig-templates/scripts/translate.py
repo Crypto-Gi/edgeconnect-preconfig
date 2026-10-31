@@ -19,14 +19,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, RunContext, find_default_template, load_yaml, output_root, run_context, running, toolkit_version, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
+from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, RunContext, dump_yaml, find_default_template, load_yaml, output_root, run_context, running, toolkit_version, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 from generate import generate  # noqa: E402
 from decisions import list_mode, make_decide, propose  # noqa: E402
 from variables import classify, only_at, read_sheet, sheet_items, write_sheet  # noqa: E402  guard-ok: imported after the sys.path insert
 from mappers import ECOS_RELEASE, ITEM_ERRORS, MAPPERS, Ctx, cli_lines, failed_read, guarded, id_names, item_failed, own_sharing, passthrough_max_bandwidth, Unreadable, unreadable_read  # noqa: E402  guard-ok: imported after the sys.path insert
 
 HARDEN = {0: "All", 1: "harden", 2: "stateful", 3: "statefulSNAT"}  # verified via Swagger + live apply-and-diff
-NETWORK_ROLE = {0: "non-hub", 1: "hub"}  # verified across multiple Orchestrators: code 1 = overlay hub; code 0 = non-hub; nrhub: no sample, unresolved
+NETWORK_ROLE = {0: "non-hub", 1: "hub", 3: "nrhub"}  # 0/1 verified across Orchestrators; 3 = nrhub: set live on the full-coverage lab, Pass 1, 2026-10-31
 
 DEFAULT_TEMPLATE = DEFAULT_TEMPLATES_DIR / "orchestrator-9.7.1.42046.yml"
 
@@ -303,7 +303,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
         role = NETWORK_ROLE.get(int(app["networkRole"]))
         if role:
             info["networkRole"] = role
-            note("appliance.networkRole", "mapped", "applianceInfo.networkRole", "verified across reference Orchestrators: code 1 = hub (all overlay hubs), code 0 = non-hub; nrhub has no sample")
+            note("appliance.networkRole", "mapped", "applianceInfo.networkRole", "verified: code 1 = hub (all overlay hubs), code 0 = non-hub (reference Orchestrators), code 3 = nrhub (full-coverage lab, 2026-10-31)")
         else:
             note("appliance.networkRole", "unresolved", "applianceInfo.networkRole", "code {} has no known meaning".format(app["networkRole"]))
     if failed_read(ctx, "region-associations", "the region is not written", "applianceInfo.region"):
@@ -1240,7 +1240,7 @@ def convert(args: argparse.Namespace, template: Path, template_why: str, default
         extra = sorted({p for o in others for p in only_at(mine, dict(sheet_items(o)))[0]})
         ledger.append({"item": "site comparison", "disposition": "context", "target": "", "note": "compared with {} other site(s); {} field(s) exist only at the others (different site type, not in the sheet){}".format(
             len(others), len(extra), ": " + ", ".join(extra[:12]) + (" ..." if len(extra) > 12 else "") if extra else "")})
-    (out / "reference.yaml").write_text(yaml.safe_dump(reference, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    (out / "reference.yaml").write_text(dump_yaml(reference, sort_keys=False, allow_unicode=True), encoding="utf-8")
     from generate import Builder
     probe = Builder()
     probe.find_secrets(reference)
@@ -1253,7 +1253,7 @@ def convert(args: argparse.Namespace, template: Path, template_why: str, default
         (out / "proposal.md").write_text("| Section | Leaves | Site-specific | Secrets | Proposed | Why |\n|---|---|---|---|---|---|\n" + "\n".join(
             "| {} | {} | {} | {} | {} | {} |".format(s, p["leaves"], p["site_specific_leaves"], p["secrets"], p["proposed"], p["why"]) for s, p in proposal.items()) + "\n\nSections the source did not provide (add any to `include_from_default` in decisions.yaml to start from the default template's example values): " + ", ".join(s for s in default_doc if s not in reference) + "\n", encoding="utf-8")
         decisions = decisions_in
-        (out / "decisions.yaml").write_text(yaml.safe_dump(dict(decisions, approved_by=decisions.get("approved_by", "owner")), sort_keys=False), encoding="utf-8")
+        (out / "decisions.yaml").write_text(dump_yaml(dict(decisions, approved_by=decisions.get("approved_by", "owner")), sort_keys=False), encoding="utf-8")
         list_fixed = {p for p in ("templateGroups.groups", "businessIntentOverlays.overlays") if list_mode(decisions, p.split(".")[0]) == "fixed"}
         gen = dict(decide=make_decide(decisions), list_fixed=list_fixed)
     else:

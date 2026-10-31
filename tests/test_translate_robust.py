@@ -700,6 +700,39 @@ class NothingUnknownIsWritten(unittest.TestCase):
                     self.check(out, ledger, "10.0.0.40860")
 
 
+class NetworkRole(unittest.TestCase):
+    def test_code_3_is_nrhub(self):
+        """The full-coverage lab set a box to nrhub (Pass 1, 2026-10-31) and the API reported networkRole 3; it was left out, and the field is required."""
+        out, ledger = translate(lambda d: d["appliance"].update(networkRole="3"))
+        self.assertEqual(out["applianceInfo"]["networkRole"], "nrhub")
+        self.assertFalse([e for e in ledger if e["target"] == "applianceInfo.networkRole" and e["disposition"] != "mapped"])
+
+
+class YamlTwelveNumbers(unittest.TestCase):
+    """Text a YAML 1.2 reader takes for a number is quoted in every YAML the toolkit writes (full-coverage lab: zipCode 08034 and 1e5 unquoted)."""
+
+    def test_reference_yaml_and_the_validation_copy_quote_number_like_text(self):
+        import json
+        import shutil
+        import tempfile
+        import translate
+        from synth import dump
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(tmp))
+        cap = tmp / "cap"
+        shutil.copytree(str(Path(__file__).resolve().parent / "fixtures" / "compare" / "captures" / "base"), str(cap))
+        info = cap / "capture" / "extra-info.live.json"
+        doc = json.loads(info.read_text())
+        doc["data"]["location"].update(zipCode="08034", address2="1e5")
+        info.write_text(json.dumps(doc))
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            translate.main(["--capture", str(cap), "--site-type", "t", "--out", str(tmp / "out")])
+        text = (tmp / "out" / "reference.yaml").read_text()
+        self.assertIn("zipCode: '08034'", text)
+        self.assertIn("address2: '1e5'", text)
+        self.assertIn("zipCode: '08034'", dump({"location": {"zipCode": "08034"}}))
+
+
 class LedgerNeverClaimsWhatIsNotWritten(unittest.TestCase):
     """A section the converter maps but the format checks leave out (here a VTI, which no validated build has used) is never ledgered
     `mapped`: the full-coverage lab found VTIs, custom tags, NAC and SWS missing from the YAML while the ledger said mapped."""

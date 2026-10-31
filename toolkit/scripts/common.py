@@ -688,6 +688,26 @@ def parse_yaml(text: str) -> Any:
     return yaml.load(text, Loader=Core)
 
 
+# YAML 1.2 core-schema numbers PyYAML (1.1) writes unquoted: 08034, 1e5, 0o17; a 1.2 reader would turn them into numbers
+CORE_NUMBER = re.compile(r"^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+|[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$")
+
+
+def dump_yaml(doc: Any, **options: Any) -> str:
+    """yaml.safe_dump that also quotes every text value a YAML 1.2 reader would take for a number (zipCode 08034 stays text)."""
+    import yaml
+
+    class Dumper(yaml.SafeDumper):
+        pass
+
+    def text(dumper: Any, value: str) -> Any:
+        if CORE_NUMBER.match(value):
+            return dumper.represent_scalar("tag:yaml.org,2002:str", value, style="'")
+        return yaml.SafeDumper.represent_str(dumper, value)
+
+    Dumper.add_representer(str, text)
+    return yaml.dump(doc, Dumper=Dumper, **options)
+
+
 def load_yaml(path: Path) -> Any:
     return parse_yaml(path.read_text(encoding="utf-8"))
 
