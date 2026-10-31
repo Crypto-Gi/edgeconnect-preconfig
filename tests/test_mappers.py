@@ -196,6 +196,11 @@ class Substitution(unittest.TestCase):
         self.assertEqual(doc["applianceInfo"]["group"], "X")  # input untouched
 
 
+def flat_paths_of(doc):
+    from translate import flat_paths
+    return flat_paths(doc)
+
+
 class Release(unittest.TestCase):
     def test_prune_keeps_only_allowed_paths_and_ledgers_each_drop_once(self):
         ledger = []
@@ -207,14 +212,31 @@ class Release(unittest.TestCase):
         # a null or wrong type in a yes/no or number field fails /validate (10.0 flowProcess); a null in a text field is accepted
         types = {"a.flag": bool, "a.n": int, "a.text": str, "l.name": str}
         ledger = []
-        out = prune({"a": {"flag": None, "n": "x", "text": None}, "l": [{"name": {"x": 1}}, {"name": "ok"}]},
+        out = prune({"a": {"flag": None, "n": {"x": 1}, "text": None}, "l": [{"name": {"x": 1}}, {"name": "ok"}]},
                     {"a", "a.flag", "a.n", "a.text", "l", "l.name"}, ledger, types=types)
         self.assertEqual(out, {"a": {"text": None}, "l": [{}, {"name": "ok"}]})
         self.assertEqual([(e["target"], e["disposition"]) for e in ledger], [("a.flag", "unresolved"), ("a.n", "unresolved"), ("l.name", "unresolved")])
         ok = prune({"a": {"flag": False, "n": 0, "text": "t"}}, {"a", "a.flag", "a.n", "a.text"}, ledger, types=types)
         self.assertEqual(ok, {"a": {"flag": False, "n": 0, "text": "t"}})
+        real = prune({"a": {"flag": True, "n": "auto", "text": "08034"}, "z": None}, {"a", "a.flag", "a.n", "a.text", "z"}, ledger, types=dict(types, z=int))
+        self.assertEqual(real, {"a": {"flag": True, "n": "auto", "text": "08034"}, "z": None})  # interfaceSpeed "auto", a zip code with a leading zero, a null zip code
+
+    def test_real_values_the_10_0_template_example_types_get_wrong_are_kept(self):
+        from translate import template_types
+        types, ledger = template_types("10.0.0.40860"), []
+        doc = {"applianceInfo": {"location": {"zipCode": "08034"}}, "interfaceConfig": {"interfaces": [{"interfaceSpeed": "auto"}]},
+               "secureWebServicesConfig": {"urlClassificationConfig": {"flowProcess": None}}}
+        out = prune(doc, flat_paths_of(doc), ledger, types=types)
+        self.assertEqual(out["applianceInfo"]["location"]["zipCode"], "08034")
+        self.assertEqual(out["interfaceConfig"]["interfaces"], [{"interfaceSpeed": "auto"}])
+        self.assertEqual(out["secureWebServicesConfig"]["urlClassificationConfig"], {})
+        self.assertEqual([e["target"] for e in ledger], ["secureWebServicesConfig.urlClassificationConfig.flowProcess"])
+
+    def test_list_items_are_checked(self):
+        ledger = []
         names = []  # a list of text (template groups, DNS servers): each item is checked, a null item dropped
         self.assertEqual(prune({"g": ["a", None, "b"], "d": ["8.8.8.8"]}, {"g", "d"}, names, types={"g": str, "d": str}), {"g": ["a", "b"], "d": ["8.8.8.8"]})
+        self.assertEqual(ledger, [])
         self.assertEqual([(e["target"], e["disposition"]) for e in names], [("g", "unresolved")])
 
     def test_template_types_reads_the_target_template(self):

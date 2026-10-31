@@ -784,14 +784,14 @@ def template_types(target: str) -> Dict[str, type]:
 def _fits(value: Any, expected: type) -> bool:
     if expected is bool:
         return isinstance(value, bool)
-    if expected is int:
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
-    return not isinstance(value, (dict, list))  # text: any scalar or null (/validate accepts a null text field)
+    # a number or text leaf takes any scalar or null: the example type is not the documented one (zipCode 94088 is "any string",
+    # interfaceSpeed 1000 also takes "auto"), and /validate accepts a null there (corpus of 98 captures, 2026-10-31)
+    return not isinstance(value, (dict, list))
 
 
 def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = "", types: Optional[Dict[str, type]] = None) -> Any:
     """Drop every key path not in `allowed`, one ledger line per path: an appliance can report keys the target's format rejects (ECOS 9.5.x NAC).
-    With `types` (template_types), also drop a value of another type than the template's yes/no, number or text leaf: /validate rejects a null flag."""
+    With `types` (template_types), also drop a non-true/false value in a yes/no leaf and an object or list in a number or text leaf: /validate rejects a null flag."""
     if isinstance(value, dict):
         out = {}
         for k, v in value.items():
