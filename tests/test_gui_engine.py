@@ -149,7 +149,8 @@ class EngineTests(unittest.TestCase):
         fingerprint = [r["value"] for r in result.outputs if r["kind"] == "fingerprint"]
         self.assertEqual(result.approval, {"gates": [{"prompt": "Type the Orchestrator nickname lab to upload: ", "expected": "lab",
                                                       "refusal": "upload approval refused: the nickname typed is not lab"}],
-                                           "fingerprint": fingerprint[0], "orchestrator": "lab"})
+                                           "fingerprint": fingerprint[0], "orchestrator": "lab", "command": result.approval["command"]})
+        self.assertEqual(result.approval["command"][-1], "--approve")
 
     def test_text_holds_stdout_and_stderr_and_the_exit_code_of_an_argparse_error(self):
         result = engine.run(["build", "--orchestrator", "lab"], **self.context(self.on))
@@ -205,8 +206,14 @@ class EngineTests(unittest.TestCase):
         self.assertEqual((checked.status, checked.counts, self.orch.posts()), ("done", {"PLANNED": 2}, []))
         self.assertIn("checking (no upload without --approve)", checked.text)
         approvals = GuiApprovals()
-        with self.assertRaisesRegex(ApprovalError, "nickname typed is not lab"):
+        log = self.tmp / "approve-log"
+        with mock.patch.dict(os.environ, {"EDGECONNECT_REPORT_DIR": str(log)}), self.assertRaisesRegex(ApprovalError, "nickname typed is not lab"):
             engine.approve(approvals, checked.approval, ["Lab"])
+        refused = json.loads((log / "preconfig.jsonl").read_text(encoding="utf-8"))  # the wrong nickname never runs the CLI, so the engine logs it
+        self.assertEqual((refused["status"], refused["changes_written"], refused["source"], refused["summary"]["plan_fingerprint"]),
+                         ("REFUSED", "no", "gui", checked.approval["fingerprint"]))
+        command = refused["summary"]["command"].split()
+        self.assertEqual((command[:2], command[-1], refused["summary"]["csv"]["path"]), (["edgeconnect-preconfig", "upload"], "--approve", str(sheet)))
         approver = engine.approve(approvals, checked.approval, ["lab"])
         sent = engine.upload(sheet, "lab", folder=self.site, approver=approver, **self.context(self.on))
         self.assertEqual((sent.exit_code, sent.status, sent.approval), (0, "done", None))
