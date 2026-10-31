@@ -114,9 +114,16 @@ class Ctx:
             raise Unresolved("vrf id {} names no segment".format(vrf))
         return name
 
-    def zone(self, vrf: Any, zone: Any) -> Optional[str]:
+    def zone(self, vrf: Any, zone: Any, item: str = "", target: str = "") -> Optional[str]:
+        """Zone name; zone ids are global, and a segment's vrfZonesMap can lack a zone another segment lists (lab: lo2 in corp, zone TRUSTED).
+        With a target, a zone found nowhere is ledgered instead of written as null unnoticed."""
         self.readable("vrfZonesMap")
-        return self.zones.get(str(vrf), {}).get(str(zone))
+        name = self.zones.get(str(vrf), {}).get(str(zone))
+        if name is None:
+            name = next((m[str(zone)] for m in self.zones.values() if m.get(str(zone)) is not None), None)
+        if name is None and target and zone not in (None, ""):
+            self.note(item, "unresolved", target, "zone id {} of segment {} is not among the zones (deployment.sysConfig.vrfZonesMap); written as null, set it by hand".format(zone, vrf))
+        return name
 
     def role(self, ident: Any) -> Optional[str]:
         self.readable("roles")
@@ -323,7 +330,8 @@ def m_loopbackInterface(ctx: Ctx) -> Optional[Dict[str, Any]]:
     if not items:
         return None
     out = each(ctx, "loopbacks", "loopbackInterface", items, lambda k, v: {"interfaceId": k, "adminStatus": ADMIN[bool(v["admin"])], "ipAddressMask": "{}/{}".format(v["ipaddr"], v["nmask"]),
-               "interfaceLabel": ctx.label(v["label"]), "zone": ctx.zone(v["vrf_id"], v["zone"]), "role": ctx.role(v.get("role_id", 0)), "segment": ctx.segment(v["vrf_id"])})
+               "interfaceLabel": ctx.label(v["label"]), "zone": ctx.zone(v["vrf_id"], v["zone"], "loopbacks[{}]".format(k), "loopbackInterface.loopbacks[].zone"),
+               "role": ctx.role(v.get("role_id", 0)), "segment": ctx.segment(v["vrf_id"])})
     if not out:
         return None
     ctx.note("loopbacks", "mapped", "loopbackInterface", "{} loopbacks".format(len(out)))
@@ -1454,7 +1462,8 @@ def m_virtualTunnelInterface(ctx: Ctx) -> Optional[Dict[str, Any]]:
     out = each(ctx, "vtis", "virtualTunnelInterface", sorted(mine.items()), lambda k, v: {
         "interfaceId": k, "ipAddressMask": "{}/{}".format(v["ipaddr"], v["nmask"]), "ipAddressAliasMask": "{}/{}".format(v["ipaddr_alias"], v["nmask_alias"]) if v.get("ipaddr_alias") not in (None, "", "0.0.0.0") else None,
         "adminStatus": ADMIN[bool(v["admin"])], "passthroughTunnel": nul(v["tunnel"]), "interfaceType": v["side"], "interfaceLabel": ctx.label(v["label"]), "interfaceLabelAlias": ctx.label(v.get("label_alias")),
-        "zone": ctx.zone(v["vrf_id"], v["zone"]), "role": ctx.role(v.get("role_id", 0)), "segment": ctx.segment(v["vrf_id"]), "autoDistribute": v["auto_distribute"], "behindNat": v["behindNAT"]})
+        "zone": ctx.zone(v["vrf_id"], v["zone"], "vtis[{}]".format(k), "virtualTunnelInterface.vtis[].zone"), "role": ctx.role(v.get("role_id", 0)), "segment": ctx.segment(v["vrf_id"]),
+        "autoDistribute": v["auto_distribute"], "behindNat": v["behindNAT"]})
     if not out:
         return None
     ctx.note("vtis", "mapped", "virtualTunnelInterface", "{} user interfaces (no user-defined sample was available: shape verified against the validator only on synthetic data)".format(len(out)))

@@ -38,6 +38,18 @@ class MapperRules(unittest.TestCase):
         c, _ = ctx({"peer-priority": {"peerlist": {"B": {"peer_metric": 0, "peer_weight": 5}, "A": {"peer_metric": 0, "peer_weight": 10}}}})
         self.assertEqual(m_peerPriority(c), {"peerPriorities": [{"peerName": "A", "priority": 10}, {"peerName": "B", "priority": 5}]})
 
+    def test_a_loopback_zone_missing_from_its_segment_map_is_resolved_or_ledgered(self):
+        """Full-coverage lab, Pass 1: lo2 in segment corp with zone TRUSTED was written with zone null and no ledger line."""
+        from mappers import m_loopbackInterface
+        dep = copy.deepcopy(DEP)
+        dep["sysConfig"]["vrfs"].append({"id": "1", "name": "corp"})
+        dep["sysConfig"]["vrfZonesMap"] = {"0": {"a": {"id": 0, "name": "Default"}, "b": {"id": 5, "name": "TRUSTED"}}, "1": {"a": {"id": 0, "name": "Default"}}}
+        lo = {"ipaddr": "198.19.1.1", "nmask": 32, "admin": True, "label": "", "vrf_id": 1, "zone": 5}
+        c, notes = ctx({"deployment": dep, "loopbacks": {"lo2": lo, "lo3": dict(lo, zone=77)}})
+        out = m_loopbackInterface(c)
+        self.assertEqual([x["zone"] for x in out["loopbacks"]], ["TRUSTED", None])
+        self.assertEqual([(n["disposition"], n["target"]) for n in notes if "zone" in n["target"]], [("unresolved", "loopbackInterface.loopbacks[].zone")])
+
     def test_vrrp_drops_runtime_state(self):
         c, notes = ctx({"vrrp": [{"groupId": 1, "interface": "lan0", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 100, "priority": 101, "tracker": False, "version": 3, "preempt": True,
                                   "auth": "", "desc": "", "pkt_trace": False, "holddown": 10, "mode": "master", "uptime": "1 day", "vmac": "00:00:5e:00:01:01"}]})
