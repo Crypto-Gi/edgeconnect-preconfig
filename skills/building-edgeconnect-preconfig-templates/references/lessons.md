@@ -22,7 +22,7 @@ Verified across HPE Aruba EdgeConnect Orchestrator releases `9.6.4`, `9.7.1`, an
   - ECOS `9.5.x` leaves out `routeLabelId` in `/ipsla/config/managers` and `tracker` in `/vrrp`; the mappers read both with `.get()` (tracker defaults to `false`, the template value).
   - ECOS `9.5.x` HA groups report `v6HaSubnet: null` and `v6HaMask: 0`; `/validate` needs a mask of 1-127, so `haConfig` takes Orchestrator's default `fd00::a9fe:0000/112` and `126`.
 - **Release differences (dropped by the same allow list):**
-  - `10.0.0` adds `ikePqcgroup` and `ipsecPqcgroup` under `tunnelConfiguration.tunnels[].ipsecConfig`, and `flowProcess` under `flowRedirection`.
+  - `10.0.0` adds `ikePqcgroup` and `ipsecPqcgroup` under `tunnelConfiguration.tunnels[].ipsecConfig`, and `flowProcess` under `secureWebServicesConfig.urlClassificationConfig`.
   - `9.6.4` uses `nac.server[].address` instead of `nac.server[].host` and lacks `dhcpRemoteAddressPoolConfig` and `multicast`.
   - Pre-`9.6` appliances (`9.3.x`, `9.5.x`) omit `sysConfig.roles`, `applianceIPs[].role`, and `sysConfig.maxInBW` in `GET /deployment`.
 

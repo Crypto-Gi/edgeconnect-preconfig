@@ -434,7 +434,7 @@ def run_compare(reference, others, argv=("--yes",), answers=(), nepk=lambda site
         with mock.patch("capture.capture", side_effect=lambda nick, site, *a: site), \
                 mock.patch("translate.Capture", side_effect=lambda c: mock.Mock(run={"appliance": {"nePk": nepk(c)}})), \
                 mock.patch("translate.build", side_effect=[copy.deepcopy(o) for o in others]), \
-                mock.patch("translate.prune", side_effect=lambda value, allowed, ledger: value), \
+                mock.patch("translate.prune", side_effect=lambda value, allowed, ledger, **kw: value), \
                 mock.patch.object(cli, "build_site", side_effect=build_site), mock.patch.object(cli, "ensure_sites_csv"), \
                 mock.patch.object(cli, "validate_rows", return_value=0), \
                 contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(out):
@@ -549,7 +549,7 @@ class CompareForTheGui(unittest.TestCase):
                     mock.patch("upload.client_for", side_effect=AssertionError("no Orchestrator request")), \
                     mock.patch("translate.Capture", side_effect=lambda c: mock.Mock(run=run_of(c))), \
                     mock.patch("translate.build", side_effect=built_by or [copy.deepcopy(o) for o in others]), \
-                    mock.patch("translate.prune", side_effect=lambda value, allowed, ledger: value), \
+                    mock.patch("translate.prune", side_effect=lambda value, allowed, ledger, **kw: value), \
                     mock.patch.object(cli, "build_site", side_effect=build_site), mock.patch.object(cli, "ensure_sites_csv"), \
                     mock.patch.object(cli, "validate_rows", return_value=validated), running(RunContext(recorder=recorder)), \
                     contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(out):
