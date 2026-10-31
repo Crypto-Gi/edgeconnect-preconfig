@@ -282,7 +282,7 @@ automation's own reader when its checkout is found (`EDGECONNECT_AUTOMATION_SRC`
 identity read in the upload run). `Fleet.warnings` names, by key only and never its value, each `.env` key that makes every
 edgeconnect-auto command stop: an unnumbered `orch_` key, an unclosed quote, a nickname with `-` or another character outside
 letters, digits and `_`, a reserved nickname (default, ec, edgeconnect, orchestrator), and a nickname used by two `orch_N` lines.
-Not yet: the read-only lab check, which needs the owner's machine.
+Lab check (2026-10-30, virtual lab): the fleet panel listed every Orchestrator of the owner's `.env` green, with the validator and uploads columns right.
 
 ## Step 5: GUI server and tasks
 `gui_server.py` copied from automation (security unchanged) and `gui_tasks.py` over `engine.py`. Reads (list, build,
@@ -388,8 +388,8 @@ records (R8, #23), never its printed table. The `preconfigs` task (with `show`) 
 in the browser (`PagedTable` pages a server endpoint, and these rows are one task's result), the preconfigs (name, serial, tag, last
 change, id), and the clicked one's YAML as text in a `<pre>`, read only, fetched by its id.
 Tested in `tests/test_gui_inventory.py` over HTTP with the golden preconfigs (list, show and task JSON, the event stream, the YAML whose
-`"` breaks parsing), and `tests/test_gui_shell.py`. Not yet: the read-only lab check (which also confirms the `modifiedTime` field
-name, `cli.LAST_CHANGE`).
+`"` breaks parsing), and `tests/test_gui_shell.py`. Lab check (2026-10-30 and 31, virtual lab): the list (5 appliances, 95 preconfigs), the YAML viewer with a secret shown as
+`<SECRET:...>`, and two uploaded preconfigs read back. Not confirmed separately: the `modifiedTime` field name (`cli.LAST_CHANGE`).
 
 ## Step 11: Polish and release
 Accessibility pass (axe-core on every screen, both themes), a Playwright smoke test in its own CI job (from an appliance to
@@ -413,4 +413,7 @@ use `--text` and `--glow` (pick.css). `app.css` is unchanged. The user guide is 
 used to show uploads on for `true`, `yes` and `1`, which the upload gate refused; the panel and the gate now read it only through
 `engine.uploads_setting`: on (only `on`, any case), off (`off` or blank) or bad (anything else, `true` and `yes` too), which the panel
 shows red with "must be on or off" and the gate refuses like off.
-Not yet: the WSL check by hand. The version bump came after this step: 1.4.0-rc.1 (PR #35); whether the GitHub pre-release is published is not recorded here.
+The check by hand passed on Ubuntu 24.04 over SSH on 2026-10-30 ([ubuntu-ssh-check.md](ubuntu-ssh-check.md)); WSL stays untested.
+A live upload through the GUI passed on the virtual lab on 2026-10-31 (CSV with the typed nickname, a wrong nickname refused, a name
+conflict stopped, YAML with one button, both read back as uploaded with `autoApply` off, then deleted). Released as the GitHub
+pre-release `v1.4.0-rc.1` from `gui` on 2026-10-31; notes in [docs/releases/1.4.0-rc.1.md](../releases/1.4.0-rc.1.md).
