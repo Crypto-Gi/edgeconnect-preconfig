@@ -759,6 +759,9 @@ TEMPLATE_OMISSIONS = {
 }
 
 
+OMISSION_TYPES = {p: bool for p in TEMPLATE_OMISSIONS if p.endswith(".bfdEnabled")}  # yes/no paths no template shows
+
+
 def allowed_paths(target: str) -> set:
     """Key paths a preconfig for the target release may hold: those in its default template (find_default_template), plus TEMPLATE_OMISSIONS."""
     return flat_paths(load_yaml(find_default_template(target)[0])) | TEMPLATE_OMISSIONS
@@ -778,7 +781,7 @@ def template_types(target: str) -> Dict[str, type]:
         elif value is not None:
             seen.setdefault(prefix, set()).add(bool if isinstance(value, bool) else int if isinstance(value, (int, float)) else str)
     walk(load_yaml(find_default_template(target)[0]), "")
-    return {p: next(iter(t)) for p, t in seen.items() if len(t) == 1}
+    return dict({p: next(iter(t)) for p, t in seen.items() if len(t) == 1}, **OMISSION_TYPES)
 
 
 def _fits(value: Any, expected: type) -> bool:
@@ -803,14 +806,16 @@ def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = 
                 continue
             if types and p in types and isinstance(v, list):  # a list of yes/no, numbers or text: check each item
                 bad = [x for x in v if not _fits(x, types[p]) or x is None]
-                if bad and not any(e["target"] == p for e in ledger):
+                if bad and not any(e["item"] == "source value" and e["target"] == p for e in ledger):  # a mapper's own line on p is no Gap line
                     ledger.append({"item": "source value", "disposition": "unresolved", "target": p,
                                    "note": "the appliance reported {} item(s) that are not a {} as the target release's format needs ({!r}), so not written; check it by hand".format(
                                        len(bad), {bool: "true/false", int: "number", str: "text"}[types[p]], bad[0] if not isinstance(bad[0], (dict, list)) else type(bad[0]).__name__)})
-                out[k] = [x for x in v if _fits(x, types[p]) and x is not None]
+                kept = [x for x in v if _fits(x, types[p]) and x is not None]
+                if kept or not v:  # every item bad: not written, never an empty list (templateGroups replaces on apply)
+                    out[k] = kept
                 continue
             if types and p in types and not _fits(v, types[p]):
-                if not any(e["target"] == p for e in ledger):
+                if not any(e["item"] == "source value" and e["target"] == p for e in ledger):
                     ledger.append({"item": "source value", "disposition": "unresolved", "target": p,
                                    "note": "the appliance reported {!r}, not a {} as the target release's format needs, so not written; check it by hand".format(
                                        v if not isinstance(v, (dict, list)) else type(v).__name__, {bool: "true/false", int: "number", str: "text"}[types[p]])})

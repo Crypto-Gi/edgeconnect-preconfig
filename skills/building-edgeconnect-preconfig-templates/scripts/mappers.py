@@ -539,7 +539,7 @@ def m_vrrp(ctx: Ctx) -> Optional[Dict[str, Any]]:
             entry: Dict[str, Any] = {
                 "groupId": v["groupId"], "interfaceName": v["interface"], "admin": v["enable"],
                 "virtualIpAddress": v["vipaddr"], "advertisementTimer": v["adv_timer"], "priority": v["priority"],
-                "tracker": v.get("tracker", False), "version": v["version"], "preemption": v["preempt"],
+                "tracker": v.get("tracker") or False, "version": v["version"], "preemption": v["preempt"],
             }
             if v.get("auth"):
                 entry["authenticationString"] = v["auth"]

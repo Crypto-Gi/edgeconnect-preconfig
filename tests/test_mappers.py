@@ -209,7 +209,7 @@ class Release(unittest.TestCase):
         self.assertEqual([(e["target"], e["disposition"]) for e in ledger], [("a.extra", "outside-preconfig"), ("l.extra", "outside-preconfig")])
 
     def test_prune_drops_a_value_of_the_wrong_type_for_the_target_template(self):
-        # a null or wrong type in a yes/no or number field fails /validate (10.0 flowProcess); a null in a text field is accepted
+        # a null or wrong type in a yes/no field fails /validate (10.0 flowProcess); number and text fields take any plain value or null
         types = {"a.flag": bool, "a.n": int, "a.text": str, "l.name": str}
         ledger = []
         out = prune({"a": {"flag": None, "n": {"x": 1}, "text": None}, "l": [{"name": {"x": 1}}, {"name": "ok"}]},
@@ -238,6 +238,26 @@ class Release(unittest.TestCase):
         self.assertEqual(prune({"g": ["a", None, "b"], "d": ["8.8.8.8"]}, {"g", "d"}, names, types={"g": str, "d": str}), {"g": ["a", "b"], "d": ["8.8.8.8"]})
         self.assertEqual(ledger, [])
         self.assertEqual([(e["target"], e["disposition"]) for e in names], [("g", "unresolved")])
+
+    def test_a_bad_list_item_is_a_gap_even_after_a_mapper_line_and_an_all_bad_list_is_not_written(self):
+        mapped = {"item": "template groups", "disposition": "mapped", "target": "templateGroups.groups", "note": "n"}
+        ledger = [dict(mapped)]
+        out = prune({"templateGroups": {"groups": ["G1", None]}}, {"templateGroups", "templateGroups.groups"}, ledger, types={"templateGroups.groups": str})
+        self.assertEqual(out, {"templateGroups": {"groups": ["G1"]}})
+        self.assertEqual([e["disposition"] for e in ledger], ["mapped", "unresolved"])
+        ledger = [dict(mapped)]  # groups: [] would remove every template group on apply
+        out = prune({"templateGroups": {"groups": [{"id": "G1"}]}}, {"templateGroups", "templateGroups.groups"}, ledger, types={"templateGroups.groups": str})
+        self.assertEqual(out, {"templateGroups": {}})
+        self.assertEqual([e["disposition"] for e in ledger], ["mapped", "unresolved"])
+        self.assertEqual(prune({"g": []}, {"g"}, [], types={"g": str}), {"g": []})  # an empty source list stays as it was
+
+    def test_bfd_enabled_paths_no_template_shows_are_yes_no(self):
+        from translate import template_types
+        ledger = []
+        doc = {"bgpSystemConfig": {"neighbors": [{"bfdEnabled": None}, {"bfdEnabled": True}]}}
+        out = prune(doc, flat_paths_of(doc) | {"bgpSystemConfig.neighbors.bfdEnabled"}, ledger, types=template_types("10.0.0.40860"))
+        self.assertEqual(out, {"bgpSystemConfig": {"neighbors": [{}, {"bfdEnabled": True}]}})
+        self.assertEqual([e["target"] for e in ledger], ["bgpSystemConfig.neighbors.bfdEnabled"])
 
     def test_template_types_reads_the_target_template(self):
         from translate import template_types
