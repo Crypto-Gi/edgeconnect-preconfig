@@ -1,9 +1,9 @@
 # Source fields the API has returned, per read (translate.new_source_fields, docs/decisions/0020). A field a capture holds that is not here
 # is "new": no converter rule was written with it in view, so translate ledgers it (new-source-field) to check by hand.
 # Made from the same 98 captures as observed-fields.yaml (6 Orchestrators, ECOS 9.3 to 9.7.2; 2026-10-31), every ok read (live, cached,
-# orchestrator, backup). Field names only, never values. A key that is not lower camel or snake case (an IP, an interface or map name, an id)
-# is "*", and so is every key of a record map (2+ non-empty objects with the same keys); record_maps lists, per read, the paths that were
-# record maps on some appliance, so they are "*" on every appliance. Widen only by hand: regenerate from captures whose builds validated, and
+# orchestrator, backup). Field names only, never values. A key that is not a field name (lower camel or snake case, digits allowed; an IP,
+# an id, a name, or an interface or map name such as lan0) is "*", and so is every key of a record map (2+ non-empty objects with the
+# same keys); record_maps lists, per read, the paths that were record maps on some appliance, so they are "*" on every appliance. Widen only by hand: regenerate from captures whose builds validated, and
 # say in the commit which ones.
 fields:
   admin-distance:
@@ -193,6 +193,14 @@ fields:
   - modeIfs[].applianceIPs[].dhcp
   - modeIfs[].applianceIPs[].dhcpd.relay.*
   - modeIfs[].applianceIPs[].dhcpd.relay.dhcpserver[]
+  - modeIfs[].applianceIPs[].dhcpd.relay.opt82SubOpt1
+  - modeIfs[].applianceIPs[].dhcpd.relay.opt82SubOpt10
+  - modeIfs[].applianceIPs[].dhcpd.relay.opt82SubOpt11
+  - modeIfs[].applianceIPs[].dhcpd.relay.opt82SubOpt150
+  - modeIfs[].applianceIPs[].dhcpd.relay.opt82SubOpt151
+  - modeIfs[].applianceIPs[].dhcpd.relay.opt82SubOpt152
+  - modeIfs[].applianceIPs[].dhcpd.relay.opt82SubOpt5
+  - modeIfs[].applianceIPs[].dhcpd.relay.option82_policy
   - modeIfs[].applianceIPs[].dhcpd.server.defaultLease
   - modeIfs[].applianceIPs[].dhcpd.server.dns[]
   - modeIfs[].applianceIPs[].dhcpd.server.failover
@@ -253,6 +261,8 @@ fields:
   - scalars.isIdsSupported
   - scalars.isLicenseRequired
   - scalars.isMistSupported
+  - scalars.isModel10G
+  - scalars.isModel4Port
   - scalars.isModelForReplication
   - scalars.isModelPowerCycle
   - scalars.isModelSingleDisk
@@ -308,6 +318,9 @@ fields:
   - scalars.memorySize
   - scalars.minMtu
   - scalars.nmDiskSize
+  - scalars.num10GigPorts
+  - scalars.num1GigFiberPorts
+  - scalars.num1GigPorts
   - scalars.numMgmtPorts
   - scalars.poeInterfaces[]
   - scalars.portalLicenseType
@@ -319,7 +332,6 @@ fields:
   - scalars.supportsDiskSelfTest
   - scalars.tpmEnabled
   - scalars.vrrpCompatible
-  - sysConfig.*
   - sysConfig.bonding
   - sysConfig.haIf
   - sysConfig.ifLabels.lan[].id
@@ -346,6 +358,7 @@ fields:
   - sysConfig.serverPerSegment
   - sysConfig.singleBridge
   - sysConfig.tenG
+  - sysConfig.useMgmt0
   - sysConfig.vrfEnable
   - sysConfig.vrfZonesMap.*.*.id
   - sysConfig.vrfZonesMap.*.*.name
@@ -358,9 +371,10 @@ fields:
   dhcp-relay:
   - ''
   - '[].*'
-  - '[].*[]'
   - '[].destinationDhcpServer[]'
   - '[].interface'
+  - '[].opt82Policy'
+  - '[].opt82SubOpts[]'
   - '[].perSegmentDHCPServer'
   dhcp-remote-subnets:
   - ''
@@ -408,8 +422,9 @@ fields:
   - '*.ra.retransTimer'
   - '*.ra.routerAdvertisementEnabled'
   - '*.relay.*'
-  - '*.relay.*[]'
   - '*.relay.destinationDhcpServer[]'
+  - '*.relay.opt82Policy'
+  - '*.relay.opt82SubOpts[]'
   - '*.relay.perSegmentDHCPServer'
   - '*.server.defaultLeaseTime'
   - '*.server.dnsServers[]'
@@ -434,38 +449,11 @@ fields:
   - '*.server.scopeName'
   - '*.server.subnet'
   interface-state:
-  - '*.*.address'
-  - '*.*.ifdevname'
-  - '*.*.ifname'
-  - '*.*.mask'
-  - '*.*.self'
-  - '*[].*'
-  - '*[].active'
-  - '*[].cell'
-  - '*[].dhcp'
-  - '*[].gw'
-  - '*[].gwState'
-  - '*[].ha_if'
-  - '*[].inMaxBw'
-  - '*[].inTargetThres'
-  - '*[].incomplete'
-  - '*[].ip'
-  - '*[].kernalVrfName'
-  - '*[].label'
-  - '*[].labelID'
-  - '*[].lanOnly'
-  - '*[].mask'
-  - '*[].name'
-  - '*[].numTunEndpoints'
-  - '*[].outMaxBw'
-  - '*[].outTargetThres'
-  - '*[].securityMode'
-  - '*[].shaperIdx'
-  - '*[].type'
-  - '*[].valid'
-  - '*[].vrf_id'
-  - '*[].wanOnly'
-  - '*[].zone_id'
+  - addrstIp6.*.address
+  - addrstIp6.*.ifdevname
+  - addrstIp6.*.ifname
+  - addrstIp6.*.mask
+  - addrstIp6.*.self
   - availMACs[]
   - ifInfo[].*
   - ifInfo[].admin
@@ -478,6 +466,8 @@ fields:
   - ifInfo[].ifIndex
   - ifInfo[].ifSpeed
   - ifInfo[].ifname
+  - ifInfo[].ipv4dhcp
+  - ifInfo[].ipv4mask
   - ifInfo[].label
   - ifInfo[].linkLocal
   - ifInfo[].linkLocalIp
@@ -492,6 +482,33 @@ fields:
   - ifInfo[].speed
   - ifInfo[].supported
   - ifInfo[].vrf
+  - l3info[].active
+  - l3info[].cell
+  - l3info[].dhcp
+  - l3info[].gw
+  - l3info[].gwState
+  - l3info[].ha_if
+  - l3info[].inMaxBw
+  - l3info[].inTargetThres
+  - l3info[].incomplete
+  - l3info[].ip
+  - l3info[].kernalVrfName
+  - l3info[].label
+  - l3info[].labelID
+  - l3info[].lanOnly
+  - l3info[].mask
+  - l3info[].name
+  - l3info[].numTunEndpoints
+  - l3info[].outMaxBw
+  - l3info[].outTargetThres
+  - l3info[].p2p
+  - l3info[].securityMode
+  - l3info[].shaperIdx
+  - l3info[].type
+  - l3info[].valid
+  - l3info[].vrf_id
+  - l3info[].wanOnly
+  - l3info[].zone_id
   - macIfs[]
   - scalars.*
   - scalars.actualMemorySize
@@ -510,6 +527,8 @@ fields:
   - scalars.isIdsSupported
   - scalars.isLicenseRequired
   - scalars.isMistSupported
+  - scalars.isModel10G
+  - scalars.isModel4Port
   - scalars.isModelForReplication
   - scalars.isModelPowerCycle
   - scalars.isModelSingleDisk
@@ -565,6 +584,9 @@ fields:
   - scalars.memorySize
   - scalars.minMtu
   - scalars.nmDiskSize
+  - scalars.num10GigPorts
+  - scalars.num1GigFiberPorts
+  - scalars.num1GigPorts
   - scalars.numMgmtPorts
   - scalars.poeInterfaces[]
   - scalars.portalLicenseType
@@ -647,25 +669,15 @@ fields:
   - '[].vrf_id'
   - enable
   nac:
-  - '*.*.eapol_logoff'
-  - '*.*.idrequest_period'
-  - '*.*.ignore_eapolstart_after_auth'
-  - '*.*.max_auth_fails'
-  - '*.*.max_req'
-  - '*.*.name'
-  - '*.*.quiet_period'
-  - '*.*.reauth'
-  - '*.*.reauth_max'
-  - '*.*.reauth_period'
-  - '*.*.self'
-  - '*.*.server_retry'
-  - '*.*.server_retry_period'
-  - aaaProfile.*.*
   - aaaProfile.*.da_enable
   - aaaProfile.*.da_server
   - aaaProfile.*.deny_enable
   - aaaProfile.*.deny_period
   - aaaProfile.*.deny_threshold
+  - aaaProfile.*.dot1x_acct_server_group
+  - aaaProfile.*.dot1x_default_role
+  - aaaProfile.*.dot1x_profile
+  - aaaProfile.*.dot1x_server_group
   - aaaProfile.*.mac_acct_server_group
   - aaaProfile.*.mac_default_role
   - aaaProfile.*.mac_profile
@@ -678,6 +690,19 @@ fields:
   - applyPolicies.if.*.auth_type
   - applyPolicies.if.*.profile
   - applyPolicies.if.*.self
+  - dot1x.*.eapol_logoff
+  - dot1x.*.idrequest_period
+  - dot1x.*.ignore_eapolstart_after_auth
+  - dot1x.*.max_auth_fails
+  - dot1x.*.max_req
+  - dot1x.*.name
+  - dot1x.*.quiet_period
+  - dot1x.*.reauth
+  - dot1x.*.reauth_max
+  - dot1x.*.reauth_period
+  - dot1x.*.self
+  - dot1x.*.server_retry
+  - dot1x.*.server_retry_period
   - macAuthProfile.*.max_auth_fails
   - macAuthProfile.*.message_auth_attribute
   - macAuthProfile.*.name
@@ -733,7 +758,6 @@ fields:
   - '*.*.translator_role'
   ospf-interfaces:
   - '*'
-  - '*.*'
   - '*.adminStatus'
   - '*.area'
   - '*.authKey'
@@ -743,12 +767,13 @@ fields:
   - '*.cost'
   - '*.deadInterval'
   - '*.helloInterval'
+  - '*.md5Key'
+  - '*.md5Password'
   - '*.priority'
   - '*.retransmitInterval'
   - '*.transmitDelay'
   ospf-interfaces-all-vrfs:
   - '*'
-  - '*.*.*'
   - '*.*.adminStatus'
   - '*.*.area'
   - '*.*.authKey'
@@ -758,6 +783,8 @@ fields:
   - '*.*.cost'
   - '*.*.deadInterval'
   - '*.*.helloInterval'
+  - '*.*.md5Key'
+  - '*.*.md5Password'
   - '*.*.priority'
   - '*.*.retransmitInterval'
   - '*.*.transmitDelay'
@@ -1148,7 +1175,6 @@ fields:
   - subnets.*.metricAddedByIPSLA
   system-info:
   - '*'
-  - '*.enable'
   - app_summary.enable
   - auto_ipid
   - auto_mtu.fast_mode
@@ -1189,6 +1215,7 @@ fields:
   - bw.if_rx_target
   - disk_encrypt_enable
   - dpc.tunfail
+  - e2e_zfw.enable
   - enforce_overlay
   - excess_flow.dscp_marking
   - excess_flow.policy
@@ -1208,6 +1235,8 @@ fields:
   - iph_compression
   - ipsec_override
   - ipsec_sa_delay_delete_time
+  - ipv6_frag_enable
+  - ipv6_reassmble_enable
   - max_tcp_mss
   - mgmt_ip
   - nat
@@ -1332,7 +1361,7 @@ record_maps:
   dhcp-settings:
   - ''
   interface-state:
-  - '*'
+  - addrstIp6
   ip-allow-list:
   - ip
   ipsla-managers:
@@ -1347,9 +1376,9 @@ record_maps:
   - '[].pim'
   - pim
   nac:
-  - '*'
   - aaaProfile
   - applyPolicies.if
+  - dot1x
   - macAuthProfile
   - server
   - serverGroup.*.server

@@ -16,13 +16,13 @@ A new or never-seen setting must not turn into a new `/validate` bug. The old ru
 
 The yes/no type check (`template_types`) runs before the tiers and applies to every path.
 
-The tiers judge what the YAML would write. A new setting can also sit in a read no mapper takes in, so translate also compares every field the capture holds with `references/known-source-fields.yaml` (1,255 read-and-field pairs from the same 98 captures) and writes one `new-source-field` line per read with fields none of them had. That line counts towards "to check by hand". How "seen" is decided, so it is never widened by accident:
+The tiers judge what the YAML would write. A new setting can also sit in a read no mapper takes in, so translate also compares every field the capture holds with `references/known-source-fields.yaml` (1,284 read-and-field pairs from the same 98 captures) and writes one `new-source-field` line per read with fields none of them had. That line counts towards "to check by hand". How "seen" is decided, so it is never widened by accident:
 - Each ok read (live, cached, orchestrator, backup) is walked to field paths: `[]` for a list entry, `*` for a key that is site data and for every key of a record map (two or more non-empty objects with the same keys). A key is a field name when it is lower camel or snake case and may hold digits (`ipv6Mode`, `option82SubOptions1`), but not when it is letters then digits only (`lan0`, `wan1`, `map1`: interface and map names); anything else (an address, an id, a name with capitals first or spaces) is site data. `record_maps` lists, per read, the paths that were record maps on any appliance, so they are `*` everywhere.
 - Known limit: a new key at the top of a record map (for example in an OSPF interface or VNI read that is empty on the box) looks like a new record name and is not reported; a new key inside any record is. In the corpus check this was 215 of 3,983 injected reads, all such empty record-map reads.
 - A read whose body is empty or text, or whose stored copy is damaged, is not compared.
 - Reads of Orchestrator objects and state (`NOT_SETTINGS`: template groups, overlays, segments, zones, regions, the appliance list and the like) are not compared.
 - Only a commit widens either file, regenerated from captures whose builds validated; the commit names them.
-- Leave-one-out on the corpus: a box from an Orchestrator the others did not see would show 0 to 122 new fields (122 on the Orchestrator running 10.0); a box like those already seen shows none.
+- Leave-one-out on the corpus: a box from an Orchestrator the others did not see would show 0 to 124 new fields (124 on the Orchestrator running 10.0); a box like those already seen shows none.
 
 Considered:
 - **Template only (decision 0013 alone):** the 10.0 `flowProcess` null came through this way.
