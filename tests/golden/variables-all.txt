@@ -12,7 +12,7 @@ Next:
   edgeconnect-preconfig validate <tmp>/out/h1/site-gall --csv <tmp>/out/h1/site-gall/sites.csv
 --- stderr
 --- files
-3d8d6440f371bdb6  <tmp>/out/h1/site-gall/checks.json
+88279cf82f904cc5  <tmp>/out/h1/site-gall/checks.json
 98337fcdfb4344fe  <tmp>/out/h1/site-gall/columns.json
 28c6bf9678743a27  <tmp>/out/h1/site-gall/columns.md
 02d4f692225cc446  <tmp>/out/h1/site-gall/example.csv

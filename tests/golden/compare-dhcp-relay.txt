@@ -25,7 +25,7 @@ ok   branch-a_preconfig -> <tmp>/out/branch-a/site-dhcp-relay/rendered/branch-a_
 rows that passed are in <tmp>/out/branch-a/site-dhcp-relay/rendered
 --- stderr
 --- files
-a6067ddbbe114fd0  <tmp>/out/branch-a/site-dhcp-relay/checks.json
+2fbb2b9587e62725  <tmp>/out/branch-a/site-dhcp-relay/checks.json
 2a33134f2304505e  <tmp>/out/branch-a/site-dhcp-relay/columns.json
 a34942e8e0fdfe51  <tmp>/out/branch-a/site-dhcp-relay/columns.md
 6a8cbc31a75a17f3  <tmp>/out/branch-a/site-dhcp-relay/dhcp-relay.csv

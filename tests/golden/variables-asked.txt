@@ -81,7 +81,7 @@ Next:
   edgeconnect-preconfig validate <tmp>/out/h1/site-gask --csv <tmp>/out/h1/site-gask/sites.csv
 --- stderr
 --- files
-771e9efe4974d1fa  <tmp>/out/h1/site-gask/checks.json
+626043b09ae895c3  <tmp>/out/h1/site-gask/checks.json
 e1bbbf514dd38b64  <tmp>/out/h1/site-gask/columns.json
 b2ee08ac5200f338  <tmp>/out/h1/site-gask/columns.md
 705c91e410b94ebe  <tmp>/out/h1/site-gask/example.csv

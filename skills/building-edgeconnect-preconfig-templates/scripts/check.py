@@ -3,6 +3,7 @@
 
 1 headers match   2 renders and parses   4 variables flow through (and multicast on has an RP)   5 mutation (one column at a time)
 8 example row reproduces reference.yaml   10 validation recorded (with --validate)   7 no secrets in the example row
+11 ledger matches the YAML (translate.py folders: every mapped line written, every written section ledgered)
 Reads <site>.jinja2, <site>.csv, example.csv, columns.json, reference.yaml. Writes checks.json and rendered/.
 Extra rows (--rows CSV) are rendered and checked the same way.
 """
@@ -134,6 +135,13 @@ def run(site_dir: Path, site: str, extra_rows: Optional[Path], validate: Optiona
             diffs = [p for p in changed_paths(reference, doc0)]
             secret_paths = {c["path"] for c in columns.values() if c["secret"]}
             record("8 example row reproduces reference", set(diffs) <= secret_paths, [d for d in diffs if d not in secret_paths][:8])
+    ledger_file, ref_file = site_dir / "ledger.json", site_dir / "reference.yaml"
+    if ledger_file.exists() and ref_file.exists():  # a translate.py folder: the ledger and the YAML must tell the same story
+        from translate import unledgered_sections, unwritten_mapped
+        entries, reference = json.loads(ledger_file.read_text())["entries"], load_yaml(ref_file)
+        mismatch = ["ledger says mapped, YAML lacks: " + e["target"] for e in unwritten_mapped(entries, reference)] + \
+                   ["YAML writes, no ledger line: " + s for s in unledgered_sections(entries, reference)]
+        record("11 ledger matches the YAML", not mismatch, mismatch[:8])
     leaks = [n for n, c in columns.items() if c["secret"] and rows[0].get(n)]
     record("7 example row holds no secret values", not leaks, leaks)
 

@@ -38,7 +38,7 @@ ok   branch-b_preconfig -> <tmp>/out/branch-a/site-scalar-unticked/rendered/bran
 rows that passed are in <tmp>/out/branch-a/site-scalar-unticked/rendered
 --- stderr
 --- files
-e27f189e8a6ed4e7  <tmp>/out/branch-a/site-scalar-unticked/checks.json
+a1f8a916c2dc1969  <tmp>/out/branch-a/site-scalar-unticked/checks.json
 dd582cafbab90d24  <tmp>/out/branch-a/site-scalar-unticked/columns.json
 4acfe4fb7e88ccaa  <tmp>/out/branch-a/site-scalar-unticked/columns.md
 00cc919200c6ee5c  <tmp>/out/branch-a/site-scalar-unticked/example.csv

@@ -972,6 +972,41 @@ def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = 
     return value
 
 
+def _written(target: str, paths: set) -> bool:
+    """A ledger target (`a.b`, `a.b[].c`, or a path below a section such as `deploymentInterfaces[].zone`) names a path the YAML holds."""
+    t = target.strip().replace("[]", "")
+    return any(p == t or p.startswith(t + ".") or p.endswith("." + t) or ("." + t + ".") in p for p in paths)
+
+
+def unwritten_mapped(ledger: List[Dict[str, Any]], reference: Any) -> List[Dict[str, Any]]:
+    """Ledger lines that say `mapped` while none of their targets is in the YAML: the ledger must never claim a value it did not write."""
+    paths = flat_paths(reference)
+    return [e for e in ledger if e["disposition"] == "mapped" and any(t.strip() for t in e["target"].split(","))
+            and not any(_written(t, paths) for t in e["target"].split(",") if t.strip())]
+
+
+WRITES = {"mapped", "from-default-template", "unverified"}  # dispositions that say a value was written
+
+
+def unledgered_sections(ledger: List[Dict[str, Any]], reference: Any) -> List[str]:
+    """Sections the YAML holds that no ledger line says it wrote: every written value must be accounted for."""
+    named = {re.split(r"[.\[]", t.strip())[0] for e in ledger if e["disposition"] in WRITES for t in e["target"].split(",") if t.strip()}
+    return [s for s in (reference or {}) if s not in named]
+
+
+def reconcile(ledger: List[Dict[str, Any]], reference: Any) -> List[str]:
+    """Turn every `mapped` line whose value the format checks (prune) left out into a gap that says so; returns the targets."""
+    out = []
+    for e in unwritten_mapped(ledger, reference):
+        targets = [t.strip() for t in e["target"].split(",") if t.strip()]
+        why = [x["note"].split(";")[0] for x in ledger if x is not e and x["disposition"] != "mapped"
+               and any(x["target"].strip().replace("[]", "").startswith(t.replace("[]", "")) for t in targets)]
+        e["disposition"] = "unresolved"
+        e["note"] = "converted, but not written: {}; was: {}".format(why[0] if why else "the target release's format checks left it out", e["note"])
+        out.append(e["target"])
+    return out
+
+
 def _default_nat_maps(data: Any) -> bool:
     maps = (data.get("data") or {}) if isinstance(data, dict) else {}
     maps = {k: m for k, m in maps.items() if isinstance(m, dict)}  # a map listed by name only holds no rules
@@ -1057,7 +1092,11 @@ def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: 
         lines.append("- Objects the YAML names: route labels the target Orchestrator must already have: {}.".format(", ".join(route_labels)))
     lines += ["- Default template: {} ({}).".format(e["target"], e["note"]) for e in ledger if e["item"] == "default template"]
     lines.append("- {}.".format(ecos_line(target_ecos)))
-    lines += ["- **Warning: apply will fail**: " + w for w in apply_warnings(ledger)] + [""]
+    lines += ["- **Warning: apply will fail**: " + w for w in apply_warnings(ledger)]
+    left = [e["target"] for e in ledger if e["disposition"] == "unresolved" and e["note"].startswith("converted, but not written")]
+    if left:  # the converter read these, but the format checks left them out: never only inside the Gaps list
+        lines.append("- **Converted but not written ({})**: {}. The appliance has them; set them by hand (see Gaps).".format(len(left), ", ".join(left)))
+    lines.append("")
     known = set().union(*(d for _, d in REPORT_GROUPS)) | QUIET
     groups = REPORT_GROUPS + [("Unknown disposition: treat as a gap", {e["disposition"] for e in ledger} - known)]
     for title, dispositions in groups:
@@ -1170,6 +1209,7 @@ def convert(args: argparse.Namespace, template: Path, template_why: str, default
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2
+    reconcile(ledger, reference)
     unseen = sorted(flat_paths(reference) - flat_paths(default_doc))
     if unseen:
         ledger.append({"item": "release fit", "disposition": "context", "target": "", "note": "{} key paths are not shown in the default template {} (valid optional keys or unverified for that release): {}".format(len(unseen), template.name, ", ".join(unseen[:12]) + (" ..." if len(unseen) > 12 else ""))})

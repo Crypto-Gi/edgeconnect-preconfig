@@ -27,7 +27,7 @@ Next:
   edgeconnect-preconfig validate <tmp>/out/h1/site-h1 --csv <tmp>/out/h1/site-h1/sites.csv
 --- stderr
 --- files
-bd35a6c0751d9128  <tmp>/out/h1/site-h1/checks.json
+66ecfe56a9217d88  <tmp>/out/h1/site-h1/checks.json
 432bc1acf3565c8c  <tmp>/out/h1/site-h1/columns.json
 1abc142c3bb91f0b  <tmp>/out/h1/site-h1/columns.md
 80a3fcc15ec915b7  <tmp>/out/h1/site-h1/example.csv

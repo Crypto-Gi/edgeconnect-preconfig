@@ -25,7 +25,7 @@ ok   branch-a_preconfig -> <tmp>/out/branch-a/site-partner-only-route/rendered/b
 rows that passed are in <tmp>/out/branch-a/site-partner-only-route/rendered
 --- stderr
 --- files
-c4da5b7814a905ad  <tmp>/out/branch-a/site-partner-only-route/checks.json
+e61372fb48e5cdc4  <tmp>/out/branch-a/site-partner-only-route/checks.json
 ed2a33c483b02839  <tmp>/out/branch-a/site-partner-only-route/columns.json
 7d36ffc36f8e8515  <tmp>/out/branch-a/site-partner-only-route/columns.md
 d75b1097e20fc26f  <tmp>/out/branch-a/site-partner-only-route/example.csv

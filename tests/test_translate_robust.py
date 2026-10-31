@@ -6,6 +6,7 @@ and that the rest of the preconfig is still written."""
 import copy
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "scripts"))
@@ -697,6 +698,76 @@ class NothingUnknownIsWritten(unittest.TestCase):
                     except NothingToConvert:
                         continue
                     self.check(out, ledger, "10.0.0.40860")
+
+
+class LedgerNeverClaimsWhatIsNotWritten(unittest.TestCase):
+    """A section the converter maps but the format checks leave out (here a VTI, which no validated build has used) is never ledgered
+    `mapped`: the full-coverage lab found VTIs, custom tags, NAC and SWS missing from the YAML while the ledger said mapped."""
+
+    def test_a_mapped_section_left_out_by_the_format_checks_is_a_gap_and_named_at_the_top(self):
+        from test_mappers import VTI
+        from translate import allowed_paths, observed_paths, prune, reconcile, summary_md, template_enums, template_types, unwritten_mapped, verdict
+        data = copy.deepcopy(DATA)
+        data["vtis"] = {"vti1": VTI}
+        for target in ("9.6.4.40046", "9.7.1.42046", "10.0.0.40516"):
+            ledger = []
+            out = prune(build(FakeCap(data), ledger), allowed_paths(target), ledger, types=template_types(target), observed=observed_paths(), enums=template_enums(target))
+            self.assertNotIn("virtualTunnelInterface", out)
+            reconcile(ledger, out)
+            self.assertEqual(unwritten_mapped(ledger, out), [], target)
+            vti = [e for e in ledger if e["item"] == "vtis" and e["target"] == "virtualTunnelInterface"]
+            self.assertEqual([e["disposition"] for e in vti], ["unresolved"], target)
+            self.assertTrue(vti[0]["note"].startswith("converted, but not written: "), vti[0]["note"])
+            self.assertIn("Incomplete", verdict(ledger))
+            self.assertIn("**Converted but not written (1)**: virtualTunnelInterface.", summary_md(ledger, out, {}, target))
+
+    def test_translate_never_ledgers_mapped_for_a_section_it_did_not_write(self):
+        import json
+        import shutil
+        import tempfile
+        import translate
+        from test_mappers import VTI
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(tmp))
+        cap = tmp / "cap"
+        shutil.copytree(str(Path(__file__).resolve().parent / "fixtures" / "compare" / "captures" / "base"), str(cap))
+        (cap / "capture" / "vtis.live.json").write_text(json.dumps({"data": {"vti1": VTI}}))
+        index = json.loads((cap / "capture-index.json").read_text())
+        (cap / "capture-index.json").write_text(json.dumps(index + [{"id": "vtis", "label": "live", "status": "ok", "file": "capture/vtis.live.json"}]))
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            translate.main(["--capture", str(cap), "--site-type", "t", "--out", str(tmp / "out")])
+        ledger = json.loads((tmp / "out" / "ledger.json").read_text())["entries"]
+        self.assertEqual([e["disposition"] for e in ledger if e["target"] == "virtualTunnelInterface" and e["item"] == "vtis"], ["unresolved"])
+        self.assertIn("**Converted but not written (1)**: virtualTunnelInterface.", (tmp / "out" / "summary.md").read_text())
+
+    def test_check_fails_when_the_ledger_and_the_yaml_disagree(self):
+        import json
+        import shutil
+        import tempfile
+        import check
+        import translate
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(tmp))
+        out = tmp / "t"
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            translate.main(["--capture", str(Path(__file__).resolve().parent / "fixtures" / "compare" / "captures" / "base"), "--site-type", "t", "--out", str(out)])
+        self.assertTrue(check.run(out, "t", None, None)["checks"]["11 ledger matches the YAML"]["ok"])
+        doc = json.loads((out / "ledger.json").read_text())
+        doc["entries"].append({"item": "vtis", "disposition": "mapped", "target": "virtualTunnelInterface", "note": "1 user interfaces"})
+        doc["entries"] = [e for e in doc["entries"] if not (e["disposition"] == "mapped" and e["target"].startswith("businessIntentOverlays"))]
+        (out / "ledger.json").write_text(json.dumps(doc))
+        got = check.run(out, "t", None, None)["checks"]["11 ledger matches the YAML"]
+        self.assertFalse(got["ok"])
+        self.assertEqual(got["detail"], ["ledger says mapped, YAML lacks: virtualTunnelInterface", "YAML writes, no ledger line: businessIntentOverlays"])
+
+    def test_a_written_section_keeps_its_mapped_line(self):
+        from translate import allowed_paths, observed_paths, prune, reconcile, template_enums, template_types
+        target = "9.7.1.42046"
+        ledger = []
+        out = prune(build(FakeCap(copy.deepcopy(DATA)), ledger), allowed_paths(target), ledger, types=template_types(target), observed=observed_paths(), enums=template_enums(target))
+        before = [e["target"] for e in ledger if e["disposition"] == "mapped"]
+        self.assertEqual(reconcile(ledger, out), [])
+        self.assertEqual([e["target"] for e in ledger if e["disposition"] == "mapped"], before)
 
 
 class NewSourceFields(unittest.TestCase):

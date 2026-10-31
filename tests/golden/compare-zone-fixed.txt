@@ -38,7 +38,7 @@ ok   branch-b_preconfig -> <tmp>/out/branch-a/site-zone-fixed/rendered/branch-b_
 rows that passed are in <tmp>/out/branch-a/site-zone-fixed/rendered
 --- stderr
 --- files
-c3ef5b862497e9c9  <tmp>/out/branch-a/site-zone-fixed/checks.json
+cf883929a48d25da  <tmp>/out/branch-a/site-zone-fixed/checks.json
 77d1a6ab80c8accc  <tmp>/out/branch-a/site-zone-fixed/columns.json
 ff6922f095a64081  <tmp>/out/branch-a/site-zone-fixed/columns.md
 00cc919200c6ee5c  <tmp>/out/branch-a/site-zone-fixed/example.csv
