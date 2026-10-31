@@ -51,6 +51,17 @@ class UserinfoInTheUrl(unittest.TestCase):
                 # a malformed [host] is urlsplit's ValueError on newer Pythons, the userinfo refusal on 3.9: both name no secret
                 self.assertRegex(str(refused.exception), "x_api_key" if "[" not in url else "x_api_key|https://")
 
+    def test_a_url_with_a_page_path_is_refused_with_one_clear_line(self):
+        """A web UI address (https://host/<release>/webui/login) answered /gms/versions with HTML: a JSONDecodeError traceback, not a message."""
+        for url in ("https://host.invalid/10.0.0.40724/webui/login", "https://host.invalid/webui/", "https://host.invalid/?a=1", "https://host.invalid/#x"):
+            with self.subTest(url=url), tempfile.TemporaryDirectory() as directory:
+                with self.assertRaisesRegex(ConfigurationError, r"base URL for 'x' must be the Orchestrator's address only \(https://<host>\)"):
+                    client_for("x", self.env(directory, url))
+        for url, kept in (("https://host.invalid", "https://host.invalid/gms/rest"), ("https://host.invalid/", "https://host.invalid/gms/rest"),
+                          ("https://host.invalid:8443/gms/rest/", "https://host.invalid:8443/gms/rest"), ("https://host.invalid/proxy/gms/rest", "https://host.invalid/proxy/gms/rest")):
+            with self.subTest(url=url), tempfile.TemporaryDirectory() as directory:
+                self.assertEqual(client_for("x", self.env(directory, url)).config.base_url, kept)
+
     def test_an_http_client_error_is_a_transport_error_without_its_text(self):
         from http.client import BadStatusLine, InvalidURL
 

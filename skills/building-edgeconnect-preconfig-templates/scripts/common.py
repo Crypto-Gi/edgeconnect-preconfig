@@ -535,6 +535,8 @@ def client_for(nickname: str, dotenv_path: Optional[str] = None) -> ApiClient:
     if parsed.scheme != "https" or not parsed.netloc:
         raise ConfigurationError("base URL for {!r} must be an https:// URL".format(nickname))
     path = parsed.path.rstrip("/") or "/gms/rest"
+    if not path.endswith("/gms/rest") or parsed.query or parsed.fragment:  # a web UI page answers the API with HTML: a JSON traceback, not a message
+        raise ConfigurationError("base URL for {!r} must be the Orchestrator's address only (https://<host>), not a web page such as .../webui/login".format(nickname))
     normalized_url = urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
     ca_bundle = env.get("{}_ca_bundle".format(norm))
     verify_raw = env.get("{}_verify_tls".format(norm), "").strip().lower()
