@@ -411,15 +411,43 @@ def m_inboundPortForwarding(ctx: Ctx) -> Optional[Dict[str, Any]]:
     return {"portForwardingRules": rules}
 
 
+def flow_process(url: Dict[str, Any], source: Dict[str, Any]) -> Tuple[bool, Optional[Tuple[str, str]]]:
+    """urlClassificationConfig.flowProcess as a boolean, with the (disposition, note) to ledger when the section is written.
+
+    The 10.0.0 default template marks it required (true: WebCC treatment of all requests, the default; false: first request only).
+    Orchestrator 10.0.0 /validate answers "Secure Web Services Config - Not valid value: flowProcess." when it is null or missing;
+    true, false and the text "true"/"false" are accepted (lab, 10.0.0.40724, 2026-10-31). GET /secureWebServicesConfig of an
+    appliance on ECOS 9.7.2 behind that Orchestrator holds flowProcess: null, so the default is written. A 9.x target drops the key
+    again (not in its default template)."""
+    raw = url.get("flowProcess", source.get("flowProcess"))
+    if isinstance(raw, bool):
+        return raw, None
+    if isinstance(raw, str) and raw.strip().lower() in ("true", "false"):
+        return raw.strip().lower() == "true", None
+    if raw is None:
+        return True, ("mapped", "the appliance reports no flowProcess value (null or absent: ECOS before 10.0): written true, the default template value (WebCC treatment of all requests)")
+    return True, ("not-readable", "flowProcess read as {!r}, not a boolean: written true, the default template value; check the WebCC treatment (all requests / first request) by hand".format(raw))
+
+
 def m_secureWebServicesConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     source = (ctx.data("secure-web-services") or {}).get("secureWebServicesConfig") or {}
-    defaults = {"urlClassificationConfig": {"hasURLClassification": False, "incrementalUpdate": False, "queryOnMiss": False, "urlReputation": 1},
-                "ipReputationConfig": {"hasIPReputation": False, "incrementalUpdate": False}}  # default template values
-    if not source.get("hasSecureWebServicesConfig") and all(source.get(k) in (None, v) for k, v in defaults.items()):
+    if not isinstance(source, dict):
+        raise Unreadable("secureWebServicesConfig could not be read ({})".format(type(source).__name__))
+    url, ip = source.get("urlClassificationConfig"), source.get("ipReputationConfig")
+    if (url is not None and not isinstance(url, dict)) or (ip is not None and not isinstance(ip, dict)):
+        raise Unreadable("secureWebServicesConfig.urlClassificationConfig or .ipReputationConfig could not be read")
+    url_defaults = {"hasURLClassification": False, "incrementalUpdate": False, "queryOnMiss": False, "urlReputation": 1}  # default template values
+    ip_defaults = {"hasIPReputation": False, "incrementalUpdate": False}
+    url_value = {k: v for k, v in (url or {}).items() if k != "flowProcess"}
+    flow, flow_note = flow_process(url or {}, source) if url is not None else (True, None)
+    if not source.get("hasSecureWebServicesConfig") and url_value in ({}, url_defaults) and (ip or {}) in ({}, ip_defaults) and flow is True:
         ctx.note("secure-web-services", "default-omitted", "secureWebServicesConfig", "feature not configured")
         return None
+    url_value["flowProcess"] = flow
+    if flow_note:
+        ctx.note("secure-web-services", flow_note[0], "secureWebServicesConfig.urlClassificationConfig.flowProcess", flow_note[1])
     ctx.note("secure-web-services", "mapped", "secureWebServicesConfig", "url classification and IP reputation")
-    return {"urlClassificationConfig": source["urlClassificationConfig"], "ipReputationConfig": source["ipReputationConfig"]}
+    return {"urlClassificationConfig": url_value, "ipReputationConfig": dict(ip or ip_defaults)}
 
 
 BGP_NEIGHBOR_USED = {"remote_as", "type", "enable", "hold", "ka", "lcl_interface", "next_hop_self", "password", "rtmap_inbound", "rtmap_outbound", "evpn", "bfd_desired", "directly_connected", "store_received_routes"}
