@@ -45,7 +45,7 @@ class Result:
     counts: Dict[str, int]           # rows per outcome
     files: List[str]                 # the YAML files this run wrote
     text: str                        # what the command printed, stdout and stderr in order, secret values replaced
-    approval: Optional[Dict[str, Any]]  # {gates, fingerprint, orchestrator} for a CSV upload check that has rows to upload
+    approval: Optional[Dict[str, Any]]  # {gates, fingerprint, orchestrator, command} for a CSV upload check that has rows to upload
     outputs: List[Dict[str, Any]] = field(default_factory=list)  # the recorder's results, secret values replaced
 
 

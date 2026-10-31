@@ -38,7 +38,7 @@ NEXT_STEP = {
     "INTERRUPTED": "The run was interrupted. If that happened during an upload, check Orchestrator's preconfigurations.",
     "ERROR": "Read the error above and rerun the same command.",
 }
-CONFLICTED = "Nothing was uploaded: every row's preconfig name or serial number already exists on Orchestrator. Change them, or remove the preconfigs there, then rerun."
+CONFLICTED = "Nothing was uploaded: every row's (or file's) preconfig name or serial number already exists on Orchestrator. Change them, or remove the preconfigs there, then rerun."
 _SECRET_TEXT = re.compile(r"(?i)(authorization|x-auth-token|api[-_]?key|password|secret|cookie)\s*[:=]\s*([^\s,;]+)")
 _BEARER = re.compile(r"(?i)\b(bearer)(?:\s*[:=]\s*|\s+)[^\s,;]+")  # `Authorization: Bearer <token>`: _SECRET_TEXT alone would take "Bearer" for the value; every string, like _SECRET_TEXT: over-masking "Bearer Creek" beats a token in a key not marked free
 GRAM = 8  # a run of this many characters of a secret anywhere in the text is masked, as the whole secret is
