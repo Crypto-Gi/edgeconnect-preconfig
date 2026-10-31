@@ -733,6 +733,27 @@ class YamlTwelveNumbers(unittest.TestCase):
         self.assertIn("zipCode: '08034'", dump({"location": {"zipCode": "08034"}}))
 
 
+class ValidateRejectsNamedOffline(unittest.TestCase):
+    """Values an appliance holds but /validate rejects (full-coverage lab, Pass 1) are named by check.py, never changed or invented."""
+
+    def test_each_reject(self):
+        from check import validate_rejects
+        doc = {"ospfSystemConfig": {"areas": [{"areaId": "0.0.0.0", "areaType": 0}, {"areaId": "0.0.0.2", "areaType": 2}]},
+               "segmentOspfConfig": [{"segment": "corp", "areas": [{"areaId": "0.0.0.1", "areaType": 1}]}],
+               "deploymentInfo": {"dhcpInfo": [{"dhcpInterfaceName": "lan1.212", "dhcpType": "relay", "enableOptions82": True, "option82SubOptions1": False},
+                                               {"dhcpInterfaceName": "lan1.213", "dhcpType": "relay", "enableOptions82": True, "option82SubOptions5": True}],
+                                  "deploymentInterfaces": [{"interfaceName": "wan1", "interfaceLabel": "MPLS1", "interfaceType": "wan", "ipAddressMask": "172.16.10.3/24"},
+                                                           {"interfaceName": "wan1", "interfaceLabel": "MPLS1", "interfaceType": "wan", "ipAddressMask": "2001:db8:10::3/64"},
+                                                           {"interfaceName": "lan1", "interfaceLabel": "Data", "interfaceType": "lan"},
+                                                           {"interfaceName": "lan1", "interfaceLabel": "Data", "interfaceType": "lan"}]}}
+        got = validate_rejects(doc)
+        self.assertEqual(len(got), 3, got)
+        self.assertTrue(got[0].startswith("OSPF area 0.0.0.2 (segment Default): areaType 2"), got[0])
+        self.assertTrue(got[1].startswith("DHCP relay on lan1.212: option 82 is on with no sub-option"), got[1])
+        self.assertTrue(got[2].startswith("WAN wan1: two entries (dual stack) with the same label MPLS1"), got[2])
+        self.assertEqual(validate_rejects({"deploymentInfo": {"dhcpInfo": [{"enableOptions82": False}]}}), [])
+
+
 class LedgerNeverClaimsWhatIsNotWritten(unittest.TestCase):
     """A section the converter maps but the format checks leave out (here a VTI, which no validated build has used) is never ledgered
     `mapped`: the full-coverage lab found VTIs, custom tags, NAC and SWS missing from the YAML while the ledger said mapped."""
