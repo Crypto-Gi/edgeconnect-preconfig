@@ -479,6 +479,8 @@ verified:
   - deploymentInfo.raInfo.routerdeflifetime
   - deploymentInfo.raInfo.routerpreference
   - deploymentInfo.raInfo.sendadv
+  # 2026-10-31: branch NAT destination port, /validate on a 10.0.0.40860 Orchestrator accepted a real build with it added (no capture in the corpus had it validated)
+  - branchNatMapsConfig.branchNatRules.destinationPort
   # 2026-10-31: top-level static routes (pre-segment layout), applied live 45 times on the virtual lab, 44 completed
   - localRoutes.routes.advertise
   - localRoutes.routes.advertiseToBgp

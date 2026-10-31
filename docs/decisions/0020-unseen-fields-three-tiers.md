@@ -6,17 +6,20 @@ A new or never-seen setting must not turn into a new `/validate` bug. The old ru
 
 1. **Seen:** the path is in `references/observed-fields.yaml`. `observed` lists the paths written by a build of a real capture that a real `/validate` accepted. `verified` lists paths added by hand, each with its evidence. These paths are written as before.
 2. **Not seen, plain and safe:** the path is written, with a check-by-hand ledger line (`unverified`, which counts towards "to check by hand", not as a gap), when all of these hold:
-   - it is a single plain value in an object that is itself seen;
+   - it is a single plain value in an object that is itself seen (a list, even of plain values, is never written unseen);
    - it is not inside a list entry;
    - it is not empty or null;
-   - it is a documented word where the template lists them (`template_enums`);
+   - it has the type of the template's own example (yes/no, number or text), since nothing has validated other values there;
+   - it is a documented word, spelt exactly as documented, where the template lists them (`template_enums`);
    - it is not in a section that can affect management access, interfaces or licensing (`NO_UNSEEN`).
-3. **Everything else is not written:** an `unresolved` ledger line names the reason.
+3. **Everything else is not written:** an `unresolved` ledger line names the reason. A list entry (route, neighbor, NAT or firewall rule) that holds an unseen field is left out whole, never written without the field: a branch NAT rule without its unseen `destinationPort` would have translated every port (found by the corpus check). A list whose every entry is left out is not written at all.
 
 The yes/no type check (`template_types`) runs before the tiers and applies to every path.
 
 The tiers judge what the YAML would write. A new setting can also sit in a read no mapper takes in, so translate also compares every field the capture holds with `references/known-source-fields.yaml` (1,255 read-and-field pairs from the same 98 captures) and writes one `new-source-field` line per read with fields none of them had. That line counts towards "to check by hand". How "seen" is decided, so it is never widened by accident:
-- Each ok read (live, cached, orchestrator, backup) is walked to field paths: `[]` for a list entry, `*` for a key that is not lower camel or snake case (`^[a-z][a-zA-Z_]*$`: names, addresses, ids) and for every key of a record map (two or more non-empty objects with the same keys). `record_maps` lists, per read, the paths that were record maps on any appliance, so they are `*` everywhere.
+- Each ok read (live, cached, orchestrator, backup) is walked to field paths: `[]` for a list entry, `*` for a key that is site data and for every key of a record map (two or more non-empty objects with the same keys). A key is a field name when it is lower camel or snake case and may hold digits (`ipv6Mode`, `option82SubOptions1`), but not when it is letters then digits only (`lan0`, `wan1`, `map1`: interface and map names); anything else (an address, an id, a name with capitals first or spaces) is site data. `record_maps` lists, per read, the paths that were record maps on any appliance, so they are `*` everywhere.
+- Known limit: a new key at the top of a record map (for example in an OSPF interface or VNI read that is empty on the box) looks like a new record name and is not reported; a new key inside any record is. In the corpus check this was 215 of 3,983 injected reads, all such empty record-map reads.
+- A read whose body is empty or text, or whose stored copy is damaged, is not compared.
 - Reads of Orchestrator objects and state (`NOT_SETTINGS`: template groups, overlays, segments, zones, regions, the appliance list and the like) are not compared.
 - Only a commit widens either file, regenerated from captures whose builds validated; the commit names them.
 - Leave-one-out on the corpus: a box from an Orchestrator the others did not see would show 0 to 122 new fields (122 on the Orchestrator running 10.0); a box like those already seen shows none.
@@ -27,6 +30,7 @@ Considered:
 - **An allowed-values check on every field:** the documented word lists are incomplete. `ikeEncryptAlgorithm: default` is undocumented, but `/validate` accepts it. So the check applies only to tier 2.
 
 Consequences:
+- `verified` holds fields proven outside the corpus, each with a dated comment: a real build with the field accepted by `/validate`, or applied live on the virtual lab.
 - Adding a field to `verified` once a site with it validates is how a tier-2 or tier-3 field becomes tier 1.
 - `observed` is regenerated from the corpus, field names only.
 

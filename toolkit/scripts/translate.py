@@ -53,7 +53,10 @@ class Capture:
         """(read id, data) of every read that succeeded: live, cached, orchestrator and backup copies alike."""
         for item in self.index:
             if item["status"] == "ok":
-                yield item["id"], json.loads((self.folder / item["file"]).read_text())["data"]
+                try:
+                    yield item["id"], json.loads((self.folder / item["file"]).read_text())["data"]
+                except (OSError, ValueError, KeyError):  # a damaged copy: the reads that use it report it
+                    continue
 
 
 
@@ -810,7 +813,8 @@ def observed_paths() -> set:
 
 
 KNOWN_SOURCE = DEFAULT_TEMPLATES_DIR.parent / "known-source-fields.yaml"
-SOURCE_KEY = re.compile(r"^[a-z][a-zA-Z_]*$")  # any other key is a name, address or id: site data, compared as "*"
+# a field name is lower camel or snake case; any other key (an address, an id, a name, an interface or map name such as lan0) is site data, "*"
+SOURCE_KEY = re.compile(r"^(?![a-z]+[0-9]+$)[a-z][a-zA-Z0-9_]*$")
 # reads of Orchestrator objects and state, not appliance settings: their fields are not compared
 NOT_SETTINGS = {"template-groups", "appliances-all", "cluster-state", "groups", "overlay-config", "overlay-association", "zscaler-association", "netskope-association",
                 "axis-association", "region-associations", "regions", "segments", "zones", "interface-labels", "cluster-profiles", "cluster-profile-mapping",
@@ -841,7 +845,7 @@ def new_source_fields(cap: "Capture") -> Dict[str, List[str]]:
     fields, maps = known.get("fields") or {}, known.get("record_maps") or {}
     found: Dict[str, set] = {}
     for ident, data in cap.reads():
-        if ident in NOT_SETTINGS:
+        if ident in NOT_SETTINGS or not isinstance(data, (dict, list)):  # an empty or text body holds no fields
             continue
         new = source_paths(data, set(maps.get(ident) or [])) - set(fields.get(ident) or [])
         if new:
@@ -874,29 +878,31 @@ def template_enums(target: str) -> Dict[str, set]:
         v = re.search(r"[Vv]alue:\s*\[([^\]]*)\]", line)
         if not (v and field):
             continue
-        words = frozenset(x.strip().strip("\"'").lower() for x in v.group(1).split(",") if x.strip().strip("\"'"))
-        if not words or words <= {"true", "false"} or any(re.search(r"\d+\s*-\s*\d+", x) or re.match(r"^[tb]?w?lan\d|^wan\d", x) for x in words):
+        words = frozenset(x.strip().strip("\"'") for x in v.group(1).split(",") if x.strip().strip("\"'"))
+        if not words or {w.lower() for w in words} <= {"true", "false"} or any(re.search(r"\d+\s*-\s*\d+", x) or re.match(r"^[tb]?w?lan\d|^wan\d", x) for x in words):
             continue
         found.setdefault(field, set()).add(words)
     return {f: set(next(iter(lists))) for f, lists in found.items() if len(lists) == 1}
 
 
-def _unseen_reason(p: str, v: Any, enums: Dict[str, set], in_list: bool) -> Optional[str]:
-    """None when a field never seen in the field may still be written: a plain, non-empty value (a documented word where the template lists them)
-    in a known object outside NO_UNSEEN and outside list items. Otherwise why it is not written."""
+def _unseen_reason(p: str, v: Any, enums: Dict[str, set], in_list: bool, expected: Optional[type] = None) -> Optional[str]:
+    """None when a field never seen in the field may still be written: a plain, non-empty value of the template's own example type (a documented
+    word, exactly, where the template lists them) in a known object outside NO_UNSEEN and outside list items. Otherwise why it is not written."""
     section, _, rest = p.partition(".")
     leaf = p.rsplit(".", 1)[-1].lower()
     if not rest:
         return "a whole section no validated build has used"
     if section in NO_UNSEEN:
         return "the {} section can affect management access, interfaces or licensing".format(section)
-    if in_list:  # a route, neighbor or rule with one field left out could mean something else than the source
+    if in_list:  # never guessed in a route, neighbor or rule: the entry is written without the field, and the Gap line names it
         return "a field of a list entry (route, neighbor, rule) no validated build has used"
     if isinstance(v, (dict, list)):
         return "an object or list no validated build has used"
     if v is None or v == "":
         return "an empty value"
-    if leaf in enums and isinstance(v, str) and v.lower() not in enums[leaf]:
+    if expected is not None and (isinstance(v, bool) != (expected is bool) or not isinstance(v, {bool: bool, int: (int, float), str: str}[expected])):
+        return "{!r} is not a {} like the template's example".format(v, {bool: "true/false", int: "number", str: "text"}[expected])
+    if leaf in enums and isinstance(v, str) and v not in enums[leaf]:
         return "{!r} is not one of the documented values ({})".format(v, ", ".join(sorted(enums[leaf])))
     return None
 
@@ -914,6 +920,15 @@ def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = 
                     ledger.append({"item": "source key", "disposition": "outside-preconfig", "target": p,
                                    "note": "not in the target release's preconfig format (its default template), so not written; the target keeps its own setting"})
                 continue
+            if observed is not None and p not in observed and not (prefix and prefix not in observed):  # the first unseen key on a path decides
+                why = _unseen_reason(p, v, enums or {}, in_list, (types or {}).get(p))
+                if not any(e["item"] == "unseen field" and e["target"] == p for e in ledger):
+                    ledger.append({"item": "unseen field", "disposition": "unresolved" if why else "unverified", "target": p,
+                                   "note": ("in the target release's format, but never seen in the field ({}), so not written; check it by hand".format(why) if why else
+                                            "in the target release's format and the value looks right, but no validated build has used this field yet: written; "
+                                            "check it after /validate") + "; once a site with it validates, add it to references/observed-fields.yaml"})
+                if why:
+                    continue
             if types and p in types and isinstance(v, list):  # a list of yes/no, numbers or text: check each item
                 bad = [x for x in v if not _fits(x, types[p]) or x is None]
                 if bad and not any(e["item"] == "source value" and e["target"] == p for e in ledger):  # a mapper's own line on p is no Gap line
@@ -930,19 +945,23 @@ def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = 
                                    "note": "the appliance reported {!r}, not a {} as the target release's format needs, so not written; check it by hand".format(
                                        v if not isinstance(v, (dict, list)) else type(v).__name__, {bool: "true/false", int: "number", str: "text"}[types[p]])})
                 continue
-            if observed is not None and p not in observed and not (prefix and prefix not in observed):  # the first unseen key on a path decides
-                why = _unseen_reason(p, v, enums or {}, in_list)
-                if not any(e["item"] == "unseen field" and e["target"] == p for e in ledger):
-                    ledger.append({"item": "unseen field", "disposition": "unresolved" if why else "unverified", "target": p,
-                                   "note": ("in the target release's format, but never seen in the field ({}), so not written; check it by hand".format(why) if why else
-                                            "in the target release's format and the value looks right, but no validated build has used this field yet: written; "
-                                            "check it after /validate") + "; once a site with it validates, add it to references/observed-fields.yaml"})
-                if why:
-                    continue
-            out[k] = prune(v, allowed, ledger, p, types, observed, enums, in_list)
+            kept = prune(v, allowed, ledger, p, types, observed, enums, in_list)
+            if isinstance(v, list) and v and not kept:  # every entry left out: not written, never an empty list (a list replaces on apply)
+                continue
+            out[k] = kept
         return out
     if isinstance(value, list):
-        return [prune(v, allowed, ledger, prefix, types, observed, enums, True) for v in value]
+        out = []
+        for v in value:
+            unseen = sorted(q for q in flat_paths(v, prefix) if observed is not None and q in allowed and q not in observed)
+            if unseen:  # left out whole: a rule without its port, or a route without a field, would do something else than the source
+                if not any(e["item"] == "unseen entry" and e["target"] == prefix for e in ledger):
+                    ledger.append({"item": "unseen entry", "disposition": "unresolved", "target": prefix,
+                                   "note": "an entry holds {}, which no validated build has used, so the whole entry is not written (writing it without the field "
+                                           "would change what it does); set it by hand, and once a site with the field validates, add it to references/observed-fields.yaml".format(", ".join(unseen))})
+                continue
+            out.append(prune(v, allowed, ledger, prefix, types, observed, enums, True))
+        return out
     return value
 
 

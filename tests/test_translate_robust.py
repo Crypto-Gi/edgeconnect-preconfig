@@ -611,7 +611,8 @@ if __name__ == "__main__":
 
 class NothingUnknownIsWritten(unittest.TestCase):
     """Invented fields, nulls, wrong types and an unknown release, fed into every read: every written path is in the target format and either
-    seen in the field or reported as written-not-yet-seen, and every yes/no field holds true or false (docs/decisions/0020)."""
+    seen in the field or reported as written-not-yet-seen, every yes/no field holds true or false, and every path the format check left out
+    has a ledger line (docs/decisions/0020)."""
 
     fit = {}
 
@@ -620,7 +621,9 @@ class NothingUnknownIsWritten(unittest.TestCase):
         if target not in self.fit:
             self.fit[target] = (allowed_paths(target), dict(types=template_types(target), observed=observed_paths(), enums=template_enums(target)))
         ledger = []
-        out = prune(build(FakeCap(data), ledger), self.fit[target][0], ledger, **self.fit[target][1])
+        built = build(FakeCap(data), ledger)
+        self.built = copy.deepcopy(built)
+        out = prune(built, self.fit[target][0], ledger, **self.fit[target][1])
         return out, ledger
 
     def check(self, out, ledger, target):
@@ -628,6 +631,9 @@ class NothingUnknownIsWritten(unittest.TestCase):
         unverified = {e["target"] for e in ledger if e["disposition"] == "unverified"}
         stray = flat_paths(out) - (allowed_paths(target) & (observed_paths() | unverified))
         self.assertEqual(stray, set(), "written but neither seen in the field nor reported")
+        named = {t.strip() for e in ledger if e["disposition"] not in ("mapped", "context") for t in e["target"].split(",")}
+        dropped = {p for p in flat_paths(self.built) - flat_paths(out) if not any(p == t or p.startswith(t + ".") for t in named)}
+        self.assertEqual(dropped, set(), "left out with no ledger line")
         types = template_types(target)
 
         def walk(v, p):
@@ -740,3 +746,11 @@ class NewSourceFields(unittest.TestCase):
         lines, _ = self.ledgered(lambda d: d.update({"zz-new-read": {"enable": True}}))
         self.assertEqual(lines[0]["item"], "zz-new-read")
         self.assertIn("1 field(s) no earlier capture had", lines[0]["note"])
+
+    def test_a_field_name_with_digits_or_capitals_is_a_field_and_an_interface_name_is_site_data(self):
+        def change(d):
+            d["deployment"]["sysConfig"].update(ipv6Mode="slaac", evpn2Enable=True)
+            d["deployment"]["sysConfig"]["vrfZonesMap"]["0"]["a"]["lan3"] = None  # an interface name as a key
+        lines, _ = self.ledgered(change)
+        self.assertIn("sysConfig.evpn2Enable, sysConfig.ipv6Mode", lines[0]["note"])
+        self.assertNotIn("lan3", lines[0]["note"])
