@@ -289,7 +289,12 @@ class Release(unittest.TestCase):
         self.assertEqual(prune({"vrrp": {"rules": [{"a": 1, "b": 2}, {"a": 3}]}}, {"vrrp", "vrrp.rules", "vrrp.rules.a", "vrrp.rules.b"}, routes, types={},
                                observed={"vrrp", "vrrp.rules", "vrrp.rules.a"}, enums={}), {"vrrp": {"rules": [{"a": 3}]}})
         self.assertEqual([(e["target"], e["disposition"]) for e in routes], [("vrrp.rules", "unresolved")])
-        self.assertIn("holds vrrp.rules.b", routes[0]["note"])
+        self.assertIn("1 of the entries hold vrrp.rules.b", routes[0]["note"])
+        many = []
+        prune({"vrrp": {"rules": [{"a": 1, "b": 2}, {"a": 3, "c": 4}, {"a": 5}]}}, {"vrrp", "vrrp.rules", "vrrp.rules.a", "vrrp.rules.b", "vrrp.rules.c"}, many,
+              types={}, observed={"vrrp", "vrrp.rules", "vrrp.rules.a"}, enums={})
+        self.assertEqual(len(many), 1)
+        self.assertIn("2 of the entries hold vrrp.rules.b, vrrp.rules.c", many[0]["note"])
         self.assertEqual(prune({"vrrp": {"rules": [{"a": 1, "b": 2}]}}, {"vrrp", "vrrp.rules", "vrrp.rules.a", "vrrp.rules.b"}, [], types={},
                                observed={"vrrp", "vrrp.rules", "vrrp.rules.a"}, enums={}), {"vrrp": {}})  # every entry left out: no empty list
         self.assertEqual(template_enums("10.0.0.40860")["addressingmode"], {"static", "dhcpv4", "dhcpv6", "slaac"})

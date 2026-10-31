@@ -55,7 +55,7 @@ class Capture:
             if item["status"] == "ok":
                 try:
                     yield item["id"], json.loads((self.folder / item["file"]).read_text())["data"]
-                except (OSError, ValueError, KeyError):  # a damaged copy: the reads that use it report it
+                except (OSError, ValueError, KeyError, TypeError):  # a damaged copy: the reads that use it report it
                     continue
 
 
@@ -894,7 +894,7 @@ def _unseen_reason(p: str, v: Any, enums: Dict[str, set], in_list: bool, expecte
         return "a whole section no validated build has used"
     if section in NO_UNSEEN:
         return "the {} section can affect management access, interfaces or licensing".format(section)
-    if in_list:  # never guessed in a route, neighbor or rule: the entry is written without the field, and the Gap line names it
+    if in_list:  # prune already leaves out a whole entry holding an unseen field; kept for a direct call
         return "a field of a list entry (route, neighbor, rule) no validated build has used"
     if isinstance(v, (dict, list)):
         return "an object or list no validated build has used"
@@ -951,16 +951,23 @@ def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = 
             out[k] = kept
         return out
     if isinstance(value, list):
-        out = []
+        out, left, fields = [], 0, set()
         for v in value:
-            unseen = sorted(q for q in flat_paths(v, prefix) if observed is not None and q in allowed and q not in observed)
+            unseen = {q for q in flat_paths(v, prefix) if observed is not None and q in allowed and q not in observed}
             if unseen:  # left out whole: a rule without its port, or a route without a field, would do something else than the source
-                if not any(e["item"] == "unseen entry" and e["target"] == prefix for e in ledger):
-                    ledger.append({"item": "unseen entry", "disposition": "unresolved", "target": prefix,
-                                   "note": "an entry holds {}, which no validated build has used, so the whole entry is not written (writing it without the field "
-                                           "would change what it does); set it by hand, and once a site with the field validates, add it to references/observed-fields.yaml".format(", ".join(unseen))})
+                left, fields = left + 1, fields | unseen
                 continue
             out.append(prune(v, allowed, ledger, prefix, types, observed, enums, True))
+        if left:
+            entry = next((e for e in ledger if e["item"] == "unseen entry" and e["target"] == prefix), None)
+            if entry is None:
+                entry = {"item": "unseen entry", "disposition": "unresolved", "target": prefix, "left": 0, "fields": []}
+                ledger.append(entry)
+            entry["left"] += left
+            entry["fields"] = sorted(set(entry["fields"]) | fields)
+            entry["note"] = ("{} of the entries hold {}, which no validated build has used, so those entries are not written whole (writing one without the field "
+                             "would change what it does); set them by hand, and once a site with the field validates, add it to references/observed-fields.yaml").format(
+                                 entry["left"], ", ".join(entry["fields"]))
         return out
     return value
 
