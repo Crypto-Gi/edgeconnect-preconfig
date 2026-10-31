@@ -775,7 +775,7 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
             raise Fail("{} is given twice: give each other site once".format(site))
     base = a.folder if (a.folder / "build.json").is_file() else a.folder.parent
     from capture import Stop, capture
-    from translate import Capture, NothingToConvert, allowed_paths, build, prune, template_types
+    from translate import Capture, NothingToConvert, allowed_paths, build, prune, observed_paths, template_enums, template_types
     from variables import classify, only_at, sheet_items, write_sheet
     caps = list(a.captures or [])
     for site in a.sites[len(caps):]:
@@ -786,14 +786,14 @@ def cmd_compare(argv: List[str], read: Callable[[str], str] = input) -> int:
             raise Fail(str(stop))
     for site, c in zip(a.sites, caps):
         record("capture", site=site, folder=str(c))  # what a later --captures gives back
-    allowed, types = allowed_paths(info["target_release"]), template_types(info["target_release"])
+    allowed, types, observed, enums = allowed_paths(info["target_release"]), template_types(info["target_release"]), observed_paths(), template_enums(info["target_release"])
     others = []
     read_ne = set()
     for site, c in zip(a.sites, caps):
         try:
             cap = Capture(c)
             why = reused_capture_problem(cap.run, site, info["orchestrator"]) if a.captures else None  # before build: a partial capture is not "offline?"
-            other = None if why else prune(build(cap, [], info.get("target_ecos")), allowed, [], types=types)
+            other = None if why else prune(build(cap, [], info.get("target_ecos")), allowed, [], types=types, observed=observed, enums=enums)
         except NothingToConvert:
             raise Fail("{}: no appliance or deployment data could be read (offline with no Orchestrator cache?), so it cannot be compared".format(site))
         except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:  # a damaged capture: one line naming the site as typed, not a traceback

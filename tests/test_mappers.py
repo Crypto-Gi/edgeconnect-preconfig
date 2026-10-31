@@ -259,6 +259,28 @@ class Release(unittest.TestCase):
         self.assertEqual(out, {"bgpSystemConfig": {"neighbors": [{}, {"bfdEnabled": True}]}})
         self.assertEqual([e["target"] for e in ledger], ["bgpSystemConfig.neighbors.bfdEnabled"])
 
+    def test_a_field_never_seen_in_the_field_is_written_only_when_plain_and_safe(self):
+        from translate import template_enums
+        allowed = {"vrrp", "vrrp.a", "vrrp.new", "vrrp.mode", "vrrp.obj", "vrrp.obj.x", "vrrp.empty", "deploymentInfo", "deploymentInfo.new", "fresh", "fresh.x"}
+        observed = {"vrrp", "vrrp.a", "deploymentInfo"}
+        enums = {"mode": {"ids only", "off"}}
+        ledger = []
+        out = prune({"vrrp": {"a": 1, "new": 5, "mode": "Turbo", "obj": {"x": 1}, "empty": ""}, "deploymentInfo": {"new": 1}, "fresh": {"x": 1}},
+                    allowed, ledger, types={}, observed=observed, enums=enums)
+        self.assertEqual(out, {"vrrp": {"a": 1, "new": 5}, "deploymentInfo": {}})
+        self.assertEqual([(e["target"], e["disposition"]) for e in ledger], [
+            ("vrrp.new", "unverified"), ("vrrp.mode", "unresolved"), ("vrrp.obj", "unresolved"), ("vrrp.empty", "unresolved"),
+            ("deploymentInfo.new", "unresolved"), ("fresh", "unresolved")])
+        self.assertIn("not one of the documented values", ledger[1]["note"])
+        self.assertIn("management access", ledger[4]["note"])
+        self.assertEqual(prune({"vrrp": {"mode": "Off"}}, allowed, [], types={}, observed=observed, enums=enums), {"vrrp": {"mode": "Off"}})  # documented word, any case
+        self.assertEqual(template_enums("10.0.0.40860")["addressingmode"], {"static", "dhcpv4", "dhcpv6", "slaac"})
+        self.assertNotIn("interfacename", template_enums("10.0.0.40860"))  # an interface-name list is not a closed list
+
+    def test_an_unseen_field_is_check_by_hand_not_a_gap_when_written(self):
+        from translate import verdict
+        self.assertEqual(verdict([{"disposition": "unverified"}]), "Complete for preconfig; 1 item(s) to check by hand.")
+
     def test_template_types_reads_the_target_template(self):
         from translate import template_types
         types = template_types("10.0.0.40860")
