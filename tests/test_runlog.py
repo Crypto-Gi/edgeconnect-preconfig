@@ -177,10 +177,34 @@ class RunLog(unittest.TestCase):
         code, record = self.logged(["upload", str(site), "--csv", str(site / "sites.csv"), "--approve"], "approval", RunContext(approver=refuse, source="gui"))
         self.assertEqual((code, record["status"], record["changes_written"], record["source"]), (2, "REFUSED", "no", "gui"))
         self.assertEqual(record["summary"]["blocking_issues"], ["the rows changed"])
+        self.assertRegex(record["summary"]["plan_fingerprint"], "^[0-9a-f]{64}$")
         approval = {"by": "someone", "time": "2026-10-30T07:00:00Z", "typed_orchestrator": "lab", "typed": []}
         code, record = self.logged(["upload", str(site), "--csv", str(site / "sites.csv"), "--approve"], "approval", RunContext(approver=lambda fingerprint: approval, source="gui"))
         self.assertEqual((code, record["status"], record["summary"]["approval"]), (0, "SUCCESS", approval))
         self.assertIn("Approved by  : someone at 2026-10-30T07:00:00Z in the GUI, typing 'lab'", automation_reader.render(record["summary"]))
+
+    def test_an_upload_where_every_row_conflicts_is_blocked(self):
+        site = self.site()
+        sheet = self.sheet("all-taken.csv", lambda rows: [dict(rows[0], preconfig_name="taken")])
+        for approve in ([], ["--approve"]):
+            code, record = self.logged(["upload", str(site), "--csv", str(sheet)] + approve, "conflict")
+            self.assertEqual((code, record["status"], record["changes_written"]), (0, "BLOCKED", "no"), approve)
+            self.assertEqual(record["summary"]["blocking_issues"], ["preconfig_name 'taken' already exists on Orchestrator"])
+            self.assertIn("already exists on Orchestrator", record["summary"]["next_step"])
+        record = runlog.entry(["upload", "s", "--approve"], 0, "run-x", __import__("datetime").datetime.now().astimezone(), 0.0,
+                              [{"kind": "row", "index": 1, "preconfig_name": "a", "status": "conflict", "file": "a.yml", "problems": [{"message": "taken"}]},
+                               {"kind": "row", "index": 2, "preconfig_name": "b", "status": "uploaded", "file": "b.yml", "problems": []}], "cli", {})
+        self.assertEqual((record["status"], record["changes_written"]), ("SUCCESS", "yes"))  # one row went: not blocked
+
+    def test_a_refusal_before_the_run_is_logged_with_the_plan_fingerprint(self):
+        folder = self.tmp / "refused-early"
+        with mock.patch.dict(os.environ, {"EDGECONNECT_REPORT_DIR": str(folder)}):
+            runlog.refused(["upload", "s", "--csv", "s/sites.csv", "--orchestrator", "lab", "--approve"], "sha256:abc", "the nickname typed is not lab", "gui")
+        record = json.loads((folder / "preconfig.jsonl").read_text(encoding="utf-8"))
+        self.assertEqual((record["status"], record["exit_code"], record["changes_written"], record["source"], record["orchestrator"]), ("REFUSED", 2, "no", "gui", "lab"))
+        self.assertEqual((record["summary"]["plan_fingerprint"], record["summary"]["blocking_issues"]), ("sha256:abc", ["the nickname typed is not lab"]))
+        with mock.patch.dict(os.environ, {"EDGECONNECT_REPORT_DIR": ""}):
+            runlog.refused(["upload"], "sha256:abc", "no", "gui")  # the log turned off: nothing written, no error
 
     def test_a_command_that_raises_is_still_logged(self):
         def boom(argv):

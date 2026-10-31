@@ -38,6 +38,7 @@ NEXT_STEP = {
     "INTERRUPTED": "The run was interrupted. If that happened during an upload, check Orchestrator's preconfigurations.",
     "ERROR": "Read the error above and rerun the same command.",
 }
+CONFLICTED = "Nothing was uploaded: every row's preconfig name or serial number already exists on Orchestrator. Change them, or remove the preconfigs there, then rerun."
 _SECRET_TEXT = re.compile(r"(?i)(authorization|x-auth-token|api[-_]?key|password|secret|cookie)\s*[:=]\s*([^\s,;]+)")
 _BEARER = re.compile(r"(?i)\b(bearer)(?:\s*[:=]\s*|\s+)[^\s,;]+")  # `Authorization: Bearer <token>`: _SECRET_TEXT alone would take "Bearer" for the value; every string, like _SECRET_TEXT: over-masking "Bearer Creek" beats a token in a key not marked free
 GRAM = 8  # a run of this many characters of a secret anywhere in the text is masked, as the whole secret is
@@ -165,7 +166,7 @@ def rows_of(results: Sequence[Mapping[str, Any]]) -> List[Dict[str, Any]]:
     return rows
 
 
-def status_of(code: int, outcomes: set, refused: bool) -> str:
+def status_of(code: int, outcomes: set, refused: bool, workflow: str = "") -> str:
     if code == 130:
         return "INTERRUPTED"
     if refused:
@@ -174,6 +175,8 @@ def status_of(code: int, outcomes: set, refused: bool) -> str:
         return "BLOCKED"
     if code:  # a FAILED row was sent: as in automation, a failed write is PARTIAL, never INVALID (nothing sent)
         return "PARTIAL" if outcomes & {"CREATED", "FAILED"} else "INVALID" if "INVALID" in outcomes else "ERROR"
+    if workflow == "preconfig upload" and outcomes == {"SKIPPED"}:  # every row already on Orchestrator: nothing was or could be sent
+        return "BLOCKED"
     return "PLANNED" if "PLANNED" in outcomes else "VALID" if outcomes and outcomes <= {"VALID"} else "SUCCESS"
 
 
@@ -191,7 +194,9 @@ def entry(argv: Sequence[str], code: int, run_id: str, started: datetime.datetim
     """The log record: automation's headline fields, its summary (with the rows `report summarize` reads) and the results."""
     rows = rows_of(results)
     outcomes = {r["outcome"] for r in rows}
-    status = status_of(code, outcomes, any(r["kind"] == "refused" for r in results))
+    workflow = "preconfig " + (argv[0] if argv else "")
+    status = status_of(code, outcomes, any(r["kind"] == "refused" for r in results), workflow)
+    conflicted = status == "BLOCKED" and code == 0  # the every-row-conflicts block; a code 2 block is a stopped command
     seen = [r for r in results if r["kind"] == "orchestrator"]
     builds = [r for r in results if r["kind"] == "build"]
     csv_path = option(argv, "--csv")
@@ -211,24 +216,27 @@ def entry(argv: Sequence[str], code: int, run_id: str, started: datetime.datetim
         "orchestrator_target": "",
         "orchestrator": option(argv, "--orchestrator") or (seen[-1]["name"] if seen else "not contacted"),
         "orchestrator_url": seen[-1]["url"] if seen else "not contacted",
-        "workflow": "preconfig " + (argv[0] if argv else ""),
+        "workflow": workflow,
         "command": "edgeconnect-preconfig " + " ".join(argv),
         "source": source,
         "dry_run": False,
         "csv": csv_info,
         "status": status,
-        "changes_written": written(status, "preconfig " + (argv[0] if argv else ""), outcomes),
+        "changes_written": written(status, workflow, outcomes),
         "exit_code": code,
         "exit_meaning": EXIT_MEANING.get(code, "unknown"),
         "counts": ["{} {}".format(n, outcome) for outcome, n in sorted(totals.items())],
         "row_outcomes": totals,
         "rows": rows,
-        "blocking_issues": [str(r.get("reason") or "") for r in results if r["kind"] == "refused"],
+        "blocking_issues": [str(r.get("reason") or "") for r in results if r["kind"] == "refused"] + ([r["reason"] for r in rows if r["reason"]] if conflicted else []),
         "warnings": [],
         "targets": [],
         "run_reference": "",
-        "next_step": NEXT_STEP[status],
+        "next_step": CONFLICTED if conflicted else NEXT_STEP[status],
     }
+    fingerprints = [r["value"] for r in results if r["kind"] == "fingerprint"]
+    if fingerprints:  # the batch a run planned, approved or refused
+        summary["plan_fingerprint"] = fingerprints[-1]
     approvals = [r for r in results if r["kind"] == "approval"]
     if approvals:
         summary["approval"] = approvals[-1]["record"]
@@ -270,3 +278,16 @@ def logged(argv: Sequence[str]) -> Iterator[Dict[str, int]]:
                     append(folder / LOG_NAME, json.dumps(record, ensure_ascii=False, default=str) + "\n")
                 except OSError as err:  # the command's own result stands; only its log line is missing
                     print("warning: run log not written to {}: {}".format(folder / LOG_NAME, err), file=sys.stderr)
+
+
+def refused(argv: Sequence[str], fingerprint: str, reason: str, source: str) -> None:
+    """Log an upload refused before its command ran (the GUI's typed approval did not match): REFUSED, nothing sent."""
+    folder = report_dir()
+    if folder is None:
+        return
+    results = [{"kind": "fingerprint", "value": fingerprint}, {"kind": "refused", "reason": reason}]
+    record = entry(list(argv), 2, "run-" + uuid.uuid4().hex[:12], datetime.datetime.now().astimezone(), 0.0, results, source, {})
+    try:
+        append(folder / LOG_NAME, json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    except OSError as err:
+        print("warning: run log not written to {}: {}".format(folder / LOG_NAME, err), file=sys.stderr)

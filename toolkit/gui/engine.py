@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Seque
 
 import cli
 import common
+import runlog
 import upload as upload_stage
 from approval import ApprovalError, Gate, GuiApprovals, upload_gates
 
@@ -51,7 +52,11 @@ class Result:
 def approve(approvals: GuiApprovals, request: Mapping[str, Any], answers: Sequence[str], typed_orchestrator: str = "") -> Callable[[str], Dict[str, Any]]:
     """Check the typed answers against a Result.approval request and return the approver of the upload run for that exact batch."""
     gates = [Gate(**gate) for gate in request["gates"]]
-    token = approvals.issue(gates, answers, request["fingerprint"], request["orchestrator"])
+    try:
+        token = approvals.issue(gates, answers, request["fingerprint"], request["orchestrator"])
+    except ApprovalError as error:  # the upload command never runs, so its own REFUSED line would be missing
+        runlog.refused(list(request.get("command") or ["upload", "--orchestrator", request["orchestrator"], "--approve"]), request["fingerprint"], str(error), "gui")
+        raise
     redeem = approvals.approver(token, request["orchestrator"], tuple(answers))
     if not typed_orchestrator:
         return redeem
@@ -257,7 +262,8 @@ def _approval(argv: Sequence[str], outputs: Sequence[Mapping[str, Any]]) -> Opti
     fingerprints = [r["value"] for r in outputs if r["kind"] == "fingerprint"]
     if line.yaml is not None or line.approve or not fingerprints:
         return None
-    return {"gates": [asdict(gate) for gate in upload_gates(line.orchestrator)], "fingerprint": fingerprints[-1], "orchestrator": line.orchestrator}
+    return {"gates": [asdict(gate) for gate in upload_gates(line.orchestrator)], "fingerprint": fingerprints[-1], "orchestrator": line.orchestrator,
+            "command": list(argv) + ["--approve"]}  # the upload approving runs, for the run log line of a refusal
 
 
 # ---------------------------------------------------------------- secrets in text (BUILD_PLAN "Engineering rules")
