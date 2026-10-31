@@ -792,7 +792,60 @@ def _fits(value: Any, expected: type) -> bool:
     return not isinstance(value, (dict, list))
 
 
-def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = "", types: Optional[Dict[str, type]] = None) -> Any:
+OBSERVED = DEFAULT_TEMPLATES_DIR.parent / "observed-fields.yaml"
+
+
+def observed_paths() -> set:
+    """Key paths seen in the field: written by a build of a real capture that /validate accepted, or verified by hand (references/observed-fields.yaml)."""
+    doc = load_yaml(OBSERVED) or {}
+    return set(doc.get("observed") or []) | set(doc.get("verified") or [])
+
+
+# sections where a field never seen in the field is never written, whatever its value: management access, interfaces and licensing can lock a box out
+NO_UNSEEN = {"deploymentInfo", "managementIp", "managementRoutes", "ipAllowList", "interfaceConfig", "linkAggregation", "bridgeGroups", "pppoe", "usblte", "ecLicensing"}
+
+
+def template_enums(target: str) -> Dict[str, set]:
+    """Field name (lower case) -> allowed words, from the template's one-line "Value: [a, b]" docs; ranges, true/false, interface-name lists
+    and names documented with differing lists are left out."""
+    found: Dict[str, set] = {}
+    field = None
+    for line in find_default_template(target)[0].read_text(encoding="utf-8").splitlines():
+        m = re.match(r"\s*#\s*(?:\d+\.)?(\w+)\s+-", line)
+        if m:
+            field = m.group(1).lower()
+        v = re.search(r"[Vv]alue:\s*\[([^\]]*)\]", line)
+        if not (v and field):
+            continue
+        words = frozenset(x.strip().strip("\"'").lower() for x in v.group(1).split(",") if x.strip().strip("\"'"))
+        if not words or words <= {"true", "false"} or any(re.search(r"\d+\s*-\s*\d+", x) or re.match(r"^[tb]?w?lan\d|^wan\d", x) for x in words):
+            continue
+        found.setdefault(field, set()).add(words)
+    return {f: set(next(iter(lists))) for f, lists in found.items() if len(lists) == 1}
+
+
+def _unseen_reason(p: str, v: Any, enums: Dict[str, set], in_list: bool) -> Optional[str]:
+    """None when a field never seen in the field may still be written: a plain, non-empty value (a documented word where the template lists them)
+    in a known object outside NO_UNSEEN and outside list items. Otherwise why it is not written."""
+    section, _, rest = p.partition(".")
+    leaf = p.rsplit(".", 1)[-1].lower()
+    if not rest:
+        return "a whole section no validated build has used"
+    if section in NO_UNSEEN:
+        return "the {} section can affect management access, interfaces or licensing".format(section)
+    if in_list:  # a route, neighbor or rule with one field left out could mean something else than the source
+        return "a field of a list entry (route, neighbor, rule) no validated build has used"
+    if isinstance(v, (dict, list)):
+        return "an object or list no validated build has used"
+    if v is None or v == "":
+        return "an empty value"
+    if leaf in enums and isinstance(v, str) and v.lower() not in enums[leaf]:
+        return "{!r} is not one of the documented values ({})".format(v, ", ".join(sorted(enums[leaf])))
+    return None
+
+
+def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = "", types: Optional[Dict[str, type]] = None,
+          observed: Optional[set] = None, enums: Optional[Dict[str, set]] = None, in_list: bool = False) -> Any:
     """Drop every key path not in `allowed`, one ledger line per path: an appliance can report keys the target's format rejects (ECOS 9.5.x NAC).
     With `types` (template_types), also drop a non-true/false value in a yes/no leaf and an object or list in a number or text leaf: /validate rejects a null flag."""
     if isinstance(value, dict):
@@ -820,10 +873,19 @@ def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = 
                                    "note": "the appliance reported {!r}, not a {} as the target release's format needs, so not written; check it by hand".format(
                                        v if not isinstance(v, (dict, list)) else type(v).__name__, {bool: "true/false", int: "number", str: "text"}[types[p]])})
                 continue
-            out[k] = prune(v, allowed, ledger, p, types)
+            if observed is not None and p not in observed and not (prefix and prefix not in observed):  # the first unseen key on a path decides
+                why = _unseen_reason(p, v, enums or {}, in_list)
+                if not any(e["item"] == "unseen field" and e["target"] == p for e in ledger):
+                    ledger.append({"item": "unseen field", "disposition": "unresolved" if why else "unverified", "target": p,
+                                   "note": ("in the target release's format, but never seen in the field ({}), so not written; check it by hand".format(why) if why else
+                                            "in the target release's format and the value looks right, but no validated build has used this field yet: written; "
+                                            "check it after /validate") + "; once a site with it validates, add it to references/observed-fields.yaml"})
+                if why:
+                    continue
+            out[k] = prune(v, allowed, ledger, p, types, observed, enums, in_list)
         return out
     if isinstance(value, list):
-        return [prune(v, allowed, ledger, prefix, types) for v in value]
+        return [prune(v, allowed, ledger, prefix, types, observed, enums, True) for v in value]
     return value
 
 
@@ -848,6 +910,7 @@ REPORT_GROUPS = [
     ("Toolkit errors: a toolkit bug, report it", {"toolkit-error"}),
     ("Gaps: the preconfig format has a place for it, but the value was not carried", {"unresolved", "unmapped-source-key"}),
     ("Not readable: the format has a place for it, but a GET cannot read it; check it by hand", {"not-readable"}),
+    ("Written, not yet seen in the field: the value looks right, but no validated build has used the field; check it after /validate", {"unverified"}),
     ("Outside preconfig: the format has no place for it; set it another way", {"outside-preconfig", "release-gated"}),  # release-gated: ledgers written before 1.3.0
     ("Owned elsewhere: comes from template groups or Orchestrator, as intended", {"template-group", "orchestrator-managed"}),
 ]
@@ -870,7 +933,7 @@ def verdict(ledger: List[Dict[str, Any]]) -> str:
     known = set().union(*(d for _, d in REPORT_GROUPS)) | QUIET
     errors = sum(1 for e in ledger if e["disposition"] == "toolkit-error")
     gaps = sum(1 for e in ledger if e["disposition"] in ("unresolved", "unmapped-source-key") or e["disposition"] not in known)
-    by_hand = sum(1 for e in ledger if e["disposition"] == "not-readable")
+    by_hand = sum(1 for e in ledger if e["disposition"] in ("not-readable", "unverified"))
     if errors or gaps:
         return "Incomplete for preconfig: {} gap(s), {} toolkit error(s).".format(gaps, errors)
     return "Complete for preconfig" + ("; {} item(s) to check by hand.".format(by_hand) if by_hand else ".")
@@ -1019,7 +1082,7 @@ def convert(args: argparse.Namespace, template: Path, template_why: str, default
     cap = Capture(args.capture)
     ledger: List[Dict[str, Any]] = [{"item": "default template", "disposition": "context", "target": template.name, "note": template_why}]
     try:
-        reference = prune(build(cap, ledger, args.target_ecos), allowed_paths(args.target_release), ledger, types=template_types(args.target_release))
+        reference = prune(build(cap, ledger, args.target_ecos), allowed_paths(args.target_release), ledger, types=template_types(args.target_release), observed=observed_paths(), enums=template_enums(args.target_release))
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2
@@ -1043,7 +1106,7 @@ def convert(args: argparse.Namespace, template: Path, template_why: str, default
     order = list(default_doc)
     reference = {k: reference[k] for k in sorted(reference, key=lambda x: order.index(x) if x in order else 999)}
     try:
-        others = [] if section_modes else [prune(build(Capture(folder), [], args.target_ecos), allowed_paths(args.target_release), [], types=template_types(args.target_release)) for folder in args.compare or []]
+        others = [] if section_modes else [prune(build(Capture(folder), [], args.target_ecos), allowed_paths(args.target_release), [], types=template_types(args.target_release), observed=observed_paths(), enums=template_enums(args.target_release)) for folder in args.compare or []]
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2

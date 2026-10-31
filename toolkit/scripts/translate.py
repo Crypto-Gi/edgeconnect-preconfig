@@ -824,15 +824,17 @@ def template_enums(target: str) -> Dict[str, set]:
     return {f: set(next(iter(lists))) for f, lists in found.items() if len(lists) == 1}
 
 
-def _unseen_reason(p: str, v: Any, types: Optional[Dict[str, type]], enums: Dict[str, set]) -> Optional[str]:
-    """None when a field never seen in the field may still be written: a plain, typed, non-empty value of a documented word, in a known object
-    outside NO_UNSEEN. Otherwise why it is not written."""
+def _unseen_reason(p: str, v: Any, enums: Dict[str, set], in_list: bool) -> Optional[str]:
+    """None when a field never seen in the field may still be written: a plain, non-empty value (a documented word where the template lists them)
+    in a known object outside NO_UNSEEN and outside list items. Otherwise why it is not written."""
     section, _, rest = p.partition(".")
     leaf = p.rsplit(".", 1)[-1].lower()
     if not rest:
         return "a whole section no validated build has used"
     if section in NO_UNSEEN:
         return "the {} section can affect management access, interfaces or licensing".format(section)
+    if in_list:  # a route, neighbor or rule with one field left out could mean something else than the source
+        return "a field of a list entry (route, neighbor, rule) no validated build has used"
     if isinstance(v, (dict, list)):
         return "an object or list no validated build has used"
     if v is None or v == "":
@@ -843,7 +845,7 @@ def _unseen_reason(p: str, v: Any, types: Optional[Dict[str, type]], enums: Dict
 
 
 def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = "", types: Optional[Dict[str, type]] = None,
-          observed: Optional[set] = None, enums: Optional[Dict[str, set]] = None) -> Any:
+          observed: Optional[set] = None, enums: Optional[Dict[str, set]] = None, in_list: bool = False) -> Any:
     """Drop every key path not in `allowed`, one ledger line per path: an appliance can report keys the target's format rejects (ECOS 9.5.x NAC).
     With `types` (template_types), also drop a non-true/false value in a yes/no leaf and an object or list in a number or text leaf: /validate rejects a null flag."""
     if isinstance(value, dict):
@@ -872,7 +874,7 @@ def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = 
                                        v if not isinstance(v, (dict, list)) else type(v).__name__, {bool: "true/false", int: "number", str: "text"}[types[p]])})
                 continue
             if observed is not None and p not in observed and not (prefix and prefix not in observed):  # the first unseen key on a path decides
-                why = _unseen_reason(p, v, types, enums or {})
+                why = _unseen_reason(p, v, enums or {}, in_list)
                 if not any(e["item"] == "unseen field" and e["target"] == p for e in ledger):
                     ledger.append({"item": "unseen field", "disposition": "unresolved" if why else "unverified", "target": p,
                                    "note": ("in the target release's format, but never seen in the field ({}), so not written; check it by hand".format(why) if why else
@@ -880,10 +882,10 @@ def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = 
                                             "check it after /validate") + "; once a site with it validates, add it to references/observed-fields.yaml"})
                 if why:
                     continue
-            out[k] = prune(v, allowed, ledger, p, types, observed, enums)
+            out[k] = prune(v, allowed, ledger, p, types, observed, enums, in_list)
         return out
     if isinstance(value, list):
-        return [prune(v, allowed, ledger, prefix, types, observed, enums) for v in value]
+        return [prune(v, allowed, ledger, prefix, types, observed, enums, True) for v in value]
     return value
 
 

@@ -274,6 +274,10 @@ class Release(unittest.TestCase):
         self.assertIn("not one of the documented values", ledger[1]["note"])
         self.assertIn("management access", ledger[4]["note"])
         self.assertEqual(prune({"vrrp": {"mode": "Off"}}, allowed, [], types={}, observed=observed, enums=enums), {"vrrp": {"mode": "Off"}})  # documented word, any case
+        routes = []  # a list entry is all or nothing: an unseen field there is never written
+        self.assertEqual(prune({"vrrp": {"rules": [{"a": 1, "b": 2}]}}, {"vrrp", "vrrp.rules", "vrrp.rules.a", "vrrp.rules.b"}, routes, types={},
+                               observed={"vrrp", "vrrp.rules", "vrrp.rules.a"}, enums={}), {"vrrp": {"rules": [{"a": 1}]}})
+        self.assertEqual([(e["target"], e["disposition"]) for e in routes], [("vrrp.rules.b", "unresolved")])
         self.assertEqual(template_enums("10.0.0.40860")["addressingmode"], {"static", "dhcpv4", "dhcpv6", "slaac"})
         self.assertNotIn("interfacename", template_enums("10.0.0.40860"))  # an interface-name list is not a closed list
 
