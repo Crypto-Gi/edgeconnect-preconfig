@@ -131,6 +131,39 @@ class MapperRules(unittest.TestCase):
         self.assertIsNone(m_secureWebServicesConfig(ctx(src(url))[0]))
         self.assertEqual(m_secureWebServicesConfig(ctx(src(dict(url, urlReputation=4)))[0])["urlClassificationConfig"]["urlReputation"], 4)
 
+    def test_secure_web_services_null_flow_process_on_10_0(self):
+        """Orchestrator 10.0 reports flowProcess null on every appliance it manages; its /validate refuses null ("Not valid value: flowProcess")."""
+        ip = {"hasIPReputation": True, "incrementalUpdate": True}
+        on = {"flowProcess": None, "hasURLClassification": True, "incrementalUpdate": True, "queryOnMiss": True, "urlReputation": 3}
+        c, notes = ctx({"secure-web-services": {"secureWebServicesConfig": {"hasSecureWebServicesConfig": True, "urlClassificationConfig": on, "ipReputationConfig": ip}}})
+        out = m_secureWebServicesConfig(c)
+        self.assertEqual(out["urlClassificationConfig"], dict(on, flowProcess=True))  # the 10.0 template default: all requests
+        self.assertTrue([n for n in notes if n["target"] == "secureWebServicesConfig" and "flowProcess as null" in n["note"] and "template default true" in n["note"]], notes)
+        self.assertEqual(on["flowProcess"], None)  # the capture is not changed
+        for value in (False, True, "false"):  # a value the appliance reports is written as it is
+            c, _ = ctx({"secure-web-services": {"secureWebServicesConfig": {"hasSecureWebServicesConfig": True, "urlClassificationConfig": dict(on, flowProcess=value), "ipReputationConfig": ip}}})
+            self.assertEqual(m_secureWebServicesConfig(c)["urlClassificationConfig"]["flowProcess"], value)
+        off = {"flowProcess": None, "hasURLClassification": False, "incrementalUpdate": False, "queryOnMiss": False, "urlReputation": 1}
+        c, notes = ctx({"secure-web-services": {"secureWebServicesConfig": {"hasSecureWebServicesConfig": False, "urlClassificationConfig": off,
+                                                                            "ipReputationConfig": {"hasIPReputation": False, "incrementalUpdate": False}}}})
+        self.assertIsNone(m_secureWebServicesConfig(c))  # factory defaults with a null flowProcess are still the defaults
+        self.assertEqual([n["disposition"] for n in notes], ["default-omitted"])
+        c, _ = ctx({"secure-web-services": {"secureWebServicesConfig": {"hasSecureWebServicesConfig": False, "urlClassificationConfig": dict(off, flowProcess=True),
+                                                                        "ipReputationConfig": {"hasIPReputation": False, "incrementalUpdate": False}}}})
+        self.assertIsNone(m_secureWebServicesConfig(c))  # true is the template default too
+
+    def test_secure_web_services_on_a_target_without_flow_process(self):
+        """9.6/9.7 templates have no flowProcess: it is dropped, and the ledger says so instead of 'written as true'."""
+        from translate import allowed_paths, prune
+        on = {"flowProcess": None, "hasURLClassification": True, "incrementalUpdate": True, "queryOnMiss": True, "urlReputation": 3}
+        c, notes = ctx({"secure-web-services": {"secureWebServicesConfig": {"hasSecureWebServicesConfig": True, "urlClassificationConfig": on,
+                                                                            "ipReputationConfig": {"hasIPReputation": True, "incrementalUpdate": True}}}})
+        doc = prune({"secureWebServicesConfig": m_secureWebServicesConfig(c)}, allowed_paths("9.7.1.42046"), notes)
+        self.assertNotIn("flowProcess", doc["secureWebServicesConfig"]["urlClassificationConfig"])
+        path = "secureWebServicesConfig.urlClassificationConfig.flowProcess"
+        self.assertEqual([n["disposition"] for n in notes if n["target"] == path], ["outside-preconfig"], notes)
+        self.assertFalse([n for n in notes if "written as the template default true" in n["note"] and n["target"] == path], notes)
+
     def test_cli_sections(self):
         self.assertEqual(passthrough_max_bandwidth(["hostname x", "interface pass-through max-bandwidth 50000"]), 50000)
         self.assertIsNone(passthrough_max_bandwidth(["hostname x"]))

@@ -413,13 +413,27 @@ def m_inboundPortForwarding(ctx: Ctx) -> Optional[Dict[str, Any]]:
 
 def m_secureWebServicesConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     source = (ctx.data("secure-web-services") or {}).get("secureWebServicesConfig") or {}
+    url = source.get("urlClassificationConfig")
+    null_flow = isinstance(url, dict) and "flowProcess" in url and url["flowProcess"] is None  # Orchestrator 10.0 reports null on every appliance
+    if null_flow:
+        source = dict(source, urlClassificationConfig={k: v for k, v in url.items() if k != "flowProcess"})
     defaults = {"urlClassificationConfig": {"hasURLClassification": False, "incrementalUpdate": False, "queryOnMiss": False, "urlReputation": 1},
                 "ipReputationConfig": {"hasIPReputation": False, "incrementalUpdate": False}}  # default template values
-    if not source.get("hasSecureWebServicesConfig") and all(source.get(k) in (None, v) for k, v in defaults.items()):
+    seen = dict(source)
+    if isinstance(url, dict) and url.get("flowProcess") is True:  # true is the 10.0 template default too
+        seen["urlClassificationConfig"] = {k: v for k, v in url.items() if k != "flowProcess"}
+    if not seen.get("hasSecureWebServicesConfig") and all(seen.get(k) in (None, v) for k, v in defaults.items()):
         ctx.note("secure-web-services", "default-omitted", "secureWebServicesConfig", "feature not configured")
         return None
     ctx.note("secure-web-services", "mapped", "secureWebServicesConfig", "url classification and IP reputation")
-    return {"urlClassificationConfig": source["urlClassificationConfig"], "ipReputationConfig": source["ipReputationConfig"]}
+    out = {"urlClassificationConfig": source["urlClassificationConfig"], "ipReputationConfig": source["ipReputationConfig"]}
+    if null_flow:  # /validate on 10.0 refuses null ("Not valid value: flowProcess"); releases without the field drop it
+        out["urlClassificationConfig"] = dict(out["urlClassificationConfig"], flowProcess=True)
+        # the section, not the flowProcess path: on a release without the field, prune ledgers that path outside-preconfig itself
+        ctx.note("secure-web-services", "mapped", "secureWebServicesConfig",
+                 "the appliance reports urlClassificationConfig.flowProcess as null; where the target release has the field (10.0), it is written as the "
+                 "template default true (WebCC for all requests); set false by hand for first request only")
+    return out
 
 
 BGP_NEIGHBOR_USED = {"remote_as", "type", "enable", "hold", "ka", "lcl_interface", "next_hop_self", "password", "rtmap_inbound", "rtmap_outbound", "evpn", "bfd_desired", "directly_connected", "store_received_routes"}
