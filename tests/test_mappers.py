@@ -259,6 +259,51 @@ class Release(unittest.TestCase):
         self.assertEqual(out, {"bgpSystemConfig": {"neighbors": [{}, {"bfdEnabled": True}]}})
         self.assertEqual([e["target"] for e in ledger], ["bgpSystemConfig.neighbors.bfdEnabled"])
 
+    def test_a_field_never_seen_in_the_field_is_written_only_when_plain_and_safe(self):
+        from translate import template_enums
+        allowed = {"vrrp", "vrrp.a", "vrrp.new", "vrrp.mode", "vrrp.obj", "vrrp.obj.x", "vrrp.empty", "deploymentInfo", "deploymentInfo.new", "fresh", "fresh.x"}
+        observed = {"vrrp", "vrrp.a", "deploymentInfo"}
+        enums = {"mode": {"ids only", "off"}}
+        ledger = []
+        out = prune({"vrrp": {"a": 1, "new": 5, "mode": "Turbo", "obj": {"x": 1}, "empty": ""}, "deploymentInfo": {"new": 1}, "fresh": {"x": 1}},
+                    allowed, ledger, types={}, observed=observed, enums=enums)
+        self.assertEqual(out, {"vrrp": {"a": 1, "new": 5}, "deploymentInfo": {}})
+        self.assertEqual([(e["target"], e["disposition"]) for e in ledger], [
+            ("vrrp.new", "unverified"), ("vrrp.mode", "unresolved"), ("vrrp.obj", "unresolved"), ("vrrp.empty", "unresolved"),
+            ("deploymentInfo.new", "unresolved"), ("fresh", "unresolved")])
+        self.assertIn("not one of the documented values", ledger[1]["note"])
+        self.assertIn("management access", ledger[4]["note"])
+        self.assertEqual(prune({"vrrp": {"mode": "off"}}, allowed, [], types={}, observed=observed, enums=enums), {"vrrp": {"mode": "off"}})
+        self.assertEqual(prune({"vrrp": {"mode": "Off"}}, allowed, [], types={}, observed=observed, enums=enums), {"vrrp": {}})  # the documented spelling only
+        typed = []  # not the template's example type: a number field holding a yes/no or a word
+        self.assertEqual(prune({"vrrp": {"new": True, "a": 1}}, allowed, typed, types={"vrrp.new": int}, observed=observed, enums={}), {"vrrp": {"a": 1}})
+        self.assertEqual(prune({"vrrp": {"new": "zz"}}, allowed, typed, types={"vrrp.new": int}, observed=observed, enums={}), {"vrrp": {}})
+        self.assertEqual(prune({"vrrp": {"new": 7}}, allowed, [], types={"vrrp.new": int}, observed=observed, enums={}), {"vrrp": {"new": 7}})
+        self.assertEqual([e["disposition"] for e in typed], ["unresolved"])  # one line per field, however many values
+        self.assertIn("not a number like the template's example", typed[0]["note"])
+        plain = []  # a list of plain values is judged like any other value
+        self.assertEqual(prune({"deploymentInfo": {"servers": ["10.0.0.9"]}, "vrrp": {"hosts": ["h1"]}}, {"deploymentInfo", "deploymentInfo.servers", "vrrp", "vrrp.hosts"},
+                               plain, types={"deploymentInfo.servers": str, "vrrp.hosts": str}, observed=observed, enums={}), {"deploymentInfo": {}, "vrrp": {}})
+        self.assertEqual([(e["target"], e["disposition"]) for e in plain], [("deploymentInfo.servers", "unresolved"), ("vrrp.hosts", "unresolved")])
+        routes = []  # an entry holding an unseen field is left out whole: a NAT rule without its port would cover every port
+        self.assertEqual(prune({"vrrp": {"rules": [{"a": 1, "b": 2}, {"a": 3}]}}, {"vrrp", "vrrp.rules", "vrrp.rules.a", "vrrp.rules.b"}, routes, types={},
+                               observed={"vrrp", "vrrp.rules", "vrrp.rules.a"}, enums={}), {"vrrp": {"rules": [{"a": 3}]}})
+        self.assertEqual([(e["target"], e["disposition"]) for e in routes], [("vrrp.rules", "unresolved")])
+        self.assertIn("1 of the entries hold vrrp.rules.b", routes[0]["note"])
+        many = []
+        prune({"vrrp": {"rules": [{"a": 1, "b": 2}, {"a": 3, "c": 4}, {"a": 5}]}}, {"vrrp", "vrrp.rules", "vrrp.rules.a", "vrrp.rules.b", "vrrp.rules.c"}, many,
+              types={}, observed={"vrrp", "vrrp.rules", "vrrp.rules.a"}, enums={})
+        self.assertEqual(len(many), 1)
+        self.assertIn("2 of the entries hold vrrp.rules.b, vrrp.rules.c", many[0]["note"])
+        self.assertEqual(prune({"vrrp": {"rules": [{"a": 1, "b": 2}]}}, {"vrrp", "vrrp.rules", "vrrp.rules.a", "vrrp.rules.b"}, [], types={},
+                               observed={"vrrp", "vrrp.rules", "vrrp.rules.a"}, enums={}), {"vrrp": {}})  # every entry left out: no empty list
+        self.assertEqual(template_enums("10.0.0.40860")["addressingmode"], {"static", "dhcpv4", "dhcpv6", "slaac"})
+        self.assertNotIn("interfacename", template_enums("10.0.0.40860"))  # an interface-name list is not a closed list
+
+    def test_an_unseen_field_is_check_by_hand_not_a_gap_when_written(self):
+        from translate import verdict
+        self.assertEqual(verdict([{"disposition": "unverified"}]), "Complete for preconfig; 1 item(s) to check by hand.")
+
     def test_template_types_reads_the_target_template(self):
         from translate import template_types
         types = template_types("10.0.0.40860")

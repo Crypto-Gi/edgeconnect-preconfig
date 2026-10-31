@@ -18,7 +18,7 @@ a4d191e78b1a4c2a  <tmp>/translate/columns.md
 72c3ba05347703bf  <tmp>/translate/example.csv
 e8bd59d9a8cf47e1  <tmp>/translate/ledger.json
 661e2288c3a9e474  <tmp>/translate/reference.yaml
-1c0681d5e84c8cae  <tmp>/translate/summary.md
+23a539033c1682f9  <tmp>/translate/summary.md
 125a7c407a6bb1a0  <tmp>/translate/tr.csv
 ffcf2f83c9bbf394  <tmp>/translate/tr.jinja2
 4efc989e4f7e84df  <tmp>/translate/variables.csv

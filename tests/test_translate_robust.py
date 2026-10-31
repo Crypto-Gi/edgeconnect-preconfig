@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "scripts"))
 from mappers import Ctx  # noqa: E402  guard-ok: scripts are imported after the sys.path insert
-from translate import build  # noqa: E402  guard-ok: imported after the sys.path insert
+from translate import NothingToConvert, build  # noqa: E402  guard-ok: imported after the sys.path insert
 
 RA = {"hoplimit": 64, "linkmtu": 1500, "managedflag": False, "maxinterval": 600, "mininterval": 200, "otherconfigflag": True, "reachabletime": 30000,
       "retranstimer": 1000, "routerdeflifetime": 1800, "routerpreference": "high", "sendadv": True}
@@ -50,6 +50,9 @@ class FakeCap:
 
     def data(self, ident, prefer="live"):
         return copy.deepcopy(self._d.get(ident))
+
+    def reads(self):
+        return ((k, copy.deepcopy(v)) for k, v in self._d.items())
 
 
 def translate(change=None, failed=()):
@@ -604,3 +607,150 @@ class CapturedWhileUnreachable(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NothingUnknownIsWritten(unittest.TestCase):
+    """Invented fields, nulls, wrong types and an unknown release, fed into every read: every written path is in the target format and either
+    seen in the field or reported as written-not-yet-seen, every yes/no field holds true or false, and every path the format check left out
+    has a ledger line (docs/decisions/0020)."""
+
+    fit = {}
+
+    def written(self, data, target):
+        from translate import allowed_paths, observed_paths, prune, template_enums, template_types
+        if target not in self.fit:
+            self.fit[target] = (allowed_paths(target), dict(types=template_types(target), observed=observed_paths(), enums=template_enums(target)))
+        ledger = []
+        built = build(FakeCap(data), ledger)
+        self.built = copy.deepcopy(built)
+        out = prune(built, self.fit[target][0], ledger, **self.fit[target][1])
+        return out, ledger
+
+    def check(self, out, ledger, target):
+        from translate import allowed_paths, flat_paths, observed_paths, template_types
+        unverified = {e["target"] for e in ledger if e["disposition"] == "unverified"}
+        stray = flat_paths(out) - (allowed_paths(target) & (observed_paths() | unverified))
+        self.assertEqual(stray, set(), "written but neither seen in the field nor reported")
+        named = {t.strip() for e in ledger if e["disposition"] not in ("mapped", "context") for t in e["target"].split(",")}
+        dropped = {p for p in flat_paths(self.built) - flat_paths(out) if not any(p == t or p.startswith(t + ".") for t in named)}
+        self.assertEqual(dropped, set(), "left out with no ledger line")
+        types = template_types(target)
+
+        def walk(v, p):
+            if isinstance(v, dict):
+                for k, x in v.items():
+                    walk(x, "{}.{}".format(p, k) if p else k)
+            elif isinstance(v, list):
+                for x in v:
+                    walk(x, p)
+            elif types.get(p) is bool:
+                self.assertIsInstance(v, bool, p)
+        walk(out, "")
+
+    def leaves(self, value, path=()):
+        if isinstance(value, dict):
+            for k, v in value.items():
+                yield from self.leaves(v, path + (k,))
+        elif isinstance(value, list):
+            for i, v in enumerate(value):
+                yield from self.leaves(v, path + (i,))
+        else:
+            yield path
+
+    def test_invented_fields_in_every_read_never_reach_the_yaml(self):
+        def inject(v):
+            if isinstance(v, dict):
+                for x in list(v.values()):
+                    inject(x)
+                v["zzNewSetting"] = {"zzInner": True}
+                v["zzNewFlag"] = "yes"
+            elif isinstance(v, list):
+                for x in v:
+                    inject(x)
+        data = copy.deepcopy(DATA)
+        for k, v in data.items():
+            if k != "running-config":
+                inject(v)
+        for target in ("9.7.1.42046", "10.0.0.40860", "11.0.0.99999"):  # the last one is unknown: the nearest template stands in
+            out, ledger = self.written(data, target)
+            self.assertNotIn("zzNew", repr(out))
+            self.check(out, ledger, target)
+        from translate import NOT_SETTINGS, new_source_fields
+        recorded = new_source_fields(FakeCap(data))
+        for read, value in data.items():  # and every read that got an invented field says so
+            if read in NOT_SETTINGS or read == "running-config":
+                continue
+            with self.subTest(read=read):
+                self.assertTrue(any("zzNewSetting.zzInner" in p or "zzNewFlag" in p for p in recorded.get(read, [])), recorded.get(read))
+
+    def test_a_null_or_a_wrong_type_in_any_leaf_never_reaches_the_yaml_as_a_bad_value(self):
+        for path in list(self.leaves({k: v for k, v in DATA.items() if k != "running-config"})):
+            for bad in (None, [], "zz"):
+                data = copy.deepcopy(DATA)
+                node = data
+                for step in path[:-1]:
+                    node = node[step]
+                node[path[-1]] = bad
+                with self.subTest(path=path, bad=bad):
+                    try:
+                        out, ledger = self.written(data, "10.0.0.40860")
+                    except NothingToConvert:
+                        continue
+                    self.check(out, ledger, "10.0.0.40860")
+
+
+class NewSourceFields(unittest.TestCase):
+    """A field the API returns that no earlier capture had gets a check-by-hand line naming it (docs/decisions/0020), whatever reads it."""
+
+    def ledgered(self, change):
+        from translate import tag_new_source_fields, verdict
+        data = copy.deepcopy(DATA)
+        change(data)
+        ledger = []
+        tag_new_source_fields(FakeCap(data), ledger)
+        return [e for e in ledger if e["disposition"] == "new-source-field"], verdict(ledger)
+
+    def test_a_field_no_capture_had_is_named_and_counted_to_check_by_hand(self):
+        def change(d):
+            d["deployment"]["sysConfig"]["zzFailoverMode"] = "fast"
+            d["deployment"]["modeIfs"][0]["applianceIPs"][0]["zzWeight"] = 3
+        lines, said = self.ledgered(change)
+        self.assertEqual([e["item"] for e in lines], ["deployment"])
+        self.assertIn("2 field(s) no earlier capture had", lines[0]["note"])
+        self.assertIn("modeIfs[].applianceIPs[].zzWeight, sysConfig.zzFailoverMode", lines[0]["note"])
+        self.assertEqual(said, "Complete for preconfig; 1 item(s) to check by hand.")
+
+    def test_a_known_capture_has_no_new_fields(self):
+        self.assertEqual(self.ledgered(lambda d: None)[0], [])
+
+    def test_names_addresses_and_record_map_keys_are_site_data_not_new_fields(self):
+        def change(d):
+            d["nat-pools"] = {"Pool-East": {"name": "Pool-East", "subnet": "203.0.113.0/28"}}  # nat-pools is a record map on some appliance
+            d["deployment"]["sysConfig"]["vrfZonesMap"]["7"] = {"b": {"id": 7, "name": "Guest"}}  # a new segment id and zone
+            d["static-routes-configured"] = {"prefix": {"10.9.0.0/16": {"nhop": {"10.0.0.254": {"interface": {"lan0": {"metric": 50}}}}}}}
+        self.assertEqual(self.ledgered(change)[0], [])
+
+    def test_a_new_field_in_a_record_map_entry_is_new(self):
+        def change(d):
+            d["nat-pools"] = {"Pool-East": {"name": "Pool-East", "zzPortBlock": 64}}
+        lines, _ = self.ledgered(change)
+        self.assertIn("*.zzPortBlock", lines[0]["note"])
+
+    def test_orchestrator_objects_are_not_compared(self):
+        def change(d):
+            d["template-groups"][0]["zzNewOrchestratorField"] = 1
+            d["overlay-config"][0]["zzNewOverlayField"] = 1
+        self.assertEqual(self.ledgered(change)[0], [])
+
+    def test_a_read_no_capture_had_is_new_from_its_root(self):
+        lines, _ = self.ledgered(lambda d: d.update({"zz-new-read": {"enable": True}}))
+        self.assertEqual(lines[0]["item"], "zz-new-read")
+        self.assertIn("1 field(s) no earlier capture had", lines[0]["note"])
+
+    def test_a_field_name_with_digits_or_capitals_is_a_field_and_an_interface_name_is_site_data(self):
+        def change(d):
+            d["deployment"]["sysConfig"].update(ipv6Mode="slaac", evpn2Enable=True)
+            d["deployment"]["sysConfig"]["vrfZonesMap"]["0"]["a"]["lan3"] = None  # an interface name as a key
+        lines, _ = self.ledgered(change)
+        self.assertIn("sysConfig.evpn2Enable, sysConfig.ipv6Mode", lines[0]["note"])
+        self.assertNotIn("lan3", lines[0]["note"])

@@ -35,5 +35,5 @@ d6af6260ab8bf77e  <tmp>/out/branch-a/site-dhcp-relay/ledger.json
 36a172cb18c56314  <tmp>/out/branch-a/site-dhcp-relay/reference.yaml
 1d95583f6638fb83  <tmp>/out/branch-a/site-dhcp-relay/rendered/branch-a_preconfig.yml
 d75b1097e20fc26f  <tmp>/out/branch-a/site-dhcp-relay/sites.csv
-2be4ea34c1c4c558  <tmp>/out/branch-a/site-dhcp-relay/summary.md
+e0d59cce82ea3822  <tmp>/out/branch-a/site-dhcp-relay/summary.md
 5f4fedc99db7c7a6  <tmp>/out/branch-a/site-dhcp-relay/variables.csv
