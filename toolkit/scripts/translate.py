@@ -112,6 +112,14 @@ FIELD_TEMPLATES = {
              "fields": {"admin": "admin", "advTimer": "advertisementTimer", "priority": "priority", "preempt": "preemption", "auth": "authenticationString"}},
     # VNI maps are owned per segment from the template's vrfId; a template that sets the VTEP owns the whole section (vtepSrcInterface is required)
     "vxlan": {"sections": ("vxlan",), "segments": None, "fields": {"vtepIf": "vtepSrcInterface", "port": "destinationUdpPort"}},
+    # keyed by segment id directly (value.<segment>), lab 2026-11-01
+    "bfd": {"sections": ("segmentBfdConfigs",), "segments": (), "fields": {"minTxInterval": "minTxInterval", "minRxInterval": "minRxInterval", "detectMultiplier": "detectMultiplier"}},
+    # value.vrf.<segment>; the timers and authentication apply to every OSPF interface of the segment ("interfaces." fields), lab 2026-11-01
+    "ospf": {"sections": ("ospfSystemConfig", "segmentOspfConfig"), "segments": ("vrf",),
+             "fields": {"enable": "enable", "opaque_enable": "opaqueEnable", "redistMapToOSPF": "redistMapToOspf", "adminStatus": "interfaces.adminStatus",
+                        "authType": "interfaces.authentication", "authKey": "interfaces.authenticationKey", "md5Key": "interfaces.md5Key", "md5Password": "interfaces.md5Password",
+                        "helloInterval": "interfaces.helloInterval", "deadInterval": "interfaces.deadInterval", "transmitDelay": "interfaces.transmitDelay",
+                        "retransmitInterval": "interfaces.retransmitInterval"}},
 }
 
 
@@ -129,7 +137,7 @@ def template_fields(cap: "Capture") -> Dict[str, Dict[Optional[str], set]]:
             if not spec or name not in selected_names(group) or not isinstance(value, dict):
                 continue
             per_segment: Dict[Optional[str], Any] = {None: value}
-            if spec["segments"]:
+            if spec["segments"] is not None:  # () : keyed by segment id directly
                 for key in spec["segments"]:
                     value = (value or {}).get(key) or {}
                 per_segment = {str(k): v for k, v in value.items() if isinstance(v, dict)}
@@ -141,7 +149,7 @@ def template_fields(cap: "Capture") -> Dict[str, Dict[Optional[str], set]]:
                     item = (src.get(head) or {}).get(tail) if tail else src.get(head)
                     if tail and str((src.get(head) or {}).get("applyStatus", "")).lower() == "none":
                         continue  # e.g. route_target_template {"applyStatus": "none", "import": "0:0"} applies no route targets
-                    if item not in (None, "", "none"):
+                    if item not in (None, "", "none", "Don't apply"):  # "Don't apply": the ospf template's authType left alone
                         found.add(field)
             if name == "vxlan":
                 for seg, vni_map in (value.get("vrfId") or {}).items():
@@ -189,12 +197,23 @@ def ledger_local_nac(value: Optional[Dict[str, Any]], owned: Dict[str, Any], not
              "/validate requires all six NAC lists non-empty (HTTP 500 otherwise) and the other lists hold only the template's objects; set them on the target by hand".format(", ".join(mine)))
 
 
+def ids_of(vrfs: Dict[str, str]) -> Dict[str, str]:
+    return {n: i for i, n in vrfs.items()}
+
+
 def drop_template_fields(out: Dict[str, Any], owned: Dict[str, Dict[Optional[str], set]], vrfs: Dict[str, str], note: Any) -> None:
     """Leave out of the written sections the fields a template sets; drop a route section left with nothing of its own."""
     def strip(entry: Dict[str, Any], fields: set) -> List[str]:
         gone = sorted(f for f in fields if f in entry)
         for f in gone:
             del entry[f]
+        for f in sorted(f for f in fields if "." in f):  # "interfaces.helloInterval": the field of every item of that list
+            key, sub = f.split(".", 1)
+            items = [i for i in entry.get(key) or [] if isinstance(i, dict) and sub in i]
+            for i in items:
+                del i[sub]
+            if items:
+                gone.append("{}[].{}".format(key, sub))
         return gone
 
     for name, by_segment in owned.items():
@@ -204,6 +223,10 @@ def drop_template_fields(out: Dict[str, Any], owned: Dict[str, Dict[Optional[str
             if value is None:
                 continue
             gone = set()
+            if name == "bfd":  # /validate: "MinTxInterval of BFD ... must be a number between 300 and 5000": an entry needs its timers
+                if any(f in e for e in value for f in by_segment.get(ids_of(vrfs).get(e.get("segment")), set())):
+                    note("template bfd", "mapped", section, "the appliance's BFD timers are written although the 'bfd' template sets them: the format requires them in every entry")
+                continue
             if name == "vrrp":
                 targets = [(None, e) for e in value.get("vrrpEntries", [])]
             elif name == "vxlan":
