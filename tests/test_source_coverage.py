@@ -40,6 +40,17 @@ class SourceCoverageTest(unittest.TestCase):
         self.assertTrue(sc.under("modeIfs[].dhcpd.server.ipStart", ["modeIfs.dhcpd.server"]))
         self.assertFalse(sc.under("modeIfs[].dhcpd.serverX", ["modeIfs.dhcpd.server"]))
 
+    def test_an_object_orchestrator_pushed_is_not_reported(self):
+        seen = sc.Seen()
+        d = sc.wrap({"own": {"metric": 1, "tag": 2}, "pushed": {"gms_marked": True, "metric": 1, "tag": 2}}, "", seen)
+        d["own"]["metric"], d["pushed"]["gms_marked"]
+        self.assertEqual(seen.untaken(), {"own.tag"})
+
+    def test_entry_and_space_ledger_items_explain_paths(self):
+        ledger = [{"item": "bgp-system-all-vrfs[2].log_nbr_msgs", "disposition": "outside-preconfig"}, {"item": "nac applyPolicies", "disposition": "default-omitted"},
+                  {"item": "vrrp.vmac", "disposition": "mapped"}]
+        self.assertEqual(dict(sc.explained_paths(ledger)), {"bgp-system-all-vrfs": ["*.log_nbr_msgs"], "nac": ["applyPolicies"]})
+
     def test_ignore_paths_are_literal_but_for_the_wildcard(self):
         self.assertTrue(sc.glob("modeIfs[].applianceIPs[].version", "modeIfs[].applianceIPs[].version"))
         self.assertFalse(sc.glob("modeIfs[].version", "modeIfs1.version"))

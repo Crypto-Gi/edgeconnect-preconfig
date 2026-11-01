@@ -1082,6 +1082,13 @@ class ItemIsolation(IsolationCheck, unittest.TestCase):
         data = {"deployment": DEP, "bgp-system": {"enable": True, "asn": 65000}, "bgp-neighbors": {"192.0.2.1": n, "192.0.2.2": {"type": "Branch"}}}
         self.check(m_bgpSystemConfig, data, lambda o: [x["peerIpAddress"] for x in o["neighbors"]], ["192.0.2.1"], "bgpSystemConfig.neighbors")
 
+    def test_bgp_neighbor_logging_is_ledgered(self):
+        from mappers import m_bgpSystemConfig
+        for on in (True, False):
+            c, notes = ctx({"deployment": DEP, "bgp-system": {"enable": True, "asn": 65000, "log_nbr_msgs": on}, "bgp-neighbors": {}})
+            m_bgpSystemConfig(c)
+            self.assertEqual([n["item"] for n in notes if n["disposition"] == "outside-preconfig"], ["bgp-system.log_nbr_msgs"] if on else [])
+
     def test_port_forwarding_rule(self):
         from mappers import m_inboundPortForwarding
         r = {"srcSubnet": "0.0.0.0/0", "destSubnet": "192.0.2.10/32", "destPort": "443", "protocol": "tcp", "targetIp": "", "targetPort": "", "srcIf": "any", "vrf_id": 0, "comment": ""}
@@ -1717,6 +1724,14 @@ class DhcpRemotePoolOptions(unittest.TestCase):
         c, notes = ctx({"dhcp-remote-subnets": [dict(self.POOL, options={"1": "x", "42": "y"})]})
         self.assertEqual(m_dhcpRemoteAddressPoolConfig(c)["dhcpAddressMask"], "192.168.8.0/24")
         self.assertEqual([n["item"] for n in notes if n["disposition"] == "toolkit-error"], ["dhcp-remote-subnets.options[0]"])
+
+    def test_failover_on_a_remote_pool_is_ledgered(self):
+        c, notes = ctx({"dhcp-remote-subnets": [dict(self.POOL, failover={"failoverEnabled": True})]})
+        self.assertEqual(m_dhcpRemoteAddressPoolConfig(c)["dhcpAddressMask"], "192.168.8.0/24")
+        self.assertEqual([n["item"] for n in notes if n["disposition"] == "outside-preconfig"], ["dhcp-remote-subnets.failover"])
+        c, notes = ctx({"dhcp-remote-subnets": [dict(self.POOL, failover={"failoverEnabled": False})]})
+        m_dhcpRemoteAddressPoolConfig(c)
+        self.assertFalse([n for n in notes if n["disposition"] == "outside-preconfig"])
 
     def test_an_option_with_its_code_is_written_as_is(self):
         c, notes = ctx({"dhcp-remote-subnets": [dict(self.POOL, options=[{"option": 6, "value": "192.0.2.53"}])]})

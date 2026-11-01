@@ -301,11 +301,11 @@ def deployed(ctx: Ctx, item: str, target: str, ifs: Dict[str, Any]) -> Dict[str,
 def m_ospfSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     all_systems, all_ifs = ctx.data("ospf-system-all-vrfs") or {}, ctx.data("ospf-interfaces-all-vrfs")
     if any(vrf != "0" and ospf_runs(all_systems, all_ifs, vrf) for vrf in all_systems):
-        ctx.note("ospf-system", "default-omitted", "ospfSystemConfig", "non-default segment OSPF exists, so Default segment OSPF is included in segmentOspfConfig (Orchestrator ignores ospfSystemConfig when segmentOspfConfig is present)")
+        ctx.note("ospf-system, ospf-interfaces", "default-omitted", "ospfSystemConfig", "non-default segment OSPF exists, so Default segment OSPF is included in segmentOspfConfig (Orchestrator ignores ospfSystemConfig when segmentOspfConfig is present)")
         return None
     system, areas, ifs = ctx.data("ospf-system"), ctx.data("ospf-areas"), ctx.data("ospf-interfaces")
     if not system or (not system.get("enable") and not ifs):
-        ctx.note("ospf-system", "default-omitted", "ospfSystemConfig", "OSPF disabled and no interfaces")
+        ctx.note("ospf-system, ospf-areas, ospf-interfaces", "default-omitted", "ospfSystemConfig", "OSPF disabled and no interfaces")
         return None
     if ifs is None:  # interfaces replace on apply: an unread list is never written as an empty one
         ctx.note("ospf-interfaces", "not-readable", "ospfSystemConfig.interfaces", "OSPF is enabled but its interfaces could not be read, so ospfSystemConfig is not written; check it by hand")
@@ -453,6 +453,10 @@ def m_secureWebServicesConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
 BGP_NEIGHBOR_USED = {"remote_as", "type", "enable", "hold", "ka", "lcl_interface", "next_hop_self", "password", "rtmap_inbound", "rtmap_outbound", "evpn", "bfd_desired", "directly_connected", "store_received_routes"}
 
 
+def target_of(vrf: Optional[str]) -> str:
+    return "segmentBgpSystems" if vrf is not None else "bgpSystemConfig"
+
+
 def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str, Any], vrf: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """BGP of the Default segment, or with vrf of that segment (segmentBgpSystems)."""
     live = [(ip, n) for ip, n in sorted((neighbors or {}).items()) if not managed(n)]
@@ -478,6 +482,8 @@ def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str,
         out["importRouteTarget"], out["exportRouteTarget"] = rt.get("import"), rt.get("export")
     elif rt:
         ctx.note(label, "default-omitted", "bgpSystemConfig.import/exportRouteTarget", "0:0 means no route target (the validator rejects ASN 0)")
+    if system.get("log_nbr_msgs") and label != "check":  # source coverage 2026-11-01: was marked used but never written
+        ctx.note(label + ".log_nbr_msgs", "outside-preconfig", target_of(vrf), "logging of BGP neighbor changes is on; the preconfig format has no field for it; set it by hand or with a template")
     ctx.unmapped(label, system, {"enable", "asn", "rtr_id", "graceful_restart_en", "max_restart_time", "stale_path_time", "remote_as_path_advertise", "route_target", "neighbor", "enable_gms_marked", "log_nbr_msgs"}, "bgpSystemConfig")
     out["neighbors"] = []
     target = "segmentBgpSystems.neighbors" if vrf is not None else "bgpSystemConfig.neighbors"
@@ -530,7 +536,7 @@ def m_segmentBgpSystems(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     systems, neighbors = ctx.data("bgp-system-all-vrfs") or {}, ctx.data("bgp-neighbors-all-vrfs")
     non_default = [vrf for vrf in sorted(systems) if vrf != "0" and has_bgp(ctx, systems[vrf], neighbors, vrf)]
     if not non_default:
-        ctx.note("bgp-system-all-vrfs", "default-omitted", "segmentBgpSystems", "0 non-default segments with BGP")
+        ctx.note("bgp-system-all-vrfs, bgp-neighbors-all-vrfs", "default-omitted", "segmentBgpSystems", "0 non-default segments with BGP (the Default segment's BGP comes from the Default reads)")
         return None
     out = [v for v in each(ctx, "bgp-system-all-vrfs", "segmentBgpSystems", sorted(systems.items()),
                            lambda vrf, s: bgp_value(ctx, "bgp-system-all-vrfs[{}]".format(vrf), s, block(neighbors, vrf), vrf)) if v]
@@ -634,7 +640,7 @@ def m_segmentOspfConfig(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         elif runs[vrf] and s and not s.get("enable") and enabled and isinstance((interfaces or {}).get(vrf, {}), dict) and interfaces is not None:
             ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "mapped", "segmentOspfConfig", "segment {}: OSPF switched off but configured on interfaces; written with enable false".format(ctx.segment(vrf, strict=False)))
     if not enabled:
-        ctx.note("ospf-system-all-vrfs", "default-omitted", "segmentOspfConfig", "0 non-default segments with OSPF")
+        ctx.note("ospf-system-all-vrfs, ospf-interfaces-all-vrfs", "default-omitted", "segmentOspfConfig", "0 non-default segments with OSPF (the Default segment's OSPF comes from the Default reads)")
         return None
     out = []
     for vrf in sorted(systems):
@@ -926,6 +932,9 @@ def m_dhcpRemoteAddressPoolConfig(ctx: Ctx) -> Optional[Any]:
     if options:
         pools[-1]["options"] = options
     for p in source:
+        if isinstance(p.get("failover"), dict) and p["failover"].get("failoverEnabled"):  # source coverage 2026-11-01: was marked used but never written
+            ctx.note("dhcp-remote-subnets.failover", "outside-preconfig", "dhcpRemoteAddressPoolConfig",
+                     "pool {} has DHCP failover on; the preconfig remote pool has no failover fields, so the target keeps its own; set failover by hand".format(p["subnet"]))
         ctx.unmapped("dhcp-remote-subnets", p, {"interface", "subnet", "scopeName", "ipRange", "gatewayIp", "dnsServers", "ntpServers", "netbiosNameServers", "netbiosNodeType", "maxLeaseTime", "defaultLeaseTime", "failover", "options"}, "dhcpRemoteAddressPoolConfig")
     ctx.note("dhcp-remote-subnets", "mapped", "dhcpRemoteAddressPoolConfig", "latest of {} remote pool(s)".format(len(pools)))
     if len(pools) > 1:

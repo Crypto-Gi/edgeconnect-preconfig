@@ -4,6 +4,7 @@
 check 11 proves the other half (a ledger "mapped" line has its YAML value). This harness runs translate.py on each capture with every
 read wrapped so that each key the converter takes is recorded, then lists the leaves it never took, less:
   * keys a ledger line names as not mapped (unmapped-source-key) for that capture;
+  * leaves of an object Orchestrator pushed (gms_marked true): mappers skip those and ledger them orchestrator-managed;
   * leaves under a ledger item "read.path" that says why the path is not written (deployment.dhcpFailover runtime);
   * reads whose sections the ledger hands to a template group, or calls outside the preconfig format, not readable or empty;
   * reads of Orchestrator objects and state, not appliance settings (translate.NOT_SETTINGS: template groups, cluster state, overlays...);
@@ -79,6 +80,8 @@ def join(path: str, key: str) -> str:
 
 class TDict(dict):
     def __init__(self, src: Dict[str, Any], path: str, seen: Seen) -> None:
+        if src.get("gms_marked") is True or src.get("gmsMarked") is True:  # an object Orchestrator pushed: mappers skip it and ledger the count (orchestrator-managed)
+            seen = Seen()
         self._path, self._seen = path, seen
         records = [v for v in src.values() if isinstance(v, dict) and v]  # two or more records with the same fields, keyed by name or id (as translate._record_map)
         collection = (len(src) > 0 and all(not NAME.match(str(k)) for k in src)) or (len(src) >= 2 and len(records) == len(src) and len({tuple(sorted(v)) for v in records}) == 1)
@@ -194,9 +197,9 @@ def explained_paths(ledger: List[Dict[str, Any]]) -> Dict[str, List[str]]:
     """read id -> key paths a ledger line explains: an item "read.path" or "read.path (note)" with a disposition that says why it is not written."""
     out: Dict[str, List[str]] = defaultdict(list)
     for e in ledger:
-        m = re.match(r"^([a-z0-9-]+)\.([^ ,]+)", str(e.get("item")))
+        m = re.match(r"^([a-z0-9-]+)(\[[^\]]*\])?[. ]([A-Za-z][^ ,]*)", str(e.get("item")))  # "read.path", "read[entry].path", "read path"
         if m and e.get("disposition") in EXPLAINED:
-            out[m.group(1)].append(re.sub(r"\[[^\]]*\]", "", m.group(2)))
+            out[m.group(1)].append(("*." if m.group(2) else "") + re.sub(r"\[[^\]]*\]", "", m.group(3)))
     return out
 
 

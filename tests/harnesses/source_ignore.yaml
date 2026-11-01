@@ -73,3 +73,10 @@ ignore:
   - {read: security-maps, path: "*", why: "zone firewall rules: rules Orchestrator pushed come from its firewall template; rules it did not push are counted and ledgered whole by translate.local_firewall_rules (preconfig has no firewall section)"}
   - {read: multicast-config, path: "*pim.*", why: "PIM entries naming no interface of the appliance are ledgered as runtime (stale) and not written; the others are written field by field"}
   - {read: system-info, path: "*", except: ["auto_subnet*"], why: "system-wide settings of the System template (auto MTU, IPID, SYN, QoS DRC, DNS, shapers, HA map, regions): preconfig has no section for them; the converter reads only auto_subnet (subnet sharing), which stays reported"}
+
+  # Triage of the second corpus run (2026-11-01, 134 leaves)
+  - {read: bgp-system, path: "neighbor.*", why: "ECOS repeats the neighbors under the BGP system; they are read, field by field, from the bgp-neighbors read"}
+  - {read: bgp-system-all-vrfs, path: "*.neighbor.*", why: "ECOS repeats each segment's neighbors under its BGP system; they are read, field by field, from the bgp-neighbors-all-vrfs read"}
+  - {read: secure-web-services, path: "isWebccSupported", why: "a model capability flag the appliance reports, not a setting; no field in any default template"}
+  - {read: vxlan, path: "port", why: "the UDP port is read when the appliance has a VTEP interface; without one VXLAN is not written (the format requires vtepSrcInterface) and the VNI maps are ledgered"}
+  - {read: multicast-config, path: "[].igmp", why: "an empty IGMP table; IGMP is written per PIM interface (igmpEnable), and a non-empty table stays reported field by field"}
