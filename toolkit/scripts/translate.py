@@ -699,6 +699,9 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
             note("ha-groups, deployment.modeIfs[haIf]", "mapped", "deploymentInfo.haConfig", "EdgeHA peer {}, interface {}, {} peer WAN links; {} auto-generated HA subinterfaces excluded from deploymentInterfaces".format(peer_nepk, ha_if, len(peer_infos), len(ha_mode_entries)))
     except ITEM_ERRORS as err:  # all or nothing: a peer list with a link missing would replace the target's on apply
         item_failed(ctx, "ha-groups, deployment.modeIfs[haIf]", "deploymentInfo.haConfig", err)
+    if write_di and my_ha and not (ha_if and ha_mode_entries):  # lab 2026-11-01: in an EdgeHA group with no HA interface in the deployment
+        note("ha-groups", "unresolved", "deploymentInfo.haConfig", "the appliance is in EdgeHA group {} but its deployment has {}: haConfig is not written; "
+             "set the HA pairing by hand".format(my_ha.get("id", "?"), "no HA interface (haIf)" if not ha_if else "no HA subinterfaces on '{}'".format(ha_if)))
     if not write_di:
         dhcp, relay_leases, ra_skipped, ras, fo_done, fo_wanted = [], [], [], [], set(), set()
         ledger[:] = [e for e in ledger if not any(e is d for d in di_notes)]
