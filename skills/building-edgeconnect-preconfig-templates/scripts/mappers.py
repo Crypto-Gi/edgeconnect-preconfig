@@ -985,8 +985,9 @@ def m_interfaceConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
             ctx.note("interface-state[mgmt0]", "outside-preconfig", "interfaceConfig", "mgmt0 is admin down; management ports are never carried (the management plane stays as the target has it)")
         if not re.match(r"^(lan|wan|tlan|twan|twlan|blan|bwan)\d+$", name):
             continue
-        # a combo port (both RJ45 and SFP supported) runs in RJ45 (0) or SFP (3) mode
-        combo = i.get("comboPortConfig") if {x.strip() for x in str(i.get("comboPortSupported") or "").split(",")} == {"RJ45", "SFP"} else None
+        # a combo port (both RJ45 and SFP supported) runs in RJ45 (0) or SFP (3) mode; on a single-media port the mode is fixed by the hardware
+        mode, media = i.get("comboPortConfig"), {x.strip() for x in str(i.get("comboPortSupported") or "").split(",")}
+        combo = mode if media == {"RJ45", "SFP"} else None
         if combo is not None and str(combo) not in ("0", "3"):
             ctx.note("interface-state[{}]".format(name), "unresolved", "interfaceConfig.interfaces.comboPortMode", "combo port mode {!r} is neither 0 (RJ45) nor 3 (SFP); not written".format(combo))
             combo = None
@@ -1487,6 +1488,12 @@ def m_tunnelConfiguration(ctx: Ctx) -> Optional[Dict[str, Any]]:
             encap = ENCAP.get(v["mode"], v["mode"])
             t: Dict[str, Any] = {"tunnelName": v["alias"], "tunnelType": "passthrough", "tunnelEncap": encap, "admin": "Up" if v["adminStatus"] == "up" else "Down", "localIp": v["sourceIpAddress"],
                                  "remoteIp": nul(v["destIpAddress"]), "natMode": v["natMode"], "peerName": nul(v["peerName"]), "enableAutoMaxBandwidth": v["max_bw_auto"], "maxBandwidth": v["max_bw"]}
+            if str(v.get("local_vrf", 0)) not in ("0", "None"):  # source coverage 2026-11-01: was never read, so a segment's tunnel was written into Default
+                t["segment"] = ctx.segment(str(v["local_vrf"]))
+            extra = {key: v.get(key) for key in ("fecStatus", "fecRatio", "tag", "max_bw_unshaped") if v.get(key) not in (None, "", False, 0, "disable", "disabled", "off")}
+            if extra:
+                ctx.note("passthrough-tunnels[{}]".format(k), "outside-preconfig", "tunnelConfiguration", "tunnel {}: {}; a preconfig tunnel has no field for these, so the target keeps its own; "
+                         "set them by hand".format(v["alias"], ", ".join("{} {}".format(key, val) for key, val in sorted(extra.items()))))
             if encap == "ipsec":
                 id_val = None if v.get("ike_version") == 2 and v.get("id_type") == "address" and v.get("id_str") == v.get("ike_id_local") else nul(v["id_str"])
                 t["ikeConfig"] = {"presharedKey": v.get("presharedkey") or "<SECRET:not-captured>", "ikeAuthAlgorithm": v["ike_aalg"], "ikeEncryptAlgorithm": v["ike_ealg"], "diffHellManGroup": int(v["dhgroup"]),
@@ -1494,6 +1501,9 @@ def m_tunnelConfiguration(ctx: Ctx) -> Optional[Dict[str, Any]]:
                                   "exchangeMode": v["exchange_mode"], "ikeVersion": v["ike_version"], "localIkeIdentifier": nul(v["ike_id_local"]), "remoteIkeIdentifier": nul(v["ike_id_remote"]), "ikePrf": v["ike_prf"]}
                 t["ipsecConfig"] = {"ipsecAuthAlgorithm": v["ah"], "ipsecEncryptAlgorithm": "null" if "gmac" in str(v["ah"]) else {"": "auto", None: "auto", "null": "none"}.get(v.get("esp"), v.get("esp")), "enableIpSecArcWindow": 0 if v["ipsecAntiReplayWindow"] == "disable" else int(v["ipsecAntiReplayWindow"]), "ipsecLifetime": v["lifetime"],
                                     "ipsecLifetimeBytes": v["lifebytes"], "secrecyGroup": int(v["pfsgroup"]) if v.get("pfs") else "disable", "ipsecSuiteB": v["ipsec_Suite_b"]}  # null lets the appliance default (PFS on, group 2)
+        except Unresolved as err:  # a segment id that names no segment
+            item_failed(ctx, "passthrough-tunnels[{}]".format(k), "tunnelConfiguration", err)
+            continue
         except (KeyError, TypeError, ValueError) as err:
             ctx.note("passthrough-tunnels[{}]".format(k), "toolkit-error", "tunnelConfiguration", "tunnel {} not written: the mapper could not read it ({}: {}); a toolkit bug to report".format(v.get("alias", k), type(err).__name__, err))
             continue

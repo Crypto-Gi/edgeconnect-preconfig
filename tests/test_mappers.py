@@ -2127,3 +2127,23 @@ class SourceCoverageRun3(unittest.TestCase):
         c, notes = ctx({"deployment": DEP})
         deployed(c, "ospf-interfaces-all-vrfs[2]", "segmentOspfConfig.interfaces", {"lan9": {"cost": 1}})
         self.assertEqual([n["item"] for n in notes], ["ospf-interfaces-all-vrfs[2]"])
+
+    def test_a_tunnel_keeps_its_segment_and_ledgers_fec_and_tag(self):
+        gre = {"alias": "G1", "mode": "gre", "adminStatus": "up", "sourceIpAddress": "192.0.2.1", "destIpAddress": "198.51.100.1", "natMode": "none", "peerName": "", "max_bw_auto": True, "max_bw": 0,
+               "local_vrf": 0, "fecStatus": "disable", "fecRatio": 0, "tag": "", "max_bw_unshaped": False, "gmsMarked": False}
+        c, notes = ctx({"deployment": DEP, "passthrough-tunnels": {"a": gre}})
+        t = m_tunnelConfiguration(c)["tunnels"][0]
+        self.assertNotIn("segment", t)
+        self.assertFalse([n for n in notes if n["disposition"] == "outside-preconfig"])
+        dep = dict(DEP, sysConfig=dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "2", "name": "corp"}]))
+        c, notes = ctx({"deployment": dep, "passthrough-tunnels": {"a": dict(gre, local_vrf=2, fecStatus="enable", fecRatio=10, tag="t1")}})
+        self.assertEqual(m_tunnelConfiguration(c)["tunnels"][0]["segment"], "corp")
+        self.assertEqual([n["note"].split(";")[0] for n in notes if n["disposition"] == "outside-preconfig"], ["tunnel G1: fecRatio 10, fecStatus enable, tag t1"])
+        c, notes = ctx({"deployment": DEP, "passthrough-tunnels": {"a": dict(gre, local_vrf=9)}})
+        self.assertIsNone(m_tunnelConfiguration(c))
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "passthrough-tunnels[a]"], ["unresolved"])
+
+    def test_a_single_media_port_keeps_its_hardware_mode_out(self):
+        info = [{"ifname": "lan1", "ifSpeed": "auto", "ifDuplex": "auto", "admin": True, "comboPortSupported": "SFP", "comboPortConfig": 3},
+                {"ifname": "lan0", "ifSpeed": "1000", "ifDuplex": "full", "admin": True, "comboPortSupported": "RJ45", "comboPortConfig": 0}]
+        self.assertEqual(m_interfaceConfig(ctx({"interface-state": {"ifInfo": info}})[0])["interfaces"], [{"interfaceName": "lan0", "interfaceSpeed": 1000, "interfaceDuplex": "full", "admin": "up"}])

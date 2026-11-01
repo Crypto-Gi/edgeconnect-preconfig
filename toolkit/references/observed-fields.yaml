@@ -606,3 +606,5 @@ verified:
   - pppoe.pppoeInterfaces.dnsDomain2
   # 2026-11-01: VRRP authentication (a <SECRET:> placeholder since the key is redacted), applied live in Pass 1 (3.NE and 4.NE w28); /validate on the virtual lab's 9.7.1.42046 Orchestrator accepted the build with it put back, alone and with all others (full-coverage lab, 2026-11-01)
   - vrrp.vrrpEntries.authenticationString
+  # 2026-11-01: combo port mode (EC-10106/10108 lan2/wan2 in SFP mode, read from interface-state comboPortConfig 3); in every default template; /validate on the virtual lab's 9.7.1.42046 Orchestrator accepted a section-only interfaceConfig with comboPortMode 3 on lan2 (schema check only: the lab has no combo-port model, so no apply)
+  - interfaceConfig.interfaces.comboPortMode

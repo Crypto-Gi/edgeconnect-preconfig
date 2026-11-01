@@ -83,3 +83,18 @@ ignore:
 
   # Triage of the third corpus run (2026-11-01, 48 leaves)
   - {read: vtis, path: "*.nmask_alias", why: "the alias address's mask, read when the VTI has an alias address (ipAddressAliasMask); always 32 in the field corpus"}
+
+  # Triage of the fourth corpus run (2026-11-01, 19 leaves)
+  - {read: dhcp-remote-subnets, path: "[].failover.*", why: "the failover block of a local pool (one with an interface): local pools are written from /deployment (dhcpd, dhcpFailover); a remote pool's failover gets its own outside-preconfig line"}
+  - {read: passthrough-tunnels, path: "*.id", why: "the appliance's tunnel id; tunnels are written by name (alias)"}
+  - {read: passthrough-tunnels, path: "*.srcNePk", why: "the tunnel's own appliance, assigned at registration"}
+  - {read: passthrough-tunnels, path: "*.destNePk", why: "the far end's appliance id, known only to Orchestrator; a passthrough tunnel's far end is its remote address"}
+  - {read: passthrough-tunnels, path: "*.destTunnelId", why: "the far end's tunnel id, run-time"}
+  - {read: passthrough-tunnels, path: "*.destTunnelAlias", why: "the far end's tunnel name, run-time"}
+  - {read: passthrough-tunnels, path: "*.operStatus", why: "tunnel state, run-time"}
+  - {read: passthrough-tunnels, path: "*.remoteIdState", why: "IKE peer identity state, run-time"}
+  - {read: passthrough-tunnels, path: "*.overlayId", why: "the overlay a business intent policy assigns; set by Orchestrator, not a passthrough setting"}
+  - {read: passthrough-tunnels, path: "*.parallelTunnelId", why: "Orchestrator's id for parallel overlay tunnels, run-time"}
+  - {read: passthrough-tunnels, path: "*.ipsec_enabled", why: "follows the tunnel mode, which is written as tunnelEncap"}
+  - {read: passthrough-tunnels, path: "*.ipsecAntiReplayWindow", why: "an IPsec field of a GRE or no-encap tunnel, which has no ipsecConfig; read for IPsec tunnels"}
+  - {read: passthrough-tunnels, path: "*.ipsec_Suite_b", why: "an IPsec field of a GRE or no-encap tunnel, which has no ipsecConfig; read for IPsec tunnels"}
