@@ -98,3 +98,4 @@ ignore:
   - {read: passthrough-tunnels, path: "*.ipsec_enabled", why: "follows the tunnel mode, which is written as tunnelEncap"}
   - {read: passthrough-tunnels, path: "*.ipsecAntiReplayWindow", why: "an IPsec field of a GRE or no-encap tunnel, which has no ipsecConfig; read for IPsec tunnels"}
   - {read: passthrough-tunnels, path: "*.ipsec_Suite_b", why: "an IPsec field of a GRE or no-encap tunnel, which has no ipsecConfig; read for IPsec tunnels"}
+  - {read: passthrough-tunnels, path: "*.fecRatio", why: "the FEC ratio has no effect while FEC is off (fecStatus disable, every tunnel in the field corpus); it is ledgered with fecStatus when FEC is on"}

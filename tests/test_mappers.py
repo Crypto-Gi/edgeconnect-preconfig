@@ -525,6 +525,26 @@ class AuditRegressions(unittest.TestCase):
         self.assertEqual(owned["vrrp"], {None: {"admin", "preemption", "authenticationString"}})
         self.assertEqual(owned["bgp"], {"0": {"maxRestartTime", "importRouteTarget"}})
 
+    def test_bfd_and_ospf_templates_own_their_fields(self):
+        """Lab 2026-11-01 (Pass T): a selected bfd or ospf template set those sections, and the converter still wrote them."""
+        bfd = {"name": "bfd", "value": {"0": {"minTxInterval": 600, "minRxInterval": 600, "detectMultiplier": 4, "self": 0}}}
+        ospf = {"name": "ospf", "value": {"vrf": {"0": {"enable": "none", "adminStatus": "none", "opaque_enable": "none", "authType": "Don't apply", "redistMapToOSPF": "", "authKey": "",
+                                                        "md5Password": "", "md5Key": "", "helloInterval": 10, "deadInterval": 40, "transmitDelay": 1, "retransmitInterval": 4}}}}
+        groups = [{"name": "G1", "selectedTemplateNames": ["bfd", "ospf"], "templates": [bfd, ospf]}]
+        owned = template_fields(FakeCap({"template-association": {"templateIds": ["G1"]}, "template-groups": groups}))
+        self.assertEqual(owned["bfd"], {"0": {"minTxInterval", "minRxInterval", "detectMultiplier"}})
+        self.assertEqual(owned["ospf"], {"0": {"interfaces.helloInterval", "interfaces.deadInterval", "interfaces.transmitDelay", "interfaces.retransmitInterval"}})
+        iface = {"interfaceName": "lan1", "areaId": "0.0.0.0", "cost": 10, "helloInterval": 5, "deadInterval": 20, "transmitDelay": 2, "retransmitInterval": 10, "authentication": "None"}
+        out = {"segmentBfdConfigs": [{"segment": "Default", "enable": True, "minRxInterval": 600, "minTxInterval": 600, "detectMultiplier": 4},
+                                     {"segment": "corp", "enable": True, "minRxInterval": 300, "minTxInterval": 300, "detectMultiplier": 3}],
+               "ospfSystemConfig": {"enable": True, "routerId": "192.0.2.1", "areas": [], "interfaces": [dict(iface)]}}
+        notes = []
+        drop_template_fields(out, owned, {"0": "Default", "1": "corp"}, lambda *a: notes.append(a))
+        self.assertEqual(out["segmentBfdConfigs"], [{"segment": "Default", "enable": True}, {"segment": "corp", "enable": True, "minRxInterval": 300, "minTxInterval": 300, "detectMultiplier": 3}])
+        self.assertEqual(out["ospfSystemConfig"]["interfaces"], [{"interfaceName": "lan1", "areaId": "0.0.0.0", "cost": 10, "authentication": "None"}])
+        self.assertEqual(out["ospfSystemConfig"]["enable"], True)
+        self.assertTrue(any(n[0] == "template ospf" and n[1] == "template-group" and "interfaces[].helloInterval" in n[3] for n in notes), notes)
+
     def test_drop_template_fields_keeps_what_no_template_sets(self):
         out = {"vrrp": {"vrrpEntries": [{"groupId": 1, "interfaceName": "lan0", "virtualIpAddress": "192.0.2.1", "admin": "up", "priority": 110}]},
                "localRoutes": {"advertiseLocalLanSubnets": True, "localMetric": 50, "routes": []},
