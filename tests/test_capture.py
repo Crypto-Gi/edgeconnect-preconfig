@@ -166,6 +166,16 @@ class RedactTest(unittest.TestCase):
         self.assertEqual(out["hash"], "<SECRET:hash>")
         self.assertEqual(len(paths), 4)
 
+    def test_the_vrrp_key_is_a_secret(self):
+        """Lab 2026-11-01: /vrrp returns the key as `auth` and captures held it in clear; a VRRP `authentication` mode word is not a key."""
+        out, paths = redact_secrets({"vrrp": [{"groupId": 1, "auth": "LabKey1", "desc": "d"}], "tpl": {"authenticationString": "LabKey2"},
+                                     "cli": "   vrrp 1 authentication LabKey3\n   aaa authentication login default local"})
+        self.assertEqual(out["vrrp"][0], {"groupId": 1, "auth": "<SECRET:$.vrrp[0].auth>", "desc": "d"})
+        self.assertEqual(out["tpl"]["authenticationString"], "<SECRET:$.tpl.authenticationString>")
+        self.assertEqual(out["cli"], "   vrrp 1 authentication <SECRET:text>\n   aaa authentication login default local")
+        self.assertEqual(redact_secrets({"auth": ""})[0], {"auth": ""})
+        self.assertEqual(len(paths), 3)
+
     def test_an_empty_cli_secret_does_not_eat_the_next_line(self):
         cli = "   ip ospf authentication-key \n   interface lan0 mtu 1500\n   md5\n   interface pass-through max-bandwidth 50000\n   password 0 s3cret"
         out, _ = redact_secrets({"cli": cli})

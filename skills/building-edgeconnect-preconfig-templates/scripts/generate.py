@@ -44,7 +44,7 @@ class Builder:
             server = any(s in value for s in SERVER_SIBLINGS)
             for key, item in value.items():
                 sub = "{}.{}".format(path, key) if path else str(key)
-                if SECRET.search(str(key)) or (key == "key" and server):
+                if SECRET.search(str(key)) or (key == "key" and server) or (isinstance(item, str) and item.startswith("<SECRET:")):  # VRRP authenticationString
                     self.secret_paths.add(sub)
                 self.find_secrets(item, sub)
         elif isinstance(value, list):
