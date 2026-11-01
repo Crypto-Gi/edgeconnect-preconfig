@@ -2,6 +2,8 @@
 
 ## Unreleased (`gui` branch)
 
+## 1.4.0-rc.4 (2026-11-01, pre-release from the `gui` branch; rc.3 was not published)
+
 - **An IP SLA http/https monitor keeps "force DNS through the probe path"** (`forceDnsThroughProbePath`). Only a ping monitor carried it, and the http monitor's setting was dropped with no ledger line (full-coverage lab, Pass 2).
 - **A non-Default segment's route takes its advertise flags from the segment's own configured table.** Capture now reads `subnets3/configured/vrfs/<id>` for every segment with routes (one read per segment; segments whose read fails are listed in capture-index.json). Before, those flags came from route state, which reports them all as false, so a segment route that advertises to BGP or OSPF was written as not advertising (lab: T/T/F written as F/F/F). A capture without the new read falls back as before, with its assumption line.
 - **The VRRP key placeholder is always `<SECRET:vrrp.auth>`**, whatever the capture path, so a re-capture no longer shows a changed placeholder.

@@ -1493,7 +1493,8 @@ def m_tunnelConfiguration(ctx: Ctx) -> Optional[Dict[str, Any]]:
                                  "remoteIp": nul(v["destIpAddress"]), "natMode": v["natMode"], "peerName": nul(v["peerName"]), "enableAutoMaxBandwidth": v["max_bw_auto"], "maxBandwidth": v["max_bw"]}
             if str(v.get("local_vrf", 0)) not in ("0", "None"):  # source coverage 2026-11-01: was never read, so a segment's tunnel was written into Default
                 t["segment"] = ctx.segment(str(v["local_vrf"]))
-            extra = {key: v.get(key) for key in ("fecStatus", "fecRatio", "tag", "max_bw_unshaped") if v.get(key) not in (None, "", False, 0, "disable", "disabled", "off")}
+            fec_on = v.get("fecStatus") not in (None, "", "disable", "disabled", "off")  # the ratio means nothing while FEC is off (every corpus tunnel: disable, 10)
+            extra = {key: v.get(key) for key in (("fecStatus", "fecRatio") if fec_on else ()) + ("tag", "max_bw_unshaped") if v.get(key) not in (None, "", False, 0)}
             if extra:
                 ctx.note("passthrough-tunnels[{}]".format(k), "outside-preconfig", "tunnelConfiguration", "tunnel {}: {}; a preconfig tunnel has no field for these, so the target keeps its own; "
                          "set them by hand".format(v["alias"], ", ".join("{} {}".format(key, val) for key, val in sorted(extra.items()))))

@@ -2130,7 +2130,7 @@ class SourceCoverageRun3(unittest.TestCase):
 
     def test_a_tunnel_keeps_its_segment_and_ledgers_fec_and_tag(self):
         gre = {"alias": "G1", "mode": "gre", "adminStatus": "up", "sourceIpAddress": "192.0.2.1", "destIpAddress": "198.51.100.1", "natMode": "none", "peerName": "", "max_bw_auto": True, "max_bw": 0,
-               "local_vrf": 0, "fecStatus": "disable", "fecRatio": 0, "tag": "", "max_bw_unshaped": False, "gmsMarked": False}
+               "local_vrf": 0, "fecStatus": "disable", "fecRatio": 10, "tag": "", "max_bw_unshaped": False, "gmsMarked": False}
         c, notes = ctx({"deployment": DEP, "passthrough-tunnels": {"a": gre}})
         t = m_tunnelConfiguration(c)["tunnels"][0]
         self.assertNotIn("segment", t)
