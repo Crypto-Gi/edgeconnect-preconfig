@@ -627,12 +627,13 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
                 if side not in sides:
                     note("deployment.modeIfs", "unresolved", "deploymentInfo.deploymentMode", "inline-router with no {} interface: the deployment step will {}; set the deployment by hand".format(side.upper(), APPLY_FAILS))
     ha_groups = cap.data("ha-groups") or {}
+    groups_read = True  # a failed or unreadable read already has its own line
     if ha_if and ha_mode_entries and failed_read(ctx, "ha-groups", "haConfig is not written", "deploymentInfo.haConfig"):
-        ha_groups = {}
+        ha_groups, groups_read = {}, False
     elif not isinstance(ha_groups, dict):
         if ha_if and ha_mode_entries:
             unreadable_read(ctx, "ha-groups", "haConfig is not written", "deploymentInfo.haConfig")
-        ha_groups = {}
+        ha_groups, groups_read = {}, False
     my_ha = None
     for key, group in ha_groups.items():
         with guarded(ctx, "ha-groups[{}]".format(key), "deploymentInfo.haConfig"):
@@ -699,6 +700,12 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
             note("ha-groups, deployment.modeIfs[haIf]", "mapped", "deploymentInfo.haConfig", "EdgeHA peer {}, interface {}, {} peer WAN links; {} auto-generated HA subinterfaces excluded from deploymentInterfaces".format(peer_nepk, ha_if, len(peer_infos), len(ha_mode_entries)))
     except ITEM_ERRORS as err:  # all or nothing: a peer list with a link missing would replace the target's on apply
         item_failed(ctx, "ha-groups, deployment.modeIfs[haIf]", "deploymentInfo.haConfig", err)
+    if write_di and my_ha and not (ha_if and ha_mode_entries):  # lab 2026-11-01: in an EdgeHA group with no HA interface in the deployment
+        note("ha-groups", "unresolved", "deploymentInfo.haConfig", "the appliance is in EdgeHA group {} but its deployment has {}: haConfig is not written; "
+             "set the HA pairing by hand".format(my_ha.get("id", "?"), "no HA interface (haIf)" if not ha_if else "no HA subinterfaces on '{}'".format(ha_if)))
+    elif write_di and groups_read and not my_ha and ha_if and ha_mode_entries:  # lab 2026-11-01: haIf set, but the appliance is in no HA group
+        note("ha-groups", "unresolved", "deploymentInfo.haConfig", "the deployment has EdgeHA on '{}' ({} HA subinterfaces, left out of deploymentInterfaces) but the appliance "
+             "is in no Orchestrator EdgeHA group: haConfig is not written; set the HA pairing by hand".format(ha_if, len(ha_mode_entries)))
     if not write_di:
         dhcp, relay_leases, ra_skipped, ras, fo_done, fo_wanted = [], [], [], [], set(), set()
         ledger[:] = [e for e in ledger if not any(e is d for d in di_notes)]

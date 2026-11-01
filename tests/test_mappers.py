@@ -383,6 +383,34 @@ class Ecos95(unittest.TestCase):
         ha_cfg = build(cap, [])["deploymentInfo"]["haConfig"]
         self.assertEqual((ha_cfg["hav6IpPool"], ha_cfg["hav6SubnetMask"]), ("fd00::a9fe:0000/112", 126))  # /validate rejects mask 0
 
+    def test_ha_group_member_without_ha_interface_is_unresolved(self):
+        """Lab 2026-11-01: an EdgeHA group member whose deployment has no haIf converted with no haConfig and no ledger line."""
+        ha = {"g1": {"id": 0, "subnet": "169.254.1.0/24", "mask": 30, "vlanStart": 4000, "appliances": [{"nePk": "9.NE"}, {"nePk": "8.NE"}]}}
+        dep = copy.deepcopy(DEP)
+        dep["sysConfig"]["ifLabels"]["wan"] = [{"id": "1", "name": "INET"}]
+        wan = {"vlan": 0, "label": "1", "wanSide": True, "vrf": 0, "zone": 0, "harden": 1, "behindNAT": "none", "maxBW": {"outbound": 50000, "inbound": 50000}, "version": 4, "ip": "198.51.100.10", "mask": 24, "wanNexthop": "198.51.100.1"}
+        dep["modeIfs"] = [{"ifName": "wan0", "applianceIPs": [wan]}]
+        cap = FakeCap({"appliance": {"hostName": "h1", "groupId": "1.Network", "site": "S1", "networkRole": "0"}, "deployment": dep, "ha-groups": ha})
+        cap.folder = "fake"
+        ledger = []
+        self.assertNotIn("haConfig", build(cap, ledger)["deploymentInfo"])
+        self.assertTrue(any(e["disposition"] == "unresolved" and e["target"] == "deploymentInfo.haConfig" for e in ledger), ledger)
+
+    def test_ha_interface_in_no_ha_group_is_unresolved(self):
+        """Lab 2026-11-01: haIf set with HA subinterfaces, but /haGroups lists the appliance in no group: haConfig and the subinterfaces went with no line."""
+        dep = copy.deepcopy(DEP)
+        dep["sysConfig"]["haIf"] = "lan1"
+        dep["sysConfig"]["ifLabels"]["wan"] = [{"id": "1", "name": "INET"}]
+        wan = {"vlan": 0, "label": "1", "wanSide": True, "vrf": 0, "zone": 0, "harden": 1, "behindNAT": "none", "maxBW": {"outbound": 50000, "inbound": 50000}, "version": 4, "ip": "198.51.100.10", "mask": 24, "wanNexthop": "198.51.100.1"}
+        dep["modeIfs"] = [{"ifName": "wan0", "applianceIPs": [wan]}, {"ifName": "lan1", "applianceIPs": [dict(wan, vlan=4000)]}]
+        ha = {"g1": {"id": 0, "subnet": "169.254.1.0/24", "mask": 30, "vlanStart": 4000, "appliances": [{"nePk": "7.NE"}, {"nePk": "8.NE"}]}}
+        cap = FakeCap({"appliance": {"hostName": "h1", "groupId": "1.Network", "site": "S1", "networkRole": "0"}, "deployment": dep, "ha-groups": ha})
+        cap.folder = "fake"
+        ledger = []
+        self.assertNotIn("haConfig", build(cap, ledger)["deploymentInfo"])
+        line = next(e for e in ledger if e["disposition"] == "unresolved" and e["target"] == "deploymentInfo.haConfig")
+        self.assertIn("in no Orchestrator EdgeHA group", line["note"])
+
     def test_bonded_interface_without_speed_is_default_not_unresolved(self):
         c, notes = ctx({"interface-state": {"ifInfo": [{"ifname": "blan0", "ifSpeed": "", "ifDuplex": "", "admin": True}]}})
         self.assertIsNone(m_interfaceConfig(c))

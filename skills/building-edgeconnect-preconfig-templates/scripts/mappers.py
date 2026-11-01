@@ -1282,7 +1282,7 @@ def m_flowRedirection(ctx: Ctx) -> Optional[Dict[str, Any]]:
                 iface = st.get("interface") or app_if.get("interfaceName")
                 peers = [p["peerIP"] for p in (st.get("peerIPStatusList") or []) if isinstance(p, dict) and p.get("peerIP")]
                 if iface and "." in str(iface):
-                    ctx.note("cluster-state", "orchestrator-managed", "flowRedirection", "cluster subinterface '{}' is the EdgeHA sync interface (created by haConfig), not standalone flowRedirection".format(iface))
+                    ctx.note("cluster-state", "orchestrator-managed", "flowRedirection", "cluster subinterface '{}' is the EdgeHA sync interface (EdgeHA creates it), not standalone flowRedirection".format(iface))
                     return None
                 if peers and iface:
                     ctx.note("cluster-state", "mapped", "flowRedirection", "{} cluster peer(s) on {}".format(len(peers), iface))
@@ -1297,7 +1297,7 @@ def m_flowRedirection(ctx: Ctx) -> Optional[Dict[str, Any]]:
             ctx.note("running-config", "default-omitted", "flowRedirection", "cluster interface {} without peers (dormant)".format(iface))
         return None
     if iface and "." in iface:
-        ctx.note("running-config", "orchestrator-managed", "flowRedirection", "cluster subinterface '{}' is the EdgeHA sync interface (created by haConfig), not standalone flowRedirection".format(iface))
+        ctx.note("running-config", "orchestrator-managed", "flowRedirection", "cluster subinterface '{}' is the EdgeHA sync interface (EdgeHA creates it), not standalone flowRedirection".format(iface))
         return None
     cli_note(ctx, "flowRedirection", "cluster peers, interface and wait time; enable is true because peers are configured (assumption)")
     return {"enable": True, "waitTime": wait, "interfaceName": iface, "peers": [{"peerIp": p} for p in peers]}
