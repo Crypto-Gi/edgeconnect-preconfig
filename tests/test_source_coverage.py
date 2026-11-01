@@ -24,6 +24,13 @@ class SourceCoverageTest(unittest.TestCase):
         dict(d["b"]), d.get("e")  # a whole copy takes every key
         self.assertEqual(seen.leaves - seen.taken, {"l[].y", "routes.*.advert"})
 
+    def test_a_key_path_never_shows_a_name_the_converter_walks(self):
+        seen = sc.Seen()
+        d = sc.wrap({"peers": {"branch-a": {"metric": 1, "priority": 2}}, "sites": {"store-x": {"a": 1}, "store-y": {"a": 2}}}, "", seen)
+        for _, peer in d["peers"].items():  # one entry: only the walk shows its key is a name
+            peer["priority"]
+        self.assertEqual(seen.untaken(), {"peers.*.metric", "sites.*.a"})  # two records with the same fields: a record map
+
     def test_ignore_paths_are_literal_but_for_the_wildcard(self):
         self.assertTrue(sc.glob("modeIfs[].applianceIPs[].version", "modeIfs[].applianceIPs[].version"))
         self.assertFalse(sc.glob("modeIfs[].version", "modeIfs1.version"))

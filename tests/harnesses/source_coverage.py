@@ -5,10 +5,12 @@ check 11 proves the other half (a ledger "mapped" line has its YAML value). This
 read wrapped so that each key the converter takes is recorded, then lists the leaves it never took, less:
   * keys a ledger line names as not mapped (unmapped-source-key) for that capture;
   * reads whose sections the ledger hands to a template group, or calls outside the preconfig format, not readable or empty;
+  * reads of Orchestrator objects and state, not appliance settings (translate.NOT_SETTINGS: template groups, cluster state, overlays...);
   * entries of tests/harnesses/source_ignore.yaml (read id, path with * wildcards, reason).
 A leaf is taken when its key is read with [] or get(), or its value is handed out by items()/values()/iteration of a list.
 dict(x) and {**x} copies count as takes; json.dumps of a mapping is not seen: such leaves show up here and go on the ignore list with that reason.
-Writes key paths only, never values. Usage: source_coverage.py --out report.md [--target 9.7.1.42046 ...] CAPTURE_FOLDER...
+Writes key paths only, never values; a key of a mapping the converter walks (items()/values()), a record map, or a key that is not a
+field name (an id, address or interface) is "*", so no site, host or peer name appears. Usage: source_coverage.py --out report.md [--target 9.7.1.42046 ...] CAPTURE_FOLDER...
 """
 import argparse
 import json
@@ -45,6 +47,18 @@ class Seen:
     def __init__(self) -> None:
         self.taken: Set[str] = set()
         self.leaves: Set[str] = set()
+        self.collections: Set[str] = set()  # paths of mappings the converter walked with items()/values(): their keys are ids or names
+
+    def name(self, path: str) -> str:
+        """path with each key under a walked mapping as "*", so a key path never shows a site, host or peer name."""
+        out, raw = [], ""
+        for seg in path.split("."):
+            out.append("*" + (seg[seg.index("["):] if "[" in seg else "") if raw in self.collections else seg)
+            raw = join(raw, seg)
+        return ".".join(out)
+
+    def untaken(self) -> Set[str]:
+        return {self.name(p) for p in self.leaves} - {self.name(p) for p in self.taken}
 
 
 def wrap(value: Any, path: str, seen: Seen) -> Any:
@@ -64,7 +78,8 @@ def join(path: str, key: str) -> str:
 class TDict(dict):
     def __init__(self, src: Dict[str, Any], path: str, seen: Seen) -> None:
         self._path, self._seen = path, seen
-        collection = len(src) > 0 and all(not NAME.match(str(k)) for k in src)
+        records = [v for v in src.values() if isinstance(v, dict) and v]  # two or more records with the same fields, keyed by name or id (as translate._record_map)
+        collection = (len(src) > 0 and all(not NAME.match(str(k)) for k in src)) or (len(src) >= 2 and len(records) == len(src) and len({tuple(sorted(v)) for v in records}) == 1)
         self._parts = {k: part(k, collection) for k in src}
         super().__init__({k: wrap(v, join(path, self._parts[k]), seen) for k, v in src.items()})
         if not src and path:
@@ -94,11 +109,13 @@ class TDict(dict):
         return iter(list(dict.keys(self)))
 
     def items(self):  # type: ignore[override]
+        self._seen.collections.add(self._path)
         for k in list(dict.keys(self)):
             self._take(k)
         return super().items()
 
     def values(self):  # type: ignore[override]
+        self._seen.collections.add(self._path)
         for k in list(dict.keys(self)):
             self._take(k)
         return super().values()
@@ -150,7 +167,7 @@ def run_one(capture: Path, target: str) -> Tuple[Dict[str, Set[str]], List[Dict[
         return {}, [], "{}: {}".format(type(error).__name__, error)
     finally:
         translate.Capture.data = real  # type: ignore[method-assign]
-    return {ident: s.leaves - s.taken for ident, s in seen.items()}, ledger, None
+    return {ident: s.untaken() for ident, s in seen.items() if ident not in translate.NOT_SETTINGS}, ledger, None
 
 
 def unmapped_keys(ledger: List[Dict[str, Any]]) -> Set[str]:
