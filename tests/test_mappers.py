@@ -340,6 +340,8 @@ class Release(unittest.TestCase):
         self.assertIn("deploymentInfo.deploymentInterfaces.addressingMode", allowed)  # /validate accepts it; the template does not show it
         self.assertNotIn("nac.aaaProfile.dot1x_acct_server_group", allowed)
         self.assertNotIn("tunnelConfiguration.tunnels.ipsecConfig.ikePqcgroup", allowed)  # 10.0 only
+        for target in ("9.6.4.40046", "9.7.1.42046", "10.0.0.40516"):  # lab 2026-11-01: a tunnel's segment was stripped, so it would apply in Default
+            self.assertIn("tunnelConfiguration.tunnels.segment", allowed_paths(target))
 
 
 class Ecos95(unittest.TestCase):

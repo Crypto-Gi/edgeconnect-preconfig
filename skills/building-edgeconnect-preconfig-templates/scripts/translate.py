@@ -804,6 +804,8 @@ TEMPLATE_OMISSIONS = {
     "deploymentInfo.deploymentInterfaces.addressingMode",
     "ipSlaRule.ruleEntries.ipslaMonitor.tunnelName", "ipSlaRule.ruleEntries.ipslaMonitor.sourceInterfaceName",
     "ipSlaRule.ruleEntries.ipslaMonitor.forceDnsThroughProbePath", "ipSlaRule.ruleEntries.downAction.subnetMetricDelta",
+    # documented but only commented out ("#segment: Default") in every bundled template; /validate 9.7.1 accepts it (lab, clean box, 2026-11-01)
+    "tunnelConfiguration.tunnels.segment",
 }
 
 
