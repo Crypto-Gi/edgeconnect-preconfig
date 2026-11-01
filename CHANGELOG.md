@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (`gui` branch)
+## 1.4.0-rc.5 (2026-11-01, pre-release from the `gui` branch; rc.3 and rc.4 were not published)
 
 - **The BFD ledger line names the three timers it keeps**; lessons.md notes that a NAC re-apply onto a box with NAC bound to an interface is refused.
 - **The EdgeHA unresolved line names the HA group** by its Orchestrator key; it printed `?`.
