@@ -5,6 +5,7 @@
 - **The BFD ledger line names the three timers it keeps**; lessons.md notes that a NAC re-apply onto a box with NAC bound to an interface is refused.
 - **The EdgeHA unresolved line names the HA group** by its Orchestrator key; it printed `?`.
 - **lessons.md: a preconfig is for a fresh box.** Re-apply results on a configured box are not proof of how the YAML behaves; when re-applying deployment settings, keep `vrrp` in the same YAML (a `deploymentInfo` apply can drop VRRP on an interface whose device number it renumbers).
+- **The fixed-speed, duplex-auto ledger line says what ECOS 9.6.2.1 does** (clean-box test): from auto/auto the speed applies and duplex becomes full; from a fixed speed and duplex the entry is ignored, with no error either way. The YAML is unchanged.
 
 ## 1.4.0-rc.4 (2026-11-01, pre-release from the `gui` branch; rc.3 was not published)
 

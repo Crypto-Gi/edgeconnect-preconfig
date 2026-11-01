@@ -1000,9 +1000,10 @@ def m_interfaceConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
         entry = {"interfaceName": name, "interfaceSpeed": speed if speed == "auto" else int(speed), "interfaceDuplex": i["ifDuplex"], "admin": "up" if i["admin"] else "down"}
         if str(combo) == "3":  # RJ45 (0) is the default and is left out, as before
             entry["comboPortMode"] = 3
-        if speed != "auto" and i["ifDuplex"] == "auto":  # lab 2026-11-01: ECOS 9.6.2.1 applies this without error but keeps the old speed and duplex
-            ctx.note("interface-state[{}]".format(name), "mapped", "interfaceConfig.interfaces", "{}: speed {} with duplex auto is written as the source has it; ECOS 9.6.2.1 has been seen to keep the "
-                     "old speed and duplex for this pair with no error (references/known-constraints.yaml); check the interface after apply".format(name, speed))
+        if speed != "auto" and i["ifDuplex"] == "auto":  # lab 2026-11-01 (clean box): ECOS 9.6.2.1 never keeps duplex auto with a fixed speed
+            ctx.note("interface-state[{}]".format(name), "mapped", "interfaceConfig.interfaces", "{}: speed {} with duplex auto is written as the source has it; ECOS 9.6.2.1 never keeps duplex "
+                     "auto with a fixed speed: from auto/auto the speed applies and duplex becomes full, from a fixed speed the entry is ignored, with no error "
+                     "(references/known-constraints.yaml); check the interface after apply".format(name, speed))
         out.append(entry)
     if not out:
         ctx.note("interface-state", "default-omitted", "interfaceConfig", "every LAN and WAN interface is admin up with auto speed and duplex (management ports are not carried)")
