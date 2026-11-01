@@ -832,6 +832,41 @@ class LedgerNeverClaimsWhatIsNotWritten(unittest.TestCase):
         self.assertFalse(got["ok"])
         self.assertEqual(got["detail"], ["ledger says mapped, YAML lacks: virtualTunnelInterface", "YAML writes, no ledger line: businessIntentOverlays"])
 
+    def test_a_note_on_part_of_a_section_never_explains_a_dropped_value(self):
+        from translate import reconcile, verdict
+        for note in ("default-omitted", "orchestrator-managed"):  # a disabled segment's note, one gms-marked route skipped
+            ledger = [{"item": "x", "disposition": note, "target": "localRoutes", "note": "part"},
+                      {"item": "static-routes", "disposition": "mapped", "target": "localRoutes.routes", "note": "2 configured local routes"}]
+            reconcile(ledger, {"localRoutes": {"useSharedSubnetInfo": True}})
+            self.assertEqual([(e["disposition"], e.get("converted")) for e in ledger], [(note, None), ("unresolved", True)], note)
+            self.assertIn("Incomplete", verdict(ledger))
+
+    def test_the_gap_line_on_the_same_path_wins_over_one_below_it(self):
+        from translate import reconcile
+        ledger = [{"item": "a", "disposition": "template-group", "target": "localRoutes.routes.metric", "note": "below"},
+                  {"item": "unseen entry", "disposition": "unresolved", "target": "localRoutes.routes", "note": "same"},
+                  {"item": "static-routes", "disposition": "mapped", "target": "localRoutes.routes", "note": "2 configured local routes"}]
+        reconcile(ledger, {"localRoutes": {}})
+        self.assertEqual([(e["note"], e.get("converted")) for e in ledger], [("below", None), ("same (the converter had read it: 2 configured local routes)", True)])
+
+    def test_multicast_on_a_release_without_the_section_says_so(self):
+        from test_mappers import DEP
+        from translate import allowed_paths, observed_paths, prune, reconcile, scope_by_template, template_enums, template_types
+        from common import find_default_template, load_yaml
+        data = copy.deepcopy(DATA)
+        data.update({"deployment": DEP, "multicast-enable": [{"vrf_id": 0, "enable": True}, {"vrf_id": 1, "enable": False}],
+                     "multicast-config": [{"vrf_id": 0, "rp": "192.0.2.9", "pim": {"lan0": {"dr_priority": 1, "enable": True, "hello_interval": 30, "join_prune_interval": 30}}, "igmp": {}, "filter_name": None},
+                                          {"vrf_id": 1, "pim": {}, "igmp": {}}]})
+        target = "9.6.4.40046"
+        ledger = []
+        out = prune(build(FakeCap(data), ledger), allowed_paths(target), ledger, types=template_types(target), observed=observed_paths(), enums=template_enums(target))
+        self.assertNotIn("multicast", out)
+        reconcile(ledger, out)
+        scope_by_template(ledger, set(load_yaml(find_default_template(target)[0])))
+        lines = [(e["disposition"], e.get("converted")) for e in ledger if e["target"] == "multicast"]
+        self.assertIn(("outside-preconfig", True), lines)
+        self.assertTrue(any("has no multicast section" in e["note"] for e in ledger if e["target"] == "multicast"))
+
     def test_every_mapped_target_names_a_path_of_the_preconfig_format(self):
         """A mapped line whose target skips a level (ipSlaRule.routeLabel for ipSlaRule.ruleEntries[].routeLabel) is read as not written."""
         import re

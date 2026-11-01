@@ -994,13 +994,21 @@ def unledgered_sections(ledger: List[Dict[str, Any]], reference: Any) -> List[st
     return [s for s in (reference or {}) if s not in named]
 
 
-EXPLAINS = ["template-group", "orchestrator-managed", "outside-preconfig", "unresolved", "not-readable", "toolkit-error", "default-omitted"]  # first wins
+# Lines that can say why a mapped value is not written, best first. `default-omitted` and `orchestrator-managed` are left out: they
+# speak for part of a section (a disabled segment, one gms-marked route), never for the value the mapped line names.
+EXPLAINS = ["template-group", "unresolved", "not-readable", "toolkit-error", "outside-preconfig"]
 
 
 def _covers(a: str, b: str) -> bool:
     """Two ledger targets name the same path, or one lies below the other (at a `.` boundary)."""
     a, b = a.strip().replace("[]", ""), b.strip().replace("[]", "")
     return bool(a and b) and (a == b or a.startswith(b + ".") or b.startswith(a + "."))
+
+
+def _above(a: str, b: str) -> bool:
+    """Ledger target a is b or a parent of it."""
+    a, b = a.strip().replace("[]", ""), b.strip().replace("[]", "")
+    return bool(a) and (a == b or b.startswith(a + "."))
 
 
 def reconcile(ledger: List[Dict[str, Any]], reference: Any) -> List[str]:
@@ -1011,7 +1019,7 @@ def reconcile(ledger: List[Dict[str, Any]], reference: Any) -> List[str]:
     for e in unwritten_mapped(ledger, reference):
         targets = [t for t in e["target"].split(",") if t.strip()]
         why = sorted((x for x in ledger if x is not e and x["disposition"] in EXPLAINS and any(_covers(x["target"], t) for t in targets)),
-                     key=lambda x: EXPLAINS.index(x["disposition"]))
+                     key=lambda x: (not any(_above(x["target"], t) for t in targets), EXPLAINS.index(x["disposition"])))  # same or parent path first
         if why:
             ledger.remove(e)
             why[0]["converted"] = True
