@@ -454,6 +454,11 @@ class FailedReads(unittest.TestCase):
                 line = [e for e in ledger if e["item"] == ident]
                 self.assertEqual(len(line), 1)
                 self.assertTrue(line[0]["target"])  # names the section the read feeds
+                self.assertIn("nothing built from it is written", line[0]["note"])
+        out, ledger = translate(lambda d: d.update({"dhcp-leases": {}}), failed=("dhcp-leases",))  # a read with no known section
+        line = [e for e in ledger if e["item"] == "dhcp-leases"]
+        self.assertEqual((len(line), line[0]["target"]), (1, ""))
+        self.assertIn("may be incomplete", line[0]["note"])
 
     def test_a_404_or_an_already_named_failed_read_adds_no_line(self):
         out, ledger = translate()

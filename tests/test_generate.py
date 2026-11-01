@@ -166,6 +166,15 @@ class RoundTrip(unittest.TestCase):
         self.assertTrue(col["secret"] and col["had_value"])
         self.assertEqual(self.row["deploymentInfo.deploymentInterfaces.0.password"], "")
 
+    def test_a_secret_under_a_list_is_still_a_secret_column(self):
+        # fuzz 2026-11-01: a one-item list authKey was written literally into jinja2, the CSV and the rendered YAML
+        ref = {"applianceInfo": {"hostname": "lab-a"}, "ospfSystemConfig": {"interfaces": [{"interfaceName": "lan0", "authenticationKey": ["LabKey1"]}]}}
+        out = Path(tempfile.mkdtemp())
+        meta = generate(ref, out, "s", variables=[r"hostname$"])
+        self.assertTrue(any(c["secret"] for p, c in meta["columns"].items() if "authenticationKey" in p))
+        for f in out.iterdir():
+            self.assertNotIn("LabKey1", f.read_text(errors="replace"), f.name)
+
     def test_changing_one_cell_changes_one_field_and_flows_through(self):
         row = dict(self.row, **{"deploymentInfo.totalOutboundBandwidth": "300000", "template_groups": "G1,G9"})
         doc = parse_yaml(render_row(self.template, row))

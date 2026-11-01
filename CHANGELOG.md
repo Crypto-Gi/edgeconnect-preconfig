@@ -6,6 +6,7 @@
 - **The EdgeHA unresolved line names the HA group** by its Orchestrator key; it printed `?`.
 - **lessons.md: a preconfig is for a fresh box.** Re-apply results on a configured box are not proof of how the YAML behaves; when re-applying deployment settings, keep `vrrp` in the same YAML (a `deploymentInfo` apply can drop VRRP on an interface whose device number it renumbers).
 - **A failed read that no mapper names gets a not-readable line.** An offline fuzz found that a capture-time GET failure on, for example, passthrough tunnels, AppExpress groups or IDS/IPS dropped the whole section with no line. The YAML is unchanged.
+- **A secret under a list is a secret column**: a list-shaped key (for example an OSPF `authenticationKey`) was written literally into the template, the CSV and the rendered YAML (offline fuzz).
 - **A VRRP entry of an unexpected shape is named by its position in the ledger**, never quoted whole: the quote could carry its authentication key into ledger.json and summary.md (offline fuzz).
 - **lessons.md: an empty list in a preconfig never deletes existing entries**; Orchestrator skips the section.
 - **known-constraints.yaml: ECOS 9.6.2.1 keeps an RA router preference of medium** whatever is applied (clean-box test).
