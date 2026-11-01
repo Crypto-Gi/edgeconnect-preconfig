@@ -37,6 +37,10 @@ class MapperRules(unittest.TestCase):
     def test_peer_priority_uses_weight_not_metric(self):
         c, _ = ctx({"peer-priority": {"peerlist": {"B": {"peer_metric": 0, "peer_weight": 5}, "A": {"peer_metric": 0, "peer_weight": 10}}}})
         self.assertEqual(m_peerPriority(c), {"peerPriorities": [{"peerName": "A", "priority": 10}, {"peerName": "B", "priority": 5}]})
+        c, notes = ctx({"peer-priority": {"peerlist": {"A": {"peer_metric": 10, "peer_weight": 100}, "B": {"peer_metric": 0, "peer_weight": 1}}}})  # lab Pass 1, 1.NE
+        m_peerPriority(c)
+        self.assertEqual([(n["disposition"], n["note"]) for n in notes if n["target"].endswith("metric")],
+                         [("outside-preconfig", "peer metric not written, the preconfig format has none: A 10; set it by hand")])
 
     def test_a_loopback_zone_missing_from_its_segment_map_is_resolved_or_ledgered(self):
         """Full-coverage lab, Pass 1: lo2 in segment corp with zone TRUSTED was written with zone null and no ledger line."""
@@ -788,6 +792,10 @@ class AuditRegressions(unittest.TestCase):
                             "subnets": {"subnets": {"entries": [{"state": auto, "config": conf}, {"state": user, "config": dict(conf, prefix="198.19.10.9/32")}]}}})
             self.assertEqual([r["routeIpSubnet"] for r in m_localRoutes(c)["routes"]], want)
             self.assertEqual(any("vti1's auto-distribute" in n["note"] for n in notes), distribute)
+        mine = dict(auto, nextHop="10.0.0.2", ifName="lan0")  # a user's host route on the same prefix is kept
+        c, _ = ctx({"deployment": DEP, "vtis": {"vti1": dict(VTI, ipaddr="198.19.10.1", auto_distribute=True)},
+                    "subnets": {"subnets": {"entries": [{"state": mine, "config": dict(conf, nextHop="10.0.0.2", ifName="lan0", comment="my host route")}]}}})
+        self.assertEqual([r["routeIpSubnet"] for r in m_localRoutes(c)["routes"]], ["198.19.10.1/32"])
 
     def test_next_hop_zero_route_is_written_from_its_config(self):
         from mappers import m_localRoutes

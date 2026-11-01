@@ -1034,6 +1034,20 @@ def reconcile(ledger: List[Dict[str, Any]], reference: Any) -> List[str]:
     return out
 
 
+def drop_broken_nac(ledger: List[Dict[str, Any]], reference: Any) -> None:
+    """The format checks can empty a NAC list (an apply policy with a profile no build has used) or drop the server address (9.6.4 calls it
+    `address`): /validate answers HTTP 500 for a missing list, and a server without an address is no server, so the section is not written."""
+    nac = (reference or {}).get("nac")
+    if not isinstance(nac, dict):
+        return
+    empty = [k for k in NAC_LISTS if not nac.get(k)]
+    bare = [str(s.get("name")) for s in nac.get("server") or [] if isinstance(s, dict) and not (s.get("host") or s.get("address"))]
+    if empty or bare:
+        del reference["nac"]
+        ledger.append({"item": "nac", "disposition": "unresolved", "target": "nac", "note": "not written: the target release's format checks left {}; set NAC by hand".format(
+            "; ".join(filter(None, ["no " + ", ".join(empty) if empty else "", "no address on RADIUS server " + ", ".join(bare) if bare else ""])))})
+
+
 def _default_nat_maps(data: Any) -> bool:
     maps = (data.get("data") or {}) if isinstance(data, dict) else {}
     maps = {k: m for k, m in maps.items() if isinstance(m, dict)}  # a map listed by name only holds no rules
@@ -1237,6 +1251,7 @@ def convert(args: argparse.Namespace, template: Path, template_why: str, default
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2
+    drop_broken_nac(ledger, reference)
     reconcile(ledger, reference)
     from check import validate_rejects
     for section, problem in validate_rejects(reference):  # the source's own value, kept as it is in reference.yaml; check.py refuses the row

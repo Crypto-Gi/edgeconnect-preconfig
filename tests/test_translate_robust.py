@@ -1006,3 +1006,63 @@ class NewSourceFields(unittest.TestCase):
         lines, _ = self.ledgered(change)
         self.assertIn("sysConfig.evpn2Enable, sysConfig.ipv6Mode", lines[0]["note"])
         self.assertNotIn("lan3", lines[0]["note"])
+
+
+def translate_with(reads, *extra):
+    """translate.main on the base fixture plus extra capture reads {id: data}; returns (out folder, reference, ledger)."""
+    import json
+    import shutil
+    import tempfile
+    import translate
+    from common import parse_yaml
+    tmp = Path(tempfile.mkdtemp())
+    cap = tmp / "cap"
+    shutil.copytree(str(Path(__file__).resolve().parent / "fixtures" / "compare" / "captures" / "base"), str(cap))
+    index = json.loads((cap / "capture-index.json").read_text())
+    for ident, data in reads.items():
+        (cap / "capture" / (ident + ".live.json")).write_text(json.dumps({"data": data}))
+        index.append({"id": ident, "label": "live", "status": "ok", "file": "capture/{}.live.json".format(ident)})
+    (cap / "capture-index.json").write_text(json.dumps(index))
+    with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+        translate.main(["--capture", str(cap), "--site-type", "t", "--out", str(tmp / "out")] + list(extra))
+    out = tmp / "out"
+    return out, parse_yaml((out / "reference.yaml").read_text()), json.loads((out / "ledger.json").read_text())["entries"]
+
+
+VRRP_GROUP = {"groupId": 1, "interface": "lan0", "enable": "Up", "vipaddr": "192.0.2.3", "adv_timer": 100, "priority": 101, "tracker": False, "version": 3, "preempt": True,
+              "desc": "", "pkt_trace": False, "holddown": 10}
+NAC_LAB = {"nacEnable": True, "server": {"1": {"self": 1, "address": "192.0.2.5", "authport": 1812, "key": "", "name": "default", "source_ip_interface": "any"}},
+       "serverGroup": {"1": {"self": 1, "name": "default", "server": {"1": {"self": 1, "name": "default"}}}}, "aaaProfile": {"1": {"self": 1, "name": "default", "da_server": "default"}},
+       "dot1x": {"1": {"self": 1, "name": "default"}}, "macAuthProfile": {"1": {"self": 1, "name": "default"}}, "applyPolicies": {"if": {"lan0": {"profile": "default", "auth_type": 1}}}}
+
+
+class LabVerifiedSectionsEndToEnd(unittest.TestCase):
+    """Sections the full-coverage lab verified (2026-11-01), written through translate.main the way a site is."""
+
+    def test_the_vrrp_key_is_a_secret_column(self):
+        import json
+        import shutil
+        for auth in ("<SECRET:$.data[0].auth>", "LabKey1"):  # redacted at capture, or an older capture with the key in clear
+            out, ref, _ = translate_with({"vrrp": [dict(VRRP_GROUP, auth=auth)]})
+            self.addCleanup(shutil.rmtree, str(out.parent))
+            self.assertTrue(ref["vrrp"]["vrrpEntries"][0]["authenticationString"].startswith("<SECRET:"))
+            columns = json.loads((out / "columns.json").read_text())
+            column = [c for c in columns["columns"].values() if c["path"].endswith("authenticationString")]
+            self.assertEqual([c["secret"] for c in column], [True], auth)
+            for f in out.rglob("*"):
+                if f.is_file() and f.suffix in (".jinja2", ".csv", ".yaml", ".json"):
+                    self.assertNotIn("LabKey1", f.read_text(), f.name)
+
+    def test_nac_is_never_written_without_one_of_its_lists_or_the_server_address(self):
+        import shutil
+        for target, policy in (("9.7.1.42046", {"profile": "default", "auth_type": 1}), ("9.6.4.40046", {"auth_type": 0})):  # a profile no build has used; 9.6.4 calls it address
+            out, ref, ledger = translate_with({"nac": dict(NAC_LAB, applyPolicies={"if": {"lan0": policy}})}, "--target-release", target)
+            self.addCleanup(shutil.rmtree, str(out.parent))
+            self.assertNotIn("nac", ref, target)
+            self.assertNotIn(("mapped", "nac"), [(e["disposition"], e["target"]) for e in ledger], target)
+            self.assertTrue([e for e in ledger if e["target"] == "nac" and e["disposition"] == "unresolved" and "not written" in e["note"]], target)
+        out, ref, _ = translate_with({"nac": dict(NAC_LAB, applyPolicies={"if": {"lan0": {"auth_type": 0}}})}, "--target-release", "9.7.1.42046")
+        self.addCleanup(shutil.rmtree, str(out.parent))
+        self.assertEqual(ref["nac"]["server"][0]["host"], "192.0.2.5")
+        self.assertEqual(ref["nac"]["server"][0]["key"], "<SECRET:not-captured>")
+
