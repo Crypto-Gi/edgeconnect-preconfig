@@ -208,6 +208,12 @@ structural_and_apply_constraints:
     seen: "no error: apply COMPLETED; reads back speed/full from auto/auto, or the old speed and duplex from a fixed speed (10/auto, 10000/auto)"
     fix: "Write duplex full (or half) with a fixed speed, or check the interface after apply; translate ledgers such an interface."
 
+  - section: deploymentInfo
+    enforced_by: apply
+    rule: "On ECOS 9.6.2.1 an IPv6 RA routerpreference other than medium (low, high) passes /validate and the apply reports COMPLETED, but the appliance keeps medium, on create and on modify (clean box, 2026-11-01). ECOS 9.7.1 keeps it."
+    seen: "no error: apply COMPLETED, routerpreference reads back medium"
+    fix: "Expect medium on ECOS 9.6.2.1; check the RA after apply if another preference matters."
+
   - section: multicast
     enforced_by: apply
     rule: "The multicast section is refused on ECOS 9.6.2.1, even at its default value."

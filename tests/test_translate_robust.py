@@ -445,6 +445,13 @@ class FailedReads(unittest.TestCase):
                 self.assertFalse(any(e["disposition"] in ("mapped", "default-omitted") and e["item"].startswith(ident) for e in ledger))
                 self.assertEqual(interfaces(out), ["lan0", "lan0.90", "wan0"])
 
+    def test_any_failed_read_without_its_own_line_gets_one(self):
+        # fuzz 2026-11-01: a failed passthrough-tunnels, appexpress or ids read dropped its section with no line
+        for ident in ("passthrough-tunnels", "appexpress-group-association", "ids-profile-state"):
+            with self.subTest(ident):
+                out, ledger = translate(lambda d: d.update({ident: {}}), failed=(ident,))
+                self.assertLedgered(ledger, "not-readable", ident)
+
     def test_names_from_reads_of_another_shape_are_not_written_as_ids(self):
         for ident, field in (("groups", "group"), ("cluster-profiles", "clusterProfile"), ("cluster-profile-mapping", "clusterProfile")):
             with self.subTest(ident):

@@ -555,7 +555,7 @@ def m_vrrp(ctx: Ctx) -> Optional[Dict[str, Any]]:
         return None
     runtime = {"master_transitions", "masterip", "mode", "uptime", "vipowner", "vmac", "priorityState"}
     out = []
-    for v in source:
+    for n, v in enumerate(source):
         try:
             entry: Dict[str, Any] = {
                 "groupId": v["groupId"], "interfaceName": v["interface"], "admin": v["enable"],
@@ -568,7 +568,7 @@ def m_vrrp(ctx: Ctx) -> Optional[Dict[str, Any]]:
                 entry["description"] = v["desc"]
             entry.update({"packetTrace": v["pkt_trace"], "holddownTimer": v["holddown"]})
         except ITEM_ERRORS as err:
-            item_failed(ctx, "vrrp group {}".format(v.get("groupId") if isinstance(v, dict) else v), "vrrp", err)
+            item_failed(ctx, "vrrp group {}".format(v.get("groupId") if isinstance(v, dict) else "vrrp[{}]".format(n)), "vrrp", err)  # never the raw entry: it holds the key
             continue
         out.append(entry)
         note_ref(ctx, "vrrp group {}".format(v["groupId"]), "vrrp.interfaceName", "VRRP group {}".format(v["groupId"]), entry["interfaceName"])

@@ -5,6 +5,9 @@
 - **The BFD ledger line names the three timers it keeps**; lessons.md notes that a NAC re-apply onto a box with NAC bound to an interface is refused.
 - **The EdgeHA unresolved line names the HA group** by its Orchestrator key; it printed `?`.
 - **lessons.md: a preconfig is for a fresh box.** Re-apply results on a configured box are not proof of how the YAML behaves; when re-applying deployment settings, keep `vrrp` in the same YAML (a `deploymentInfo` apply can drop VRRP on an interface whose device number it renumbers).
+- **A failed read that no mapper names gets a not-readable line.** An offline fuzz found that a capture-time GET failure on, for example, passthrough tunnels, AppExpress groups or IDS/IPS dropped the whole section with no line. The YAML is unchanged.
+- **A VRRP entry of an unexpected shape is named by its position in the ledger**, never quoted whole: the quote could carry its authentication key into ledger.json and summary.md (offline fuzz).
+- **known-constraints.yaml: ECOS 9.6.2.1 keeps an RA router preference of medium** whatever is applied (clean-box test).
 - **The fixed-speed, duplex-auto ledger line says what ECOS 9.6.2.1 does** (clean-box test): from auto/auto the speed applies and duplex becomes full; from a fixed speed and duplex the entry is ignored, with no error either way. The YAML is unchanged.
 
 ## 1.4.0-rc.4 (2026-11-01, pre-release from the `gui` branch; rc.3 was not published)

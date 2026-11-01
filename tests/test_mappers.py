@@ -62,6 +62,12 @@ class MapperRules(unittest.TestCase):
         for auth, want in (("<SECRET:$[0].auth>", "<SECRET:vrrp.auth>"), ("LabKey1", "<SECRET:vrrp.auth>")):  # one name whatever the capture path; an older capture holds it in clear
             self.assertEqual(m_vrrp(ctx({"vrrp": [dict(group, auth=auth)]})[0])["vrrpEntries"][0]["authenticationString"], want)
 
+    def test_a_vrrp_entry_of_another_shape_is_not_quoted_in_the_ledger(self):
+        c, notes = ctx({"vrrp": [["auth", "LabKey1", "192.0.2.1"]]})  # fuzz 2026-11-01: the toolkit-error line quoted the whole raw entry
+        m_vrrp(c)
+        self.assertTrue(notes)
+        self.assertNotIn("LabKey1", repr(notes))
+
     def test_vrrp_drops_runtime_state(self):
         c, notes = ctx({"vrrp": [{"groupId": 1, "interface": "lan0", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 100, "priority": 101, "tracker": False, "version": 3, "preempt": True,
                                   "auth": "", "desc": "", "pkt_trace": False, "holddown": 10, "mode": "master", "uptime": "1 day", "vmac": "00:00:5e:00:01:01"}]})
