@@ -62,6 +62,19 @@ class MapperRules(unittest.TestCase):
         for auth, want in (("<SECRET:$[0].auth>", "<SECRET:vrrp.auth>"), ("LabKey1", "<SECRET:vrrp.auth>")):  # one name whatever the capture path; an older capture holds it in clear
             self.assertEqual(m_vrrp(ctx({"vrrp": [dict(group, auth=auth)]})[0])["vrrpEntries"][0]["authenticationString"], want)
 
+    def test_a_vrrp_entry_of_another_shape_is_not_quoted_in_the_ledger(self):
+        c, notes = ctx({"vrrp": [["auth", "LabKey1", "192.0.2.1"]]})  # fuzz 2026-11-01: the toolkit-error line quoted the whole raw entry
+        m_vrrp(c)
+        self.assertTrue(notes)
+        self.assertNotIn("LabKey1", repr(notes))
+
+    def test_a_toolkit_error_line_never_quotes_a_conversion_error_value(self):
+        from mappers import item_failed
+        c, notes = ctx({})
+        item_failed(c, "x", "s", ValueError("invalid literal for int() with base 10: 'LabKey1'"))  # approver 2026-11-01: str(err) can quote a key
+        self.assertIn("ValueError", repr(notes))
+        self.assertNotIn("LabKey1", repr(notes))
+
     def test_vrrp_drops_runtime_state(self):
         c, notes = ctx({"vrrp": [{"groupId": 1, "interface": "lan0", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 100, "priority": 101, "tracker": False, "version": 3, "preempt": True,
                                   "auth": "", "desc": "", "pkt_trace": False, "holddown": 10, "mode": "master", "uptime": "1 day", "vmac": "00:00:5e:00:01:01"}]})
@@ -340,6 +353,8 @@ class Release(unittest.TestCase):
         self.assertIn("deploymentInfo.deploymentInterfaces.addressingMode", allowed)  # /validate accepts it; the template does not show it
         self.assertNotIn("nac.aaaProfile.dot1x_acct_server_group", allowed)
         self.assertNotIn("tunnelConfiguration.tunnels.ipsecConfig.ikePqcgroup", allowed)  # 10.0 only
+        for target in ("9.6.4.40046", "9.7.1.42046", "10.0.0.40516"):  # lab 2026-11-01: a tunnel's segment was stripped, so it would apply in Default
+            self.assertIn("tunnelConfiguration.tunnels.segment", allowed_paths(target))
 
 
 class Ecos95(unittest.TestCase):
@@ -394,7 +409,7 @@ class Ecos95(unittest.TestCase):
         cap.folder = "fake"
         ledger = []
         self.assertNotIn("haConfig", build(cap, ledger)["deploymentInfo"])
-        self.assertTrue(any(e["disposition"] == "unresolved" and e["target"] == "deploymentInfo.haConfig" for e in ledger), ledger)
+        self.assertTrue(any(e["disposition"] == "unresolved" and e["target"] == "deploymentInfo.haConfig" and "group g1" in e["note"] for e in ledger), ledger)
 
     def test_ha_interface_in_no_ha_group_is_unresolved(self):
         """Lab 2026-11-01: haIf set with HA subinterfaces, but /haGroups lists the appliance in no group: haConfig and the subinterfaces went with no line."""

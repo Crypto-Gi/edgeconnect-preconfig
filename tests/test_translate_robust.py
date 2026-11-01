@@ -445,6 +445,32 @@ class FailedReads(unittest.TestCase):
                 self.assertFalse(any(e["disposition"] in ("mapped", "default-omitted") and e["item"].startswith(ident) for e in ledger))
                 self.assertEqual(interfaces(out), ["lan0", "lan0.90", "wan0"])
 
+    def test_any_failed_read_without_its_own_line_gets_one(self):
+        # fuzz 2026-11-01: a failed passthrough-tunnels, appexpress or ids read dropped its section with no line
+        for ident in ("passthrough-tunnels", "appexpress-group-association", "ids-profile-state"):
+            with self.subTest(ident):
+                out, ledger = translate(lambda d: d.update({ident: {}}), failed=(ident,))
+                self.assertLedgered(ledger, "not-readable", ident)
+                line = [e for e in ledger if e["item"] == ident]
+                self.assertEqual(len(line), 1)
+                self.assertTrue(line[0]["target"])  # names the section the read feeds
+                self.assertIn("nothing built from it is written", line[0]["note"])
+        out, ledger = translate(lambda d: d.update({"dhcp-leases": {}}), failed=("dhcp-leases",))  # a read with no known section
+        line = [e for e in ledger if e["item"] == "dhcp-leases"]
+        self.assertEqual((len(line), line[0]["target"]), (1, ""))
+        self.assertIn("may be incomplete", line[0]["note"])
+
+    def test_a_404_or_an_already_named_failed_read_adds_no_line(self):
+        out, ledger = translate()
+        cap_index = [{"id": "passthrough-tunnels", "label": "live", "status": "error", "http": 404}]
+        cap = FakeCap(copy.deepcopy(DATA))
+        cap.index += cap_index
+        ledger = []
+        build(cap, ledger)
+        self.assertFalse(any(e["item"] == "passthrough-tunnels" and e["disposition"] == "not-readable" for e in ledger))
+        out, ledger = translate(failed=("groups",))  # groups has its own failed_read line: no second one
+        self.assertEqual(sum(1 for e in ledger if e["disposition"] == "not-readable" and e["item"] == "groups"), 1)
+
     def test_names_from_reads_of_another_shape_are_not_written_as_ids(self):
         for ident, field in (("groups", "group"), ("cluster-profiles", "clusterProfile"), ("cluster-profile-mapping", "clusterProfile")):
             with self.subTest(ident):

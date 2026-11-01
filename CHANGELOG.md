@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased (`gui` branch)
+## 1.4.0-rc.5 (2026-11-01, pre-release from the `gui` branch; rc.3 and rc.4 were not published)
+
+- **The BFD ledger line names the three timers it keeps**; lessons.md notes that a NAC re-apply onto a box with NAC bound to an interface is refused.
+- **The EdgeHA unresolved line names the HA group** by its Orchestrator key; it printed `?`.
+- **lessons.md: a preconfig is for a fresh box.** Re-apply results on a configured box are not proof of how the YAML behaves; when re-applying deployment settings, keep `vrrp` in the same YAML (a `deploymentInfo` apply can drop VRRP on an interface whose device number it renumbers).
+- **A failed read that no mapper names gets a not-readable line.** An offline fuzz found that a capture-time GET failure on, for example, passthrough tunnels, AppExpress groups or IDS/IPS dropped the whole section with no line. The YAML is unchanged.
+- **A secret under a list is a secret column**: a list-shaped key (for example an OSPF `authenticationKey`) was written literally into the template, the CSV and the rendered YAML (offline fuzz).
+- **A VRRP entry of an unexpected shape is named by its position in the ledger**, never quoted whole: the quote could carry its authentication key into ledger.json and summary.md (offline fuzz).
+- **lessons.md: an empty list in a preconfig never deletes existing entries**; Orchestrator skips the section.
+- **known-constraints.yaml: ECOS 9.6.2.1 keeps an RA router preference of medium** whatever is applied (clean-box test).
+- **The fixed-speed, duplex-auto ledger line says what ECOS 9.6.2.1 does** (clean-box test): from auto/auto the speed applies and duplex becomes full; from a fixed speed and duplex the entry is ignored, with no error either way. The YAML is unchanged.
 
 ## 1.4.0-rc.4 (2026-11-01, pre-release from the `gui` branch; rc.3 was not published)
 
@@ -11,7 +21,7 @@
 - **The VRRP key placeholder is always `<SECRET:vrrp.auth>`**, whatever the capture path, so a re-capture no longer shows a changed placeholder.
 - **BGP neighbor-change logging and remote DHCP pool failover are ledgered** as outside preconfig. No default template has a field for either, and both were dropped with no ledger line (found by the source coverage check over the field corpus and the lab captures).
 - **A combo port in SFP mode is written** (`interfaceConfig` `comboPortMode: 3`, lan2/wan2 of EC-10106/10108). Before, the mode was never read, so a rebuilt box would bring the port up in RJ45 mode. RJ45 (0) is the default and is left out as before. `comboPortMode` is on the verified list: `/validate` on 9.7.1 accepted it (a schema check; no combo-port model has applied it).
-- **A passthrough tunnel in a non-Default segment keeps its segment** (`segment`). Before, `local_vrf` was never read, so the tunnel was written into Default. No validated build has a tunnel segment yet, so the unseen-field check holds such a tunnel out with a gap line instead of writing it into the wrong segment. A tunnel's FEC, tag and unshaped settings, which the format has no field for, are ledgered when set.
+- **A passthrough tunnel in a non-Default segment keeps its segment** (`segment`). Before, `local_vrf` was never read, so the tunnel was written into Default. The segment is now written: the bundled templates show `segment` only as a comment, so the release check stripped it and the tunnel would have applied in Default with no clear line (lab, clean box). `/validate` on 9.7.1 accepts it. A tunnel's FEC, tag and unshaped settings, which the format has no field for, are ledgered when set.
 - **Ledgered instead of dropped with no line:** VXLAN next-hop settings of a route (`vxlan`, `vni`, `dest_mac`, `no_subshared`) that differ from the defaults, an inbound bandwidth limit the appliance reports as switched off (`maxInBWEnabled` false), and an error answer from the VXLAN read other than NOT_AVAILABLE. An OSPF interface that the preconfig does not deploy is now named in its own ledger line.
 - **GUI: a build shows every capture request.** When the capture ended, its folder was renamed before the GUI read the last lines, so the request list could stop one or two short. The GUI now reads the rest from the renamed folder. This was the recurring macOS CI failure in `test_gui_pick`.
 - **Two ECOS 9.6.2.1 apply traps are documented** in `references/known-constraints.yaml` (full-coverage lab, Pass 3). A fixed speed with duplex auto applies with no error but changes nothing, so translate now ledgers such an interface. The multicast section is refused even at its default ("Template incompatible with VXOA version").

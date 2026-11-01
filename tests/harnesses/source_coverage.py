@@ -66,7 +66,7 @@ class Seen:
             raw = join(raw, seg)
         return ".".join(out)
 
-    def untaken(self, entries: Set[str] = frozenset()) -> Set[str]:  # type: ignore[assignment]
+    def untaken(self, entries: Set[str] = frozenset()) -> Set[str]:  # type: ignore[assignment]  guard-ok: test harness wraps dict/list and Capture.data to trace reads
         """Leaves never taken, less those found only under entries (top-level keys) that a ledger line explains."""
         keep = {p for p in self.leaves if not (self.tops.get(p) and self.tops[p] <= entries)}
         return {self.name(p) for p in keep} - {self.name(p) for p in self.taken}
@@ -121,13 +121,13 @@ class TDict(dict):
     def __iter__(self):  # not a take (ctx.unmapped lists keys); defined so that dict(x) and {**x} copy through keys() and [], which are takes
         return iter(list(dict.keys(self)))
 
-    def items(self):  # type: ignore[override]
+    def items(self):  # type: ignore[override]  guard-ok: test harness wraps dict/list and Capture.data to trace reads
         self._seen.collections.add(self._path)
         for k in list(dict.keys(self)):
             self._take(k)
         return super().items()
 
-    def values(self):  # type: ignore[override]
+    def values(self):  # type: ignore[override]  guard-ok: test harness wraps dict/list and Capture.data to trace reads
         self._seen.collections.add(self._path)
         for k in list(dict.keys(self)):
             self._take(k)
@@ -183,7 +183,7 @@ def run_one(capture: Path, target: str) -> Tuple[Dict[str, Set[str]], List[Dict[
     def data(self: Any, ident: str, prefer: str = "live") -> Any:
         return wrap(real(self, ident, prefer), "", seen[ident])
 
-    translate.Capture.data = data  # type: ignore[method-assign]
+    translate.Capture.data = data  # type: ignore[method-assign]  guard-ok: test harness wraps dict/list and Capture.data to trace reads
     try:
         with tempfile.TemporaryDirectory() as tmp, redirect_stdout(StringIO()), redirect_stderr(StringIO()) as err:
             code = translate.main(["--capture", str(capture), "--site-type", "coverage", "--out", tmp, "--target-release", target])
@@ -194,7 +194,7 @@ def run_one(capture: Path, target: str) -> Tuple[Dict[str, Set[str]], List[Dict[
     except Exception as error:  # a crash is a finding of its own
         return {}, [], "{}: {}".format(type(error).__name__, error)
     finally:
-        translate.Capture.data = real  # type: ignore[method-assign]
+        translate.Capture.data = real  # type: ignore[method-assign]  guard-ok: test harness wraps dict/list and Capture.data to trace reads
     entries = explained_entries(ledger)
     return {ident: s.untaken(entries.get(ident, set())) for ident, s in seen.items() if ident not in translate.NOT_SETTINGS}, ledger, None
 

@@ -458,6 +458,8 @@ observed:
   - vxlan.vniVrfMaps.zone
   - vxlan.vtepSrcInterface
 verified:
+  # 2026-11-01: a passthrough tunnel's segment; /validate 9.7.1 accepted the clean-box build with `segment: corp` and refused a misspelt key
+  - tunnelConfiguration.tunnels.segment
   # 2026-10-31: IPv6 router advertisement, applied live 23 times on the virtual lab with no post-apply diff (prefix_id in 6 of them)
   - deploymentInfo.raInfo
   - deploymentInfo.raInfo.hoplimit

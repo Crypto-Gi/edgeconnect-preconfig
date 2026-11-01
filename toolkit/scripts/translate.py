@@ -23,7 +23,7 @@ from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, RunContext, dump_yaml, find
 from generate import generate  # noqa: E402
 from decisions import list_mode, make_decide, propose  # noqa: E402
 from variables import classify, only_at, read_sheet, sheet_items, write_sheet  # noqa: E402  guard-ok: imported after the sys.path insert
-from mappers import ECOS_RELEASE, ITEM_ERRORS, MAPPERS, Ctx, cli_lines, failed_read, guarded, id_names, item_failed, own_sharing, passthrough_max_bandwidth, Unreadable, unreadable_read  # noqa: E402  guard-ok: imported after the sys.path insert
+from mappers import ECOS_RELEASE, ITEM_ERRORS, MAPPERS, Ctx, cli_lines, err_text, failed_read, guarded, id_names, item_failed, own_sharing, passthrough_max_bandwidth, read_failed, Unreadable, unreadable_read  # noqa: E402  guard-ok: imported after the sys.path insert
 
 HARDEN = {0: "All", 1: "harden", 2: "stateful", 3: "statefulSNAT"}  # verified via Swagger + live apply-and-diff
 NETWORK_ROLE = {0: "non-hub", 1: "hub", 3: "nrhub"}  # 0/1 verified across Orchestrators; 3 = nrhub: set live on the full-coverage lab, Pass 1, 2026-10-31
@@ -225,7 +225,7 @@ def drop_template_fields(out: Dict[str, Any], owned: Dict[str, Dict[Optional[str
             gone = set()
             if name == "bfd":  # /validate: "MinTxInterval of BFD ... must be a number between 300 and 5000": an entry needs its timers
                 if any(f in e for e in value for f in by_segment.get(ids_of(vrfs).get(e.get("segment")), set())):
-                    note("template bfd", "mapped", section, "the appliance's BFD timers are written although the 'bfd' template sets them: the format requires them in every entry")
+                    note("template bfd", "mapped", section, "the appliance's BFD timers (minTxInterval, minRxInterval, detectMultiplier) are written although the 'bfd' template sets them: the format requires them in every entry")
                 continue
             if name == "vrrp":
                 targets = [(None, e) for e in value.get("vrrpEntries", [])]
@@ -634,11 +634,11 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
         if ha_if and ha_mode_entries:
             unreadable_read(ctx, "ha-groups", "haConfig is not written", "deploymentInfo.haConfig")
         ha_groups, groups_read = {}, False
-    my_ha = None
+    my_ha, my_ha_key = None, None
     for key, group in ha_groups.items():
         with guarded(ctx, "ha-groups[{}]".format(key), "deploymentInfo.haConfig"):
             if any(m.get("nePk") == nepk for m in group.get("appliances", [])):
-                my_ha = group
+                my_ha, my_ha_key = group, key
                 break
     try:
         if write_di and ha_if and my_ha and ha_mode_entries:
@@ -702,7 +702,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
         item_failed(ctx, "ha-groups, deployment.modeIfs[haIf]", "deploymentInfo.haConfig", err)
     if write_di and my_ha and not (ha_if and ha_mode_entries):  # lab 2026-11-01: in an EdgeHA group with no HA interface in the deployment
         note("ha-groups", "unresolved", "deploymentInfo.haConfig", "the appliance is in EdgeHA group {} but its deployment has {}: haConfig is not written; "
-             "set the HA pairing by hand".format(my_ha.get("id", "?"), "no HA interface (haIf)" if not ha_if else "no HA subinterfaces on '{}'".format(ha_if)))
+             "set the HA pairing by hand".format(my_ha_key, "no HA interface (haIf)" if not ha_if else "no HA subinterfaces on '{}'".format(ha_if)))
     elif write_di and groups_read and not my_ha and ha_if and ha_mode_entries:  # lab 2026-11-01: haIf set, but the appliance is in no HA group
         note("ha-groups", "unresolved", "deploymentInfo.haConfig", "the deployment has EdgeHA on '{}' ({} HA subinterfaces, left out of deploymentInterfaces) but the appliance "
              "is in no Orchestrator EdgeHA group: haConfig is not written; set the HA pairing by hand".format(ha_if, len(ha_mode_entries)))
@@ -768,7 +768,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
             note("mapper " + section, "not-readable", section, "the {} section is not written: {}; check it by hand".format(section, err))
             continue
         except Exception as err:
-            note("mapper " + section, "toolkit-error", section, "the {} mapper failed ({}: {}), so the section was not written: a toolkit bug to report, not a limit of preconfig".format(section, type(err).__name__, err))
+            note("mapper " + section, "toolkit-error", section, "the {} mapper failed ({}), so the section was not written: a toolkit bug to report, not a limit of preconfig".format(section, err_text(err)))
             continue
         if value is not None:
             out[section] = value
@@ -779,6 +779,13 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
             for section in FIELD_TEMPLATES[name]["sections"]:
                 out.pop(section, None)
             item_failed(ctx, "template " + name, ", ".join(FIELD_TEMPLATES[name]["sections"]), err)
+    # fuzz 2026-11-01: a failed read that no mapper named dropped its section with no line (approver: name the section it feeds)
+    READ_SECTIONS = {"passthrough-tunnels": "tunnelConfiguration, ipSlaRule", "ids-profile-state": "idsIpsConfig", "appexpress-group-association": "appExpressGroups"}
+    for ident in sorted({i.get("id") for i in getattr(cap, "index", None) or [] if isinstance(i, dict)}):
+        if read_failed(cap, ident) and not any(ident in re.split(r"[\s,\[]+", str(e["item"])) for e in ledger):
+            fed = READ_SECTIONS.get(ident)  # gate 2026-11-01: other reads may feed nothing directly (dhcp-* when /deployment was read)
+            note(ident, "not-readable", fed or "", "the {} read failed (no usable live or cached copy), so {}; check by hand what it holds".format(
+                ident, "nothing built from it is written" if fed else "anything that needs it may be incomplete"))
     order = list(load_yaml(DEFAULT_TEMPLATE))
     return {k: out[k] for k in sorted(out, key=lambda s: order.index(s) if s in order else 999)}
 
@@ -804,6 +811,8 @@ TEMPLATE_OMISSIONS = {
     "deploymentInfo.deploymentInterfaces.addressingMode",
     "ipSlaRule.ruleEntries.ipslaMonitor.tunnelName", "ipSlaRule.ruleEntries.ipslaMonitor.sourceInterfaceName",
     "ipSlaRule.ruleEntries.ipslaMonitor.forceDnsThroughProbePath", "ipSlaRule.ruleEntries.downAction.subnetMetricDelta",
+    # documented but only commented out ("#segment: Default") in every bundled template; /validate 9.7.1 accepts it (lab, clean box, 2026-11-01)
+    "tunnelConfiguration.tunnels.segment",
 }
 
 

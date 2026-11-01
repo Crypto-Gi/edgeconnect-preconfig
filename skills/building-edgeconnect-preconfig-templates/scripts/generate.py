@@ -39,17 +39,19 @@ class Builder:
         self.lines: List[str] = []
         self.secret_paths: set = set()
 
-    def find_secrets(self, value: Any, path: str = "") -> None:
+    def find_secrets(self, value: Any, path: str = "", secret: bool = False) -> None:
+        if secret:  # every leaf under a secret key is one, a list or mapping included (fuzz 2026-11-01; as common.redact_secrets)
+            self.secret_paths.add(path)
         if isinstance(value, dict):
             server = any(s in value for s in SERVER_SIBLINGS)
             for key, item in value.items():
                 sub = "{}.{}".format(path, key) if path else str(key)
                 if SECRET.search(str(key)) or (key == "key" and server) or (isinstance(item, str) and item.startswith("<SECRET:")):  # VRRP authenticationString
                     self.secret_paths.add(sub)
-                self.find_secrets(item, sub)
+                self.find_secrets(item, sub, secret or SECRET.search(str(key)) is not None or (key == "key" and server))
         elif isinstance(value, list):
             for index, item in enumerate(value):
-                self.find_secrets(item, "{}[{}]".format(path, index))
+                self.find_secrets(item, "{}[{}]".format(path, index), secret)
 
     def column(self, path: str, value: Any) -> str:
         name = self.names.get(path) or re.sub(r"\[(\d+)\]", r".\1", path)

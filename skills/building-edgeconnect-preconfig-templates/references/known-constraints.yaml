@@ -204,9 +204,15 @@ structural_and_apply_constraints:
   # --- 2026-11-01 full-coverage lab, Pass 3 (ECOS 9.6.2.1_107093, Orchestrator 9.7.1) ---
   - section: interfaceConfig
     enforced_by: apply
-    rule: "A fixed interfaceSpeed with interfaceDuplex auto passes /validate and the apply reports COMPLETED, but ECOS 9.6.2.1 keeps the interface's old speed and duplex. The same speeds with duplex full apply exactly."
-    seen: "no error: apply COMPLETED, speed and duplex unchanged on the appliance (10/auto, 10000/auto)"
+    rule: "A fixed interfaceSpeed with interfaceDuplex auto passes /validate and the apply reports COMPLETED, but ECOS 9.6.2.1 never keeps duplex auto. From an auto/auto interface the speed applies and duplex becomes full; from an interface with a fixed speed and duplex the whole entry is ignored. The same speeds with duplex full or half apply exactly (clean box, 2026-11-01)."
+    seen: "no error: apply COMPLETED; reads back speed/full from auto/auto, or the old speed and duplex from a fixed speed (10/auto, 10000/auto)"
     fix: "Write duplex full (or half) with a fixed speed, or check the interface after apply; translate ledgers such an interface."
+
+  - section: deploymentInfo
+    enforced_by: apply
+    rule: "On ECOS 9.6.2.1 an IPv6 RA routerpreference other than medium (low, high) passes /validate and the apply reports COMPLETED, but the appliance keeps medium, on create and on modify (clean box, 2026-11-01). ECOS 9.7.1 keeps it."
+    seen: "no error: apply COMPLETED, routerpreference reads back medium"
+    fix: "Expect medium on ECOS 9.6.2.1; check the RA after apply if another preference matters."
 
   - section: multicast
     enforced_by: apply
