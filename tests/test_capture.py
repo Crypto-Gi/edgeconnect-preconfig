@@ -70,6 +70,28 @@ class CaptureTest(unittest.TestCase):
         self.assertEqual({c[0] for c in client.calls}, {"GET"})
         self.assertEqual(json.loads((final / "run.json").read_text())["write_requests"], 0)
 
+    def test_segment_route_tables_are_read_per_segment(self):
+        class Client(FakeClient):
+            def request(self, method, path, query=None, expected_status=(200,), expect_json=True):
+                url = (query or {}).get("url", "")
+                if path == "/subnets/all":
+                    self.calls.append((method, path, dict(query or {})))
+                    return json.dumps({"subnets": {"0": {}, "1": {}, "3": {}}}).encode()
+                if url.startswith("subnets3/configured/vrfs/"):
+                    self.calls.append((method, path, dict(query or {})))
+                    if url.endswith("/3"):
+                        raise ServerError("boom")
+                    return json.dumps({"prefix": {"10.1.0.0/24": {"advert": True, "advert_bgp": True, "advert_ospf": False}}}).encode()
+                return super().request(method, path, query, expected_status, expect_json)
+        client = Client()
+        final = self.run_capture(client, ["subnets-all-vrfs", "static-routes-configured-vrfs"])
+        urls = [c[2].get("url") for c in client.calls if c[2].get("url", "").startswith("subnets3")]
+        self.assertEqual(urls, ["subnets3/configured/vrfs/1", "subnets3/configured/vrfs/3"])  # never the Default segment
+        body = json.loads((final / "capture" / "static-routes-configured-vrfs.live.json").read_text())["data"]
+        self.assertEqual(list(body), ["1"])
+        item = next(i for i in json.loads((final / "capture-index.json").read_text()) if i["id"] == "static-routes-configured-vrfs")
+        self.assertEqual((item["status"], item["failed_segments"]), ("ok", ["3"]))
+
     def test_recapture_rereads_orchestrator_scope_unless_reuse_is_asked(self):
         capture.client_for = lambda nickname: client
         out = Path(tempfile.mkdtemp())

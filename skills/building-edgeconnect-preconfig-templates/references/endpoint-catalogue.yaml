@@ -119,6 +119,8 @@ endpoints:
      notes: "GET passthrough to the appliance REST API; live only"}
   - {id: static-routes-configured, path: /appliance/rest, scope: appliance, source: live, params: {url: subnets3/configured}, sections: [localRoutes, segmentLocalRoutes],
      notes: "GET passthrough; configured static routes keyed prefix > nhop > interface, with comment and the advert_bgp/advert_ospf flags that /subnets reports as false (2026-10-17 round trip)"}
+  - {id: static-routes-configured-vrfs, path: /appliance/rest, scope: appliance, source: live, params: {url: "subnets3/configured/vrfs/{vrf}"}, per_segment: true, sections: [segmentLocalRoutes],
+     notes: "GET passthrough, one read per non-Default segment in /subnets/all; stored as {segment id: table}, each table shaped like subnets3/configured (lab 2026-11-01: /subnets/all has no configured advert flags)"}
   - {id: running-config, path: /appliance/backup, scope: appliance, source: backup, params: {runningConfig: "true"}, reduce: latest-backup,
      sections: [ecLicensing, poE, managementIp, managementRoutes, flowRedirection, usblte, vxlan, interfaceConfig, availabilityTimeSettings, idsIpsConfig],
      notes: "CLI running-config text of the newest stored backup (can be older than the live configuration; the capture records backupTime). Secrets and hashes are redacted"}

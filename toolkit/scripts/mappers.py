@@ -556,7 +556,7 @@ def m_vrrp(ctx: Ctx) -> Optional[Dict[str, Any]]:
                 "tracker": v.get("tracker") or False, "version": v["version"], "preemption": v["preempt"],
             }
             if v.get("auth"):  # a capture from before auth was redacted holds the key in clear: never copy it
-                entry["authenticationString"] = v["auth"] if str(v["auth"]).startswith("<SECRET:") else "<SECRET:vrrp.auth>"
+                entry["authenticationString"] = "<SECRET:vrrp.auth>"  # one name whatever the capture path, so a re-capture is no diff
             if v.get("desc"):
                 entry["description"] = v["desc"]
             entry.update({"packetTrace": v["pkt_trace"], "holddownTimer": v["holddown"]})
@@ -660,10 +660,18 @@ def m_segmentOspfConfig(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     return out or None
 
 
-def configured_route(ctx: Ctx, prefix: Any, next_hop: Any, if_name: Any) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+def configured_table(ctx: Ctx, vrf: str) -> Optional[Dict[str, Any]]:
+    """subnets3/configured of one segment: the Default table, or subnets3/configured/vrfs/<id>; None when it was not read."""
+    if vrf == "0":
+        return ctx.data("static-routes-configured")
+    table = (ctx.data("static-routes-configured-vrfs") or {}).get(vrf)
+    return table if isinstance(table, dict) else None
+
+
+def configured_route(ctx: Ctx, prefix: Any, next_hop: Any, if_name: Any, vrf: str = "0") -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """The route as configured (subnets3/configured): (prefix entry with the advert flags, interface entry with the comment).
     /subnets has no comment and reports advert_bgp/advert_ospf as false."""
-    entry = (((ctx.data("static-routes-configured") or {}).get("prefix") or {}).get(prefix) or {})
+    entry = (((configured_table(ctx, vrf) or {}).get("prefix") or {}).get(prefix) or {})
     return entry, ((((entry.get("nhop") or {}).get(next_hop or "") or {}).get("interface") or {}).get(if_name or "") or {})
 
 
@@ -724,13 +732,14 @@ def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.
         if_name = None
     zone_id = conf.get("zone_id", st.get("zone_id"))  # the state reports the zone of the interface in use
     zone = None if str(zone_id) in ("65534", "") else ctx.zone(vrf, zone_id, "subnets", target + "[].zone")
-    # subnets3/configured holds the Default segment only and ignores segment parameters (ECOS 9.6.2.1)
-    cfg_prefix, cfg = configured_route(ctx, st["prefix"], next_hop, cfg_if) if vrf == "0" else ({}, {})
+    # subnets3/configured holds the Default segment; another segment's table is subnets3/configured/vrfs/<id> (lab 2026-11-01, ECOS 9.6.2.1 and 9.7.1)
+    cfg_prefix, cfg = configured_route(ctx, st["prefix"], next_hop, cfg_if, vrf)
     route = {"routeIpSubnet": st["prefix"], "nextHop": nul(next_hop), "interfaceName": nul(if_name), "metric": st["metric"], "advertise": cfg_prefix.get("advert", st["advert"]),
              "advertiseToBgp": cfg_prefix.get("advert_bgp", st["advert_bgp"]), "advertiseToOspf": cfg_prefix.get("advert_ospf", st["advert_ospf"]), "zone": zone,
              "routeLabel": ctx.route_label(st.get("label"), "subnets", "route {}".format(st["prefix"]), target + ".routeLabel")}
-    if vrf != "0":
-        ctx.note("subnets-all-vrfs[{}]".format(vrf), "mapped", "segmentLocalRoutes.routes", "route {}: advertise flags taken from route state, which for Default routes disagrees with the configured table (assumption: confirm the flags)".format(st["prefix"]))
+    if vrf != "0" and configured_table(ctx, vrf) is None:
+        ctx.note("subnets-all-vrfs[{}]".format(vrf), "mapped", "segmentLocalRoutes.routes", "route {}: the segment's configured table (subnets3/configured/vrfs/{}) was not read, so the advertise flags "
+                 "are taken from route state, which reports them as false (assumption: confirm the flags)".format(st["prefix"], vrf))
     for key, value in (("comment", cfg.get("comment") or conf.get("comment")), ("tag", cfg.get("dir") or conf.get("tag"))):  # subnets3 calls the tag dir, /subnets/all calls it tag
         if value:
             route[key] = value
@@ -1145,6 +1154,8 @@ def m_ipSlaRule(ctx: Ctx) -> Optional[Dict[str, Any]]:
                     monitor.update({"proxyAddress": op["proxyAddress"], "proxyPort": int(op.get("proxyPort") or 0)})
                 if op.get("user-agent"):
                     monitor["userAgent"] = op["user-agent"]
+                if str(op.get("force-dns")).lower() == "true":  # lab 2026-11-01: an http monitor carries it too
+                    monitor["forceDnsThroughProbePath"] = True
             else:
                 monitor = {"monitorType": "ping", "ipAddress": op.get("ip-monitor-ip"), "keepAlive": int(op.get("ka", 1)), "samplingWindow": int(op.get("sample-int", 300)),
                            "monitorUpThreshold": int(op.get("up-thresh", 3)), "monitorDownThreshold": int(op.get("dn-thresh", 30)),

@@ -2,6 +2,11 @@
 
 ## Unreleased (`gui` branch)
 
+- **An IP SLA http/https monitor keeps "force DNS through the probe path"** (`forceDnsThroughProbePath`). Only a ping monitor carried it, and the http monitor's setting was dropped with no ledger line (full-coverage lab, Pass 2).
+- **A non-Default segment's route takes its advertise flags from the segment's own configured table.** Capture now reads `subnets3/configured/vrfs/<id>` for every segment with routes (one read per segment; segments whose read fails are listed in capture-index.json). Before, those flags came from route state, which reports them all as false, so a segment route that advertises to BGP or OSPF was written as not advertising (lab: T/T/F written as F/F/F). A capture without the new read falls back as before, with its assumption line.
+- **The VRRP key placeholder is always `<SECRET:vrrp.auth>`**, whatever the capture path, so a re-capture no longer shows a changed placeholder.
+- **Source coverage check** (`tests/harnesses/source_coverage.py`): runs translate.py with every read wrapped and lists each captured field the converter never took and no ledger line names. Each one must be mapped, ledgered, or put on `tests/harnesses/source_ignore.yaml` with its reason. This is the other half of check 11: check 11 proves every "mapped" line has its YAML value, this proves every source field is accounted for.
+
 ## 1.4.0-rc.3 (2026-11-01, pre-release from the `gui` branch)
 
 - **Security: the VRRP key is redacted.** `/vrrp` returns it as `auth`, which no secret rule matched, so captures held it in clear (found by the full-coverage lab). `auth`, `authenticationString` and the CLI line `vrrp <n> authentication <key>` are now redacted at capture, and the converter writes a `<SECRET:>` placeholder even from an older capture that still holds the key, which becomes a secret CSV column like any other placeholder. It never reached the YAML or the CSVs: the unseen-field check kept VRRP groups with a key out. Check stored captures by hand.

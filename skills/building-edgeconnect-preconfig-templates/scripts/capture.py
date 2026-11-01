@@ -59,6 +59,23 @@ class Reader:
             time.sleep(self.pause)
 
 
+def per_segment_read(reader: Reader, path: str, query: Dict[str, Any], segment_ids: List[str]) -> Dict[str, Any]:
+    """One GET per segment id ({vrf} in the url parameter), as one read {segment id: body}; segments whose read failed are listed, and
+    the read fails only when every segment's did (the mapper falls back for a segment missing from the body and ledgers it)."""
+    data: Dict[str, Any] = {}
+    failed: List[str] = []
+    last: Dict[str, Any] = {}
+    for vrf in segment_ids:
+        last = reader.get(path, dict(query, url=str(query["url"]).format(vrf=vrf)))
+        if last["ok"]:
+            data[vrf] = last["data"]
+        else:
+            failed.append(vrf)
+    if failed and not data:
+        return dict(last, failed=failed)
+    return {"ok": True, "data": data, "failed": failed}
+
+
 def find_appliance(appliances: List[Dict[str, Any]], wanted: str) -> Dict[str, Any]:
     hits = [a for a in appliances if wanted in (str(a.get("nePk") or a.get("id")), a.get("hostName"))]
     if len(hits) != 1:
@@ -119,6 +136,7 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
                     pass
 
         secret_paths: Dict[str, List[str]] = {}
+        segment_ids: List[str] = []  # non-Default segments with routes, from /subnets/all (the catalogue reads it before the per-segment reads)
         for entry in load_yaml(CATALOGUE)["endpoints"]:
             if only and entry["id"] not in only:
                 continue
@@ -145,7 +163,9 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
                     payload = orch_cache[name]
                     item["reused"] = True
                 else:
-                    result = reader.get(entry["path"], query)
+                    result = per_segment_read(reader, entry["path"], query, segment_ids) if entry.get("per_segment") else reader.get(entry["path"], query)
+                    if result.get("failed"):
+                        item["failed_segments"] = result["failed"]
                     if not result["ok"] and result["error"] == "PermissionDeniedError" and entry["path"] in MUST_READ:
                         raise Stop("GET {} refused (HTTP 403): the API key may not read the {}, so the preconfig would lose them; "
                                    "give the key read rights for them and capture again".format(entry["path"], MUST_READ[entry["path"]]))
@@ -158,6 +178,8 @@ def capture(orchestrator: str, appliance: str, role: str, pause: float, out_root
                         latest = max(payload, key=lambda b: int(b.get("backupTime") or 0))
                         payload = {k: latest.get(k) for k in ("id", "backupTime", "swVersion", "fileName", "runningConfig")}
                         payload["backupCount"] = len(result["data"])
+                if entry["id"] == "subnets-all-vrfs" and isinstance(payload, dict) and isinstance(payload.get("subnets"), dict):
+                    segment_ids = sorted(str(k) for k in payload["subnets"] if str(k) != "0")
                 data, secrets = redact_secrets(payload)
                 write_json(tmp / "capture" / name, {
                     "orchestrator": orchestrator, "release": release, "nePk": nepk, "label": label,

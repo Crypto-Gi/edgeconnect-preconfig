@@ -1,0 +1,4 @@
+# Source leaves the converter never takes on purpose (tests/harnesses/source_coverage.py, fuzz oracle 2).
+# read: catalogue id ("*" for any); path: the key path as the report prints it, "*" matching anything ; why: the reason, required.
+ignore:
+  - {read: deployment, path: "modeIfs[].applianceIPs[].version", why: "the address family is taken from the address itself where the format needs it (ipVersion, addressingMode)"}
