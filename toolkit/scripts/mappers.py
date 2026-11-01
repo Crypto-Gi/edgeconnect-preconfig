@@ -555,8 +555,8 @@ def m_vrrp(ctx: Ctx) -> Optional[Dict[str, Any]]:
                 "virtualIpAddress": v["vipaddr"], "advertisementTimer": v["adv_timer"], "priority": v["priority"],
                 "tracker": v.get("tracker") or False, "version": v["version"], "preemption": v["preempt"],
             }
-            if v.get("auth"):
-                entry["authenticationString"] = v["auth"]
+            if v.get("auth"):  # a capture from before auth was redacted holds the key in clear: never copy it
+                entry["authenticationString"] = v["auth"] if str(v["auth"]).startswith("<SECRET:") else "<SECRET:vrrp.auth>"
             if v.get("desc"):
                 entry["description"] = v["desc"]
             entry.update({"packetTrace": v["pkt_trace"], "holddownTimer": v["holddown"]})
@@ -701,6 +701,11 @@ def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.
     conf = e.get("config") or {}
     if managed(conf) or managed(st):  # Orchestrator services (third-party cloud integrations, ...) create these themselves
         ctx.note("subnets", "orchestrator-managed", target, "skipped route {} created by Orchestrator (gms_marked)".format(st.get("prefix")))
+        return None
+    vti = next((k for k, v in ((ctx.data("vtis") or {}) if isinstance(ctx.data("vtis"), dict) else {}).items() if isinstance(v, dict) and v.get("auto_distribute")
+                and "{}/32".format(v.get("ipaddr")) == st.get("prefix") and str(v.get("vrf_id", 0)) == vrf), None)
+    if vti:  # lab 2026-11-01: ECOS adds this route itself (comment "auto distributable VTI subnet route", configured, ifName default)
+        ctx.note("subnets", "default-omitted", target, "route {} is the one ECOS creates for {}'s auto-distribute setting; written with the VTI, not as a static route".format(st["prefix"], vti))
         return None
     if not st.get("nextHop") and not st.get("ifName") and not conf:
         ctx.note("subnets", "unresolved", target, "route {} has neither next hop nor interface in its state and no route config, so it is not written".format(st.get("prefix")))

@@ -52,6 +52,12 @@ class MapperRules(unittest.TestCase):
         self.assertEqual([x["zone"] for x in out["loopbacks"]], ["TRUSTED", None, None, None])  # found once; nowhere; two names for one id; none
         self.assertEqual([(n["item"], n["disposition"]) for n in notes if "zone" in n["target"]], [("loopbacks[lo2]", "context"), ("loopbacks[lo3]", "unresolved"), ("loopbacks[lo4]", "unresolved")])
 
+    def test_a_vrrp_key_is_never_copied_in_clear(self):
+        group = {"groupId": 1, "interface": "lan0", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 100, "priority": 101, "tracker": False, "version": 3, "preempt": True,
+                 "desc": "", "pkt_trace": False, "holddown": 10}
+        for auth, want in (("<SECRET:$.vrrp[0].auth>", "<SECRET:$.vrrp[0].auth>"), ("LabKey1", "<SECRET:vrrp.auth>")):  # an older capture holds it in clear
+            self.assertEqual(m_vrrp(ctx({"vrrp": [dict(group, auth=auth)]})[0])["vrrpEntries"][0]["authenticationString"], want)
+
     def test_vrrp_drops_runtime_state(self):
         c, notes = ctx({"vrrp": [{"groupId": 1, "interface": "lan0", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 100, "priority": 101, "tracker": False, "version": 3, "preempt": True,
                                   "auth": "", "desc": "", "pkt_trace": False, "holddown": 10, "mode": "master", "uptime": "1 day", "vmac": "00:00:5e:00:01:01"}]})
@@ -769,6 +775,19 @@ class AuditRegressions(unittest.TestCase):
         self.assertEqual((r["advertiseToBgp"], r["comment"], r["tag"]), (True, "printers", "FROM_LAN"))  # /subnets reports advert_bgp false and has no comment
         c, _ = ctx({"deployment": DEP, "subnets": {"subnets": {"entries": [{"state": route}]}}})
         self.assertNotIn("comment", m_localRoutes(c)["routes"][0])
+
+    def test_the_route_ecos_makes_for_an_auto_distribute_vti_is_not_a_static_route(self):
+        """Lab Pass 1, 0.NE vti1: ECOS adds <vti address>/32 as a configured route; written as a static route it would be made twice."""
+        from mappers import m_localRoutes
+        auto = {"configured": True, "local": True, "automatic": False, "prefix": "198.19.10.1/32", "nextHop": "", "ifName": "", "metric": 50, "advert": False,
+                "advert_bgp": False, "advert_ospf": False, "zone_id": "65534", "label": "0"}
+        conf = {"prefix": "198.19.10.1/32", "ifName": "default", "nextHop": "0.0.0.0", "comment": "auto distributable VTI subnet route", "gms_marked": False, "zone_id": 65534}
+        user = dict(auto, prefix="198.19.10.9/32")
+        for distribute, want in ((True, ["198.19.10.9/32"]), (False, ["198.19.10.1/32", "198.19.10.9/32"])):
+            c, notes = ctx({"deployment": DEP, "vtis": {"vti1": dict(VTI, ipaddr="198.19.10.1", auto_distribute=distribute)},
+                            "subnets": {"subnets": {"entries": [{"state": auto, "config": conf}, {"state": user, "config": dict(conf, prefix="198.19.10.9/32")}]}}})
+            self.assertEqual([r["routeIpSubnet"] for r in m_localRoutes(c)["routes"]], want)
+            self.assertEqual(any("vti1's auto-distribute" in n["note"] for n in notes), distribute)
 
     def test_next_hop_zero_route_is_written_from_its_config(self):
         from mappers import m_localRoutes

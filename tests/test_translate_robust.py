@@ -708,6 +708,12 @@ class NetworkRole(unittest.TestCase):
         self.assertFalse([e for e in ledger if e["target"] == "applianceInfo.networkRole" and e["disposition"] != "mapped"])
 
 
+    def test_site_priority_is_ledgered_not_dropped(self):
+        """Lab Pass 1 (0.NE 100, 1.NE 10): no preconfig field takes it, and it was dropped with no ledger line."""
+        out, ledger = translate(lambda d: d["appliance"].update(sitePriority=100))
+        self.assertNotIn("sitePriority", out["applianceInfo"])
+        self.assertEqual([(e["disposition"], "100" in e["note"]) for e in ledger if e["target"] == "applianceInfo.sitePriority"], [("outside-preconfig", True)])
+
 class YamlTwelveNumbers(unittest.TestCase):
     """Text a YAML 1.2 reader takes for a number is quoted in every YAML the toolkit writes (full-coverage lab: zipCode 08034 and 1e5 unquoted)."""
 
@@ -732,6 +738,27 @@ class YamlTwelveNumbers(unittest.TestCase):
         self.assertIn("address2: '1e5'", text)
         self.assertIn("zipCode: '08034'", dump({"location": {"zipCode": "08034"}}))
 
+
+    def test_custom_tag_values_come_back_as_the_same_text(self):
+        """Lab Pass 1 (0.NE w38) set tags 08034, 1e5, 0x1F, yes and no; the probe that /validate accepted was dumped by PyYAML, not by the converter."""
+        import json
+        import shutil
+        import tempfile
+        import translate
+        from common import parse_yaml
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(tmp))
+        cap = tmp / "cap"
+        shutil.copytree(str(Path(__file__).resolve().parent / "fixtures" / "compare" / "captures" / "base"), str(cap))
+        values = ["08034", "1e5", "0x1F", "yes", "no", "0o17", "1:1", "~", "null", "-.inf"]
+        (cap / "capture" / "custom-tags.cached.json").write_text(json.dumps({"data": {str(i + 1): {"name": "t{}".format(i + 1), "value": v} for i, v in enumerate(values)}}))
+        index = json.loads((cap / "capture-index.json").read_text())
+        (cap / "capture-index.json").write_text(json.dumps(index + [{"id": "custom-tags", "label": "cached", "status": "ok", "file": "capture/custom-tags.cached.json"}]))
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            translate.main(["--capture", str(cap), "--site-type", "t", "--out", str(tmp / "out")])
+        text = (tmp / "out" / "reference.yaml").read_text()
+        tags = parse_yaml(text)["customApplianceTags"]["customApplianceTagsInterfaces"]  # the toolkit's YAML 1.2 reader, like Orchestrator's
+        self.assertEqual([t["value"] for t in tags], values)
 
 class ValidateRejectsNamedOffline(unittest.TestCase):
     """Values an appliance holds but /validate rejects (full-coverage lab, Pass 1) are named by check.py, never changed or invented."""
@@ -783,7 +810,8 @@ class LedgerNeverClaimsWhatIsNotWritten(unittest.TestCase):
         data["vtis"] = {"vti1": VTI}
         for target in ("9.6.4.40046", "9.7.1.42046", "10.0.0.40516"):
             ledger = []
-            out = prune(build(FakeCap(data), ledger), allowed_paths(target), ledger, types=template_types(target), observed=observed_paths(), enums=template_enums(target))
+            unseen = {p for p in observed_paths() if not p.startswith("virtualTunnelInterface")}  # as before the lab verified VTIs
+            out = prune(build(FakeCap(data), ledger), allowed_paths(target), ledger, types=template_types(target), observed=unseen, enums=template_enums(target))
             self.assertNotIn("virtualTunnelInterface", out)
             reconcile(ledger, out)
             self.assertEqual(unwritten_mapped(ledger, out), [], target)
@@ -806,7 +834,8 @@ class LedgerNeverClaimsWhatIsNotWritten(unittest.TestCase):
         (cap / "capture" / "vtis.live.json").write_text(json.dumps({"data": {"vti1": VTI}}))
         index = json.loads((cap / "capture-index.json").read_text())
         (cap / "capture-index.json").write_text(json.dumps(index + [{"id": "vtis", "label": "live", "status": "ok", "file": "capture/vtis.live.json"}]))
-        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+        unseen = {p for p in translate.observed_paths() if not p.startswith("virtualTunnelInterface")}  # as before the lab verified VTIs
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"), mock.patch("translate.observed_paths", return_value=unseen):
             translate.main(["--capture", str(cap), "--site-type", "t", "--out", str(tmp / "out")])
         ledger = json.loads((tmp / "out" / "ledger.json").read_text())["entries"]
         self.assertEqual([(e["disposition"], e.get("converted")) for e in ledger if e["target"] == "virtualTunnelInterface"], [("unresolved", True)])

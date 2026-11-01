@@ -493,3 +493,116 @@ verified:
   - localRoutes.routes.routeLabel
   - localRoutes.routes.tag
   - localRoutes.routes.zone
+  # 2026-11-01: virtual tunnel interfaces, applied live in Pass 1 (0.NE w17, 1.NE w18); /validate on the virtual lab's 9.7.1.42046 Orchestrator accepted the build with it put back, alone and with all others (full-coverage lab, 2026-11-01)
+  - virtualTunnelInterface
+  - virtualTunnelInterface.vtis
+  - virtualTunnelInterface.vtis.adminStatus
+  - virtualTunnelInterface.vtis.autoDistribute
+  - virtualTunnelInterface.vtis.behindNat
+  - virtualTunnelInterface.vtis.interfaceId
+  - virtualTunnelInterface.vtis.interfaceLabel
+  - virtualTunnelInterface.vtis.interfaceLabelAlias
+  - virtualTunnelInterface.vtis.interfaceType
+  - virtualTunnelInterface.vtis.ipAddressAliasMask
+  - virtualTunnelInterface.vtis.ipAddressMask
+  - virtualTunnelInterface.vtis.passthroughTunnel
+  - virtualTunnelInterface.vtis.role
+  - virtualTunnelInterface.vtis.segment
+  - virtualTunnelInterface.vtis.zone
+  # 2026-11-01: custom appliance tags, applied live in Pass 1 (0.NE w38, 8 tags incl. 08034, 1e5, 0x1F, yes/no and a 255/1023-char tag); /validate on the virtual lab's 9.7.1.42046 Orchestrator accepted the build with it put back, alone and with all others (full-coverage lab, 2026-11-01)
+  - customApplianceTags
+  - customApplianceTags.customApplianceTagsInterfaces
+  - customApplianceTags.customApplianceTagsInterfaces.key
+  - customApplianceTags.customApplianceTagsInterfaces.tagId
+  - customApplianceTags.customApplianceTagsInterfaces.value
+  # 2026-11-01: secure web services, applied live in Pass 1 (0, 1 and 2.NE w44); /validate on the virtual lab's 9.7.1.42046 Orchestrator accepted the build with it put back, alone and with all others (full-coverage lab, 2026-11-01)
+  - secureWebServicesConfig
+  - secureWebServicesConfig.ipReputationConfig
+  - secureWebServicesConfig.ipReputationConfig.hasIPReputation
+  - secureWebServicesConfig.ipReputationConfig.incrementalUpdate
+  - secureWebServicesConfig.urlClassificationConfig
+  - secureWebServicesConfig.urlClassificationConfig.hasURLClassification
+  - secureWebServicesConfig.urlClassificationConfig.incrementalUpdate
+  - secureWebServicesConfig.urlClassificationConfig.queryOnMiss
+  - secureWebServicesConfig.urlClassificationConfig.urlReputation
+  # 2026-11-01: NAC, applied live in Pass 1 as a section-only preconfig (1.NE w51; the interface bind not confirmed); 0.NE validated only; /validate on the virtual lab's 9.7.1.42046 Orchestrator accepted the build with it put back, alone and with all others (full-coverage lab, 2026-11-01)
+  - nac
+  - nac.aaaProfile
+  - nac.aaaProfile.da_enable
+  - nac.aaaProfile.da_server
+  - nac.aaaProfile.dot1x_default_role
+  - nac.aaaProfile.dot1x_profile
+  - nac.aaaProfile.dot1x_server_group
+  - nac.aaaProfile.id
+  - nac.aaaProfile.mac_default_role
+  - nac.aaaProfile.mac_profile
+  - nac.aaaProfile.mac_server_group
+  - nac.aaaProfile.name
+  - nac.applyPolicies
+  - nac.applyPolicies.auth_interface
+  - nac.applyPolicies.auth_type
+  - nac.applyPolicies.id
+  - nac.dot1x
+  - nac.dot1x.eapol_logoff
+  - nac.dot1x.id
+  - nac.dot1x.idrequest_period
+  - nac.dot1x.ignore_eapolstart_after_auth
+  - nac.dot1x.max_auth_fails
+  - nac.dot1x.max_req
+  - nac.dot1x.name
+  - nac.dot1x.quiet_period
+  - nac.dot1x.reauth
+  - nac.dot1x.reauth_max
+  - nac.dot1x.reauth_period
+  - nac.dot1x.server_retry
+  - nac.dot1x.server_retry_period
+  - nac.macAuthProfile
+  - nac.macAuthProfile.id
+  - nac.macAuthProfile.max_auth_fails
+  - nac.macAuthProfile.name
+  - nac.macAuthProfile.quiet_period
+  - nac.macAuthProfile.reauth
+  - nac.macAuthProfile.reauth_max
+  - nac.macAuthProfile.reauth_period
+  - nac.macAuthProfile.server_retry
+  - nac.macAuthProfile.server_retry_period
+  - nac.nacEnable
+  - nac.server
+  - nac.server.authport
+  - nac.server.host
+  - nac.server.id
+  - nac.server.key
+  - nac.server.name
+  - nac.server.source_ip_interface
+  - nac.serverGroup
+  - nac.serverGroup.id
+  - nac.serverGroup.name
+  - nac.serverGroup.server
+  # 2026-11-01: DHCP failover, ranges, options and NetBIOS servers, applied live in Pass 1 (0.NE w04d, 1.NE w05); /validate on the virtual lab's 9.7.1.42046 Orchestrator accepted the build with it put back, alone and with all others (full-coverage lab, 2026-11-01)
+  - deploymentInfo.dhcpInfo.dhcpHA
+  - deploymentInfo.dhcpInfo.dhcpHA.dhcpFailoverRole
+  - deploymentInfo.dhcpInfo.dhcpHA.foRelationshipName
+  - deploymentInfo.dhcpInfo.dhcpHA.ipAddress
+  - deploymentInfo.dhcpInfo.dhcpHA.ipAddressPort
+  - deploymentInfo.dhcpInfo.dhcpHA.loadBalanceMaxSeconds
+  - deploymentInfo.dhcpInfo.dhcpHA.maxResponseDelay
+  - deploymentInfo.dhcpInfo.dhcpHA.maxUnackedUpdates
+  - deploymentInfo.dhcpInfo.dhcpHA.mclt
+  - deploymentInfo.dhcpInfo.dhcpHA.peerIpAddress
+  - deploymentInfo.dhcpInfo.dhcpHA.peerIpAddressPort
+  - deploymentInfo.dhcpInfo.dhcpHA.split
+  - deploymentInfo.dhcpInfo.iPRanges
+  - deploymentInfo.dhcpInfo.iPRanges.endIp
+  - deploymentInfo.dhcpInfo.iPRanges.startIp
+  - deploymentInfo.dhcpInfo.netbiosNameServers
+  - deploymentInfo.dhcpInfo.options
+  - deploymentInfo.dhcpInfo.options.option
+  - deploymentInfo.dhcpInfo.options.value
+  # 2026-11-01: IP SLA tunnel up/down actions, applied live in Pass 1 (0.NE w30); /validate on the virtual lab's 9.7.1.42046 Orchestrator accepted the build with it put back, alone and with all others (full-coverage lab, 2026-11-01)
+  - ipSlaRule.ruleEntries.downAction.tunnelName
+  - ipSlaRule.ruleEntries.upAction.tunnelName
+  # 2026-11-01: PPPoE DNS servers, applied live in Pass 1 (1.NE w50); /validate on the virtual lab's 9.7.1.42046 Orchestrator accepted the build with it put back, alone and with all others (full-coverage lab, 2026-11-01)
+  - pppoe.pppoeInterfaces.dnsDomain1
+  - pppoe.pppoeInterfaces.dnsDomain2
+  # 2026-11-01: VRRP authentication (a <SECRET:> placeholder since the key is redacted), applied live in Pass 1 (3.NE and 4.NE w28); /validate on the virtual lab's 9.7.1.42046 Orchestrator accepted the build with it put back, alone and with all others (full-coverage lab, 2026-11-01)
+  - vrrp.vrrpEntries.authenticationString

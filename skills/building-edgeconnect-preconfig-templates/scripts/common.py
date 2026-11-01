@@ -29,13 +29,14 @@ CATALOGUE = SKILL_DIR / "references" / "endpoint-catalogue.yaml"
 
 # Key names whose non-empty string values are secrets. BGP "community" and tag "key" are deliberately absent.
 _SECRET_WORDS = r"passw|passphrase|secret|psk|pre[_-]?shared|(?:private|auth|authentication|api|ike)[_-]?key|token|md5|enable[_-]?pass"
-_SECRET_KEY = re.compile(r"(?i)(" + _SECRET_WORDS + ")")
+# VRRP's key is read as `auth` and written as `authenticationString` (lab, 2026-11-01: captures held it in clear)
+_SECRET_KEY = re.compile(r"(?i)(" + _SECRET_WORDS + r"|^auth$|^authenticationString$)")
 _SERVER_SIBLINGS = ("host", "address", "authport", "acctport", "server", "serverIp")
 _PEM = re.compile(r"-----BEGIN [^-]+-----.*?-----END [^-]+-----", re.S)
 _CRYPT = re.compile(r"\$(1|2[aby]?|5|6|y)\$[./A-Za-z0-9$]{8,}")
 # [ \t]: a keyword with an empty value must not reach across the line break and redact the next line's first word.
 # A filler ("is", "-", "->"; "=>" is caught by (?![:=])) is never the value: the free-text rules below handle "password is Abc1!" and "password => x".
-_CLI_SECRET = re.compile(r"(?im)(\b(?:password|passwd|secret|psk|pre-shared-key|passphrase|auth-key|authentication-key|md5|api-key|token)\b[ \t]+"
+_CLI_SECRET = re.compile(r"(?im)(\b(?:password|passwd|secret|psk|pre-shared-key|passphrase|auth-key|authentication-key|md5|api-key|token|vrrp[ \t]+\d+[ \t]+authentication)\b[ \t]+"
                          r"(?!(?:is|-+>?)[ \t])(?:\d[ \t]+)?)(?![:=])(\S+)")  # "password = x" is free text, below
 # free text (banners, comments, JSON in CLI lines): "pass: x", "secret = x", "adminPassword is x1", "\"apiKey\":\"x\"". The separator
 # (':', '=', an arrow, or "is"/"-" before a value holding a digit or a symbol other than .,;:!?, so "password is required." stays)

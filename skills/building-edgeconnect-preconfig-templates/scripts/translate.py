@@ -306,6 +306,10 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
             note("appliance.networkRole", "mapped", "applianceInfo.networkRole", "verified: code 1 = hub (all overlay hubs), code 0 = non-hub (reference Orchestrators), code 3 = nrhub (full-coverage lab, 2026-10-31)")
         else:
             note("appliance.networkRole", "unresolved", "applianceInfo.networkRole", "code {} has no known meaning".format(app["networkRole"]))
+    site_priority = app.get("sitePriority", (cap.data("network-role-and-site") or {}).get("sitePriority") if isinstance(cap.data("network-role-and-site"), dict) else None)
+    if site_priority not in (None, ""):  # no default template has it (lab, 2026-11-01)
+        note("appliance.sitePriority", "outside-preconfig", "applianceInfo.sitePriority", "site priority {} has no preconfig field; set it on the new appliance in Orchestrator "
+             "(the network role and site setting) by hand".format(site_priority))
     if failed_read(ctx, "region-associations", "the region is not written", "applianceInfo.region"):
         pass
     elif not isinstance(cap.data("region-associations") or {}, dict):
