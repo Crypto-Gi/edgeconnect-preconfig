@@ -1109,6 +1109,7 @@ def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: 
     lines.append("- {}.".format(ecos_line(target_ecos)))
     lines += ["- **Warning: apply will fail**: " + w for w in apply_warnings(ledger)]
     left = [e["target"] for e in ledger if e.get("converted") and e["disposition"] == "unresolved"]
+    lines += ["- **Warning: /validate will reject**: " + e["note"] for e in ledger if e.get("rejected")]
     if left:  # the converter read these, but the format checks left them out: never only inside the Gaps list
         lines.append("- **Converted but not written ({})**: {}. The appliance has them; set them by hand (see Gaps).".format(len(left), ", ".join(left)))
     lines.append("")
@@ -1225,6 +1226,9 @@ def convert(args: argparse.Namespace, template: Path, template_why: str, default
         print(error, file=sys.stderr)
         return 2
     reconcile(ledger, reference)
+    from check import validate_rejects
+    for section, problem in validate_rejects(reference):  # the source's own value, kept as it is in reference.yaml; check.py refuses the row
+        ledger.append({"item": "validate reject", "disposition": "unresolved", "target": section, "rejected": True, "note": problem + "; set it by hand before the rows are made"})
     unseen = sorted(flat_paths(reference) - flat_paths(default_doc))
     if unseen:
         ledger.append({"item": "release fit", "disposition": "context", "target": "", "note": "{} key paths are not shown in the default template {} (valid optional keys or unverified for that release): {}".format(len(unseen), template.name, ", ".join(unseen[:12]) + (" ..." if len(unseen) > 12 else ""))})

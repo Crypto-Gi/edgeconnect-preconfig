@@ -746,12 +746,30 @@ class ValidateRejectsNamedOffline(unittest.TestCase):
                                                            {"interfaceName": "wan1", "interfaceLabel": "MPLS1", "interfaceType": "wan", "ipAddressMask": "2001:db8:10::3/64"},
                                                            {"interfaceName": "lan1", "interfaceLabel": "Data", "interfaceType": "lan"},
                                                            {"interfaceName": "lan1", "interfaceLabel": "Data", "interfaceType": "lan"}]}}
-        got = validate_rejects(doc)
+        got = [why for _, why in validate_rejects(doc)]
+        self.assertEqual([section for section, _ in validate_rejects(doc)], ["ospfSystemConfig", "deploymentInfo", "deploymentInfo"])
         self.assertEqual(len(got), 3, got)
         self.assertTrue(got[0].startswith("OSPF area 0.0.0.2 (segment Default): areaType 2"), got[0])
         self.assertTrue(got[1].startswith("DHCP relay on lan1.212: option 82 is on with no sub-option"), got[1])
         self.assertTrue(got[2].startswith("WAN wan1: two entries (dual stack) with the same label MPLS1"), got[2])
         self.assertEqual(validate_rejects({"deploymentInfo": {"dhcpInfo": [{"enableOptions82": False}]}}), [])
+
+    def test_translate_ledgers_them_and_warns_at_the_top(self):
+        import json
+        import shutil
+        import tempfile
+        import translate
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(tmp))
+        cap = tmp / "cap"
+        shutil.copytree(str(Path(__file__).resolve().parent / "fixtures" / "compare" / "captures" / "relay"), str(cap))
+        dep = cap / "capture" / "deployment.live.json"
+        dep.write_text(dep.read_text().replace('"option82": false', '"option82": true'))
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            translate.main(["--capture", str(cap), "--site-type", "t", "--out", str(tmp / "out")])
+        ledger = json.loads((tmp / "out" / "ledger.json").read_text())["entries"]
+        self.assertEqual([(e["disposition"], e["target"]) for e in ledger if e["item"] == "validate reject"], [("unresolved", "deploymentInfo")])
+        self.assertIn("- **Warning: /validate will reject**: DHCP relay on ", (tmp / "out" / "summary.md").read_text())
 
 
 class LedgerNeverClaimsWhatIsNotWritten(unittest.TestCase):
