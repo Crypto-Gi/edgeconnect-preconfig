@@ -138,5 +138,5 @@ def substitute(doc: Dict[str, Any], inv: Dict[str, List[str]], notes: Optional[L
 
 
 def dump(doc: Dict[str, Any]) -> str:
-    import yaml
-    return yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)
+    from common import dump_yaml
+    return dump_yaml(doc, sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)

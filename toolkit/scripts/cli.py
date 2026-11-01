@@ -43,7 +43,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from variables import ALWAYS_SECTIONS, COMMA_LISTS, LAYOUT, LAYOUT_COMPARED, LAYOUT_DIFFERS, LAYOUT_KEYS, RELEASE_DEFAULTS  # noqa: E402  guard-ok: imported after the sys.path insert
-from common import DEFAULT_TEMPLATES_DIR, EdgeConnectError, PermissionDeniedError, captured_output, client_for, load_yaml, output_root, parse_yaml, record, redact_secrets, toolkit_version, utc_stamp, validators, work_dir, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
+from common import DEFAULT_TEMPLATES_DIR, EdgeConnectError, PermissionDeniedError, captured_output, client_for, dump_yaml, load_yaml, output_root, parse_yaml, record, redact_secrets, toolkit_version, utc_stamp, validators, work_dir, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 
 PROG = "edgeconnect-preconfig"
 STATES = {1: "yes", 2: "NO", 3: "unsupported version", 4: "yes (out of sync)", 5: "yes (syncing)"}  # /appliance `state`
@@ -186,7 +186,7 @@ def cmd_preconfigs(argv: List[str]) -> int:
     if not isinstance(doc, dict):
         raise Fail("{}: its YAML is not a mapping of sections, so it is not shown".format(label))
     try:
-        shown = yaml.safe_dump(redact_secrets(doc, strict=True)[0], sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)
+        shown = dump_yaml(redact_secrets(doc, strict=True)[0], sort_keys=False, allow_unicode=True, default_flow_style=False, width=1000)
     except RecursionError:  # a few hundred levels of nesting parse, but the walk or the dump runs out of stack
         raise Fail("{}: its YAML nests too deep, so it is not shown".format(label))
     record("preconfig-yaml", name=item.get("name"), id=item.get("id"), text=shown)

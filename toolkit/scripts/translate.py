@@ -19,14 +19,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, RunContext, find_default_template, load_yaml, output_root, run_context, running, toolkit_version, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
+from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, RunContext, dump_yaml, find_default_template, load_yaml, output_root, run_context, running, toolkit_version, write_json  # noqa: E402  guard-ok: imported after the sys.path insert
 from generate import generate  # noqa: E402
 from decisions import list_mode, make_decide, propose  # noqa: E402
 from variables import classify, only_at, read_sheet, sheet_items, write_sheet  # noqa: E402  guard-ok: imported after the sys.path insert
 from mappers import ECOS_RELEASE, ITEM_ERRORS, MAPPERS, Ctx, cli_lines, failed_read, guarded, id_names, item_failed, own_sharing, passthrough_max_bandwidth, Unreadable, unreadable_read  # noqa: E402  guard-ok: imported after the sys.path insert
 
 HARDEN = {0: "All", 1: "harden", 2: "stateful", 3: "statefulSNAT"}  # verified via Swagger + live apply-and-diff
-NETWORK_ROLE = {0: "non-hub", 1: "hub"}  # verified across multiple Orchestrators: code 1 = overlay hub; code 0 = non-hub; nrhub: no sample, unresolved
+NETWORK_ROLE = {0: "non-hub", 1: "hub", 3: "nrhub"}  # 0/1 verified across Orchestrators; 3 = nrhub: set live on the full-coverage lab, Pass 1, 2026-10-31
 
 DEFAULT_TEMPLATE = DEFAULT_TEMPLATES_DIR / "orchestrator-9.7.1.42046.yml"
 
@@ -303,7 +303,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
         role = NETWORK_ROLE.get(int(app["networkRole"]))
         if role:
             info["networkRole"] = role
-            note("appliance.networkRole", "mapped", "applianceInfo.networkRole", "verified across reference Orchestrators: code 1 = hub (all overlay hubs), code 0 = non-hub; nrhub has no sample")
+            note("appliance.networkRole", "mapped", "applianceInfo.networkRole", "verified: code 1 = hub (all overlay hubs), code 0 = non-hub (reference Orchestrators), code 3 = nrhub (full-coverage lab, 2026-10-31)")
         else:
             note("appliance.networkRole", "unresolved", "applianceInfo.networkRole", "code {} has no known meaning".format(app["networkRole"]))
     if failed_read(ctx, "region-associations", "the region is not written", "applianceInfo.region"):
@@ -479,7 +479,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
                     item["firewallMode"] = HARDEN[a["harden"]]
                     item["behindNat"] = a["behindNAT"]
                 item["segment"] = vrfs[str(a["vrf"])]
-                zone = zones.get(str(a["vrf"]), {}).get(str(a["zone"]))
+                zone = ctx.zone(a["vrf"], a["zone"], "deployment.modeIfs[{}]".format(if_name), "deploymentInfo.deploymentInterfaces[].zone", gap=False)  # its own gap line below
                 item["zone"] = zone
                 if roles.get(str(a.get("role", 0)), "default") != "default":
                     item["role"] = roles[str(a.get("role", 0))]
@@ -972,6 +972,64 @@ def prune(value: Any, allowed: set, ledger: List[Dict[str, Any]], prefix: str = 
     return value
 
 
+def _written(target: str, paths: set) -> bool:
+    """A ledger target (`a.b`, `a.b[].c`, or a path below a section such as `deploymentInterfaces[].zone`) names a path the YAML holds."""
+    t = target.strip().replace("[]", "")
+    return any(p == t or p.startswith(t + ".") or p.endswith("." + t) or ("." + t + ".") in p for p in paths)
+
+
+def unwritten_mapped(ledger: List[Dict[str, Any]], reference: Any) -> List[Dict[str, Any]]:
+    """Ledger lines that say `mapped` while none of their targets is in the YAML: the ledger must never claim a value it did not write."""
+    paths = flat_paths(reference)
+    return [e for e in ledger if e["disposition"] == "mapped" and any(t.strip() for t in e["target"].split(","))
+            and not any(_written(t, paths) for t in e["target"].split(",") if t.strip())]
+
+
+WRITES = {"mapped", "from-default-template", "unverified"}  # dispositions that say a value was written
+
+
+def unledgered_sections(ledger: List[Dict[str, Any]], reference: Any) -> List[str]:
+    """Sections the YAML holds that no ledger line says it wrote: every written value must be accounted for."""
+    named = {re.split(r"[.\[]", t.strip())[0] for e in ledger if e["disposition"] in WRITES for t in e["target"].split(",") if t.strip()}
+    return [s for s in (reference or {}) if s not in named]
+
+
+# Lines that can say why a mapped value is not written, best first. `default-omitted` and `orchestrator-managed` are left out: they
+# speak for part of a section (a disabled segment, one gms-marked route), never for the value the mapped line names.
+EXPLAINS = ["template-group", "unresolved", "not-readable", "toolkit-error", "outside-preconfig"]
+
+
+def _covers(a: str, b: str) -> bool:
+    """Two ledger targets name the same path, or one lies below the other (at a `.` boundary)."""
+    a, b = a.strip().replace("[]", ""), b.strip().replace("[]", "")
+    return bool(a and b) and (a == b or a.startswith(b + ".") or b.startswith(a + "."))
+
+
+def _above(a: str, b: str) -> bool:
+    """Ledger target a is b or a parent of it."""
+    a, b = a.strip().replace("[]", ""), b.strip().replace("[]", "")
+    return bool(a) and (a == b or b.startswith(a + "."))
+
+
+def reconcile(ledger: List[Dict[str, Any]], reference: Any) -> List[str]:
+    """A `mapped` line whose value the YAML does not hold: when another line already says why it is not written (a template group owns it,
+    the format has no place for it, it was never seen in the field), the mapped line is dropped and that line marked `converted`; otherwise
+    the mapped line becomes a gap that says so. The ledger never claims a value it did not write; returns the targets."""
+    out = []
+    for e in unwritten_mapped(ledger, reference):
+        targets = [t for t in e["target"].split(",") if t.strip()]
+        why = sorted((x for x in ledger if x is not e and x["disposition"] in EXPLAINS and any(_covers(x["target"], t) for t in targets)),
+                     key=lambda x: (not any(_above(x["target"], t) for t in targets), EXPLAINS.index(x["disposition"])))  # same or parent path first
+        if why:
+            ledger.remove(e)
+            why[0]["converted"] = True
+            why[0]["note"] += " (the converter had read it: {})".format(e["note"])
+        else:
+            e.update(disposition="unresolved", converted=True, note="converted, but not written: the target release's format checks left it out; was: " + e["note"])
+        out.append(e["target"])
+    return out
+
+
 def _default_nat_maps(data: Any) -> bool:
     maps = (data.get("data") or {}) if isinstance(data, dict) else {}
     maps = {k: m for k, m in maps.items() if isinstance(m, dict)}  # a map listed by name only holds no rules
@@ -1057,7 +1115,12 @@ def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: 
         lines.append("- Objects the YAML names: route labels the target Orchestrator must already have: {}.".format(", ".join(route_labels)))
     lines += ["- Default template: {} ({}).".format(e["target"], e["note"]) for e in ledger if e["item"] == "default template"]
     lines.append("- {}.".format(ecos_line(target_ecos)))
-    lines += ["- **Warning: apply will fail**: " + w for w in apply_warnings(ledger)] + [""]
+    lines += ["- **Warning: apply will fail**: " + w for w in apply_warnings(ledger)]
+    left = [e["target"] for e in ledger if e.get("converted") and e["disposition"] == "unresolved"]
+    lines += ["- **Warning: /validate will reject**: " + e["note"] for e in ledger if e.get("rejected")]
+    if left:  # the converter read these, but the format checks left them out: never only inside the Gaps list
+        lines.append("- **Converted but not written ({})**: {}. The appliance has them; set them by hand (see Gaps).".format(len(left), ", ".join(left)))
+    lines.append("")
     known = set().union(*(d for _, d in REPORT_GROUPS)) | QUIET
     groups = REPORT_GROUPS + [("Unknown disposition: treat as a gap", {e["disposition"] for e in ledger} - known)]
     for title, dispositions in groups:
@@ -1170,6 +1233,10 @@ def convert(args: argparse.Namespace, template: Path, template_why: str, default
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2
+    reconcile(ledger, reference)
+    from check import validate_rejects
+    for section, problem in validate_rejects(reference):  # the source's own value, kept as it is in reference.yaml; check.py refuses the row
+        ledger.append({"item": "validate reject", "disposition": "unresolved", "target": section, "rejected": True, "note": problem + "; set it by hand before the rows are made"})
     unseen = sorted(flat_paths(reference) - flat_paths(default_doc))
     if unseen:
         ledger.append({"item": "release fit", "disposition": "context", "target": "", "note": "{} key paths are not shown in the default template {} (valid optional keys or unverified for that release): {}".format(len(unseen), template.name, ", ".join(unseen[:12]) + (" ..." if len(unseen) > 12 else ""))})
@@ -1200,7 +1267,7 @@ def convert(args: argparse.Namespace, template: Path, template_why: str, default
         extra = sorted({p for o in others for p in only_at(mine, dict(sheet_items(o)))[0]})
         ledger.append({"item": "site comparison", "disposition": "context", "target": "", "note": "compared with {} other site(s); {} field(s) exist only at the others (different site type, not in the sheet){}".format(
             len(others), len(extra), ": " + ", ".join(extra[:12]) + (" ..." if len(extra) > 12 else "") if extra else "")})
-    (out / "reference.yaml").write_text(yaml.safe_dump(reference, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    (out / "reference.yaml").write_text(dump_yaml(reference, sort_keys=False, allow_unicode=True), encoding="utf-8")
     from generate import Builder
     probe = Builder()
     probe.find_secrets(reference)
@@ -1213,7 +1280,7 @@ def convert(args: argparse.Namespace, template: Path, template_why: str, default
         (out / "proposal.md").write_text("| Section | Leaves | Site-specific | Secrets | Proposed | Why |\n|---|---|---|---|---|---|\n" + "\n".join(
             "| {} | {} | {} | {} | {} | {} |".format(s, p["leaves"], p["site_specific_leaves"], p["secrets"], p["proposed"], p["why"]) for s, p in proposal.items()) + "\n\nSections the source did not provide (add any to `include_from_default` in decisions.yaml to start from the default template's example values): " + ", ".join(s for s in default_doc if s not in reference) + "\n", encoding="utf-8")
         decisions = decisions_in
-        (out / "decisions.yaml").write_text(yaml.safe_dump(dict(decisions, approved_by=decisions.get("approved_by", "owner")), sort_keys=False), encoding="utf-8")
+        (out / "decisions.yaml").write_text(dump_yaml(dict(decisions, approved_by=decisions.get("approved_by", "owner")), sort_keys=False), encoding="utf-8")
         list_fixed = {p for p in ("templateGroups.groups", "businessIntentOverlays.overlays") if list_mode(decisions, p.split(".")[0]) == "fixed"}
         gen = dict(decide=make_decide(decisions), list_fixed=list_fixed)
     else:

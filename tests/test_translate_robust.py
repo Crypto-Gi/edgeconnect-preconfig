@@ -6,6 +6,7 @@ and that the rest of the preconfig is still written."""
 import copy
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "toolkit" / "scripts"))
@@ -697,6 +698,228 @@ class NothingUnknownIsWritten(unittest.TestCase):
                     except NothingToConvert:
                         continue
                     self.check(out, ledger, "10.0.0.40860")
+
+
+class NetworkRole(unittest.TestCase):
+    def test_code_3_is_nrhub(self):
+        """The full-coverage lab set a box to nrhub (Pass 1, 2026-10-31) and the API reported networkRole 3; it was left out, and the field is required."""
+        out, ledger = translate(lambda d: d["appliance"].update(networkRole="3"))
+        self.assertEqual(out["applianceInfo"]["networkRole"], "nrhub")
+        self.assertFalse([e for e in ledger if e["target"] == "applianceInfo.networkRole" and e["disposition"] != "mapped"])
+
+
+class YamlTwelveNumbers(unittest.TestCase):
+    """Text a YAML 1.2 reader takes for a number is quoted in every YAML the toolkit writes (full-coverage lab: zipCode 08034 and 1e5 unquoted)."""
+
+    def test_reference_yaml_and_the_validation_copy_quote_number_like_text(self):
+        import json
+        import shutil
+        import tempfile
+        import translate
+        from synth import dump
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(tmp))
+        cap = tmp / "cap"
+        shutil.copytree(str(Path(__file__).resolve().parent / "fixtures" / "compare" / "captures" / "base"), str(cap))
+        info = cap / "capture" / "extra-info.live.json"
+        doc = json.loads(info.read_text())
+        doc["data"]["location"].update(zipCode="08034", address2="1e5")
+        info.write_text(json.dumps(doc))
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            translate.main(["--capture", str(cap), "--site-type", "t", "--out", str(tmp / "out")])
+        text = (tmp / "out" / "reference.yaml").read_text()
+        self.assertIn("zipCode: '08034'", text)
+        self.assertIn("address2: '1e5'", text)
+        self.assertIn("zipCode: '08034'", dump({"location": {"zipCode": "08034"}}))
+
+
+class ValidateRejectsNamedOffline(unittest.TestCase):
+    """Values an appliance holds but /validate rejects (full-coverage lab, Pass 1) are named by check.py, never changed or invented."""
+
+    def test_each_reject(self):
+        from check import validate_rejects
+        doc = {"ospfSystemConfig": {"areas": [{"areaId": "0.0.0.0", "areaType": 0}, {"areaId": "0.0.0.2", "areaType": 2}]},
+               "segmentOspfConfig": [{"segment": "corp", "areas": [{"areaId": "0.0.0.1", "areaType": 1}]}],
+               "deploymentInfo": {"dhcpInfo": [{"dhcpInterfaceName": "lan1.212", "dhcpType": "relay", "enableOptions82": True, "option82SubOptions1": False},
+                                               {"dhcpInterfaceName": "lan1.213", "dhcpType": "relay", "enableOptions82": True, "option82SubOptions5": True}],
+                                  "deploymentInterfaces": [{"interfaceName": "wan1", "interfaceLabel": "MPLS1", "interfaceType": "wan", "ipAddressMask": "172.16.10.3/24"},
+                                                           {"interfaceName": "wan1", "interfaceLabel": "MPLS1", "interfaceType": "wan", "ipAddressMask": "2001:db8:10::3/64"},
+                                                           {"interfaceName": "lan1", "interfaceLabel": "Data", "interfaceType": "lan"},
+                                                           {"interfaceName": "lan1", "interfaceLabel": "Data", "interfaceType": "lan"}]}}
+        got = [why for _, why in validate_rejects(doc)]
+        self.assertEqual([section for section, _ in validate_rejects(doc)], ["ospfSystemConfig", "deploymentInfo", "deploymentInfo"])
+        self.assertEqual(len(got), 3, got)
+        self.assertTrue(got[0].startswith("OSPF area 0.0.0.2 (segment Default): areaType 2"), got[0])
+        self.assertTrue(got[1].startswith("DHCP relay on lan1.212: option 82 is on with no sub-option"), got[1])
+        self.assertTrue(got[2].startswith("WAN wan1: two entries (dual stack) with the same label MPLS1"), got[2])
+        self.assertEqual(validate_rejects({"deploymentInfo": {"dhcpInfo": [{"enableOptions82": False}]}}), [])
+
+    def test_translate_ledgers_them_and_warns_at_the_top(self):
+        import json
+        import shutil
+        import tempfile
+        import translate
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(tmp))
+        cap = tmp / "cap"
+        shutil.copytree(str(Path(__file__).resolve().parent / "fixtures" / "compare" / "captures" / "relay"), str(cap))
+        dep = cap / "capture" / "deployment.live.json"
+        dep.write_text(dep.read_text().replace('"option82": false', '"option82": true'))
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            translate.main(["--capture", str(cap), "--site-type", "t", "--out", str(tmp / "out")])
+        ledger = json.loads((tmp / "out" / "ledger.json").read_text())["entries"]
+        self.assertEqual([(e["disposition"], e["target"]) for e in ledger if e["item"] == "validate reject"], [("unresolved", "deploymentInfo")])
+        self.assertIn("- **Warning: /validate will reject**: DHCP relay on ", (tmp / "out" / "summary.md").read_text())
+
+
+class LedgerNeverClaimsWhatIsNotWritten(unittest.TestCase):
+    """A section the converter maps but the format checks leave out (here a VTI, which no validated build has used) is never ledgered
+    `mapped`: the full-coverage lab found VTIs, custom tags, NAC and SWS missing from the YAML while the ledger said mapped."""
+
+    def test_a_mapped_section_left_out_by_the_format_checks_is_a_gap_and_named_at_the_top(self):
+        from test_mappers import VTI
+        from translate import allowed_paths, observed_paths, prune, reconcile, summary_md, template_enums, template_types, unwritten_mapped, verdict
+        data = copy.deepcopy(DATA)
+        data["vtis"] = {"vti1": VTI}
+        for target in ("9.6.4.40046", "9.7.1.42046", "10.0.0.40516"):
+            ledger = []
+            out = prune(build(FakeCap(data), ledger), allowed_paths(target), ledger, types=template_types(target), observed=observed_paths(), enums=template_enums(target))
+            self.assertNotIn("virtualTunnelInterface", out)
+            reconcile(ledger, out)
+            self.assertEqual(unwritten_mapped(ledger, out), [], target)
+            vti = [e for e in ledger if e["target"] == "virtualTunnelInterface"]  # one gap, from the unseen-field check, never a second one
+            self.assertEqual([(e["item"], e["disposition"], e.get("converted")) for e in vti], [("unseen field", "unresolved", True)], target)
+            self.assertIn("the converter had read it: 1 user interfaces", vti[0]["note"])
+            self.assertIn("Incomplete", verdict(ledger))
+            self.assertIn("**Converted but not written (1)**: virtualTunnelInterface.", summary_md(ledger, out, {}, target))
+
+    def test_translate_never_ledgers_mapped_for_a_section_it_did_not_write(self):
+        import json
+        import shutil
+        import tempfile
+        import translate
+        from test_mappers import VTI
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(tmp))
+        cap = tmp / "cap"
+        shutil.copytree(str(Path(__file__).resolve().parent / "fixtures" / "compare" / "captures" / "base"), str(cap))
+        (cap / "capture" / "vtis.live.json").write_text(json.dumps({"data": {"vti1": VTI}}))
+        index = json.loads((cap / "capture-index.json").read_text())
+        (cap / "capture-index.json").write_text(json.dumps(index + [{"id": "vtis", "label": "live", "status": "ok", "file": "capture/vtis.live.json"}]))
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            translate.main(["--capture", str(cap), "--site-type", "t", "--out", str(tmp / "out")])
+        ledger = json.loads((tmp / "out" / "ledger.json").read_text())["entries"]
+        self.assertEqual([(e["disposition"], e.get("converted")) for e in ledger if e["target"] == "virtualTunnelInterface"], [("unresolved", True)])
+        self.assertIn("**Converted but not written (1)**: virtualTunnelInterface.", (tmp / "out" / "summary.md").read_text())
+
+    def test_check_fails_when_the_ledger_and_the_yaml_disagree(self):
+        import json
+        import shutil
+        import tempfile
+        import check
+        import translate
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, str(tmp))
+        out = tmp / "t"
+        with mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+            translate.main(["--capture", str(Path(__file__).resolve().parent / "fixtures" / "compare" / "captures" / "base"), "--site-type", "t", "--out", str(out)])
+        self.assertTrue(check.run(out, "t", None, None)["checks"]["11 ledger matches the YAML"]["ok"])
+        doc = json.loads((out / "ledger.json").read_text())
+        doc["entries"].append({"item": "vtis", "disposition": "mapped", "target": "virtualTunnelInterface", "note": "1 user interfaces"})
+        doc["entries"] = [e for e in doc["entries"] if not (e["disposition"] == "mapped" and e["target"].startswith("businessIntentOverlays"))]
+        (out / "ledger.json").write_text(json.dumps(doc))
+        got = check.run(out, "t", None, None)["checks"]["11 ledger matches the YAML"]
+        self.assertFalse(got["ok"])
+        self.assertEqual(got["detail"], ["ledger says mapped, YAML lacks: virtualTunnelInterface", "YAML writes, no ledger line: businessIntentOverlays"])
+
+    def test_a_note_on_part_of_a_section_never_explains_a_dropped_value(self):
+        from translate import reconcile, verdict
+        for note in ("default-omitted", "orchestrator-managed"):  # a disabled segment's note, one gms-marked route skipped
+            ledger = [{"item": "x", "disposition": note, "target": "localRoutes", "note": "part"},
+                      {"item": "static-routes", "disposition": "mapped", "target": "localRoutes.routes", "note": "2 configured local routes"}]
+            reconcile(ledger, {"localRoutes": {"useSharedSubnetInfo": True}})
+            self.assertEqual([(e["disposition"], e.get("converted")) for e in ledger], [(note, None), ("unresolved", True)], note)
+            self.assertIn("Incomplete", verdict(ledger))
+
+    def test_the_gap_line_on_the_same_path_wins_over_one_below_it(self):
+        from translate import reconcile
+        ledger = [{"item": "a", "disposition": "template-group", "target": "localRoutes.routes.metric", "note": "below"},
+                  {"item": "unseen entry", "disposition": "unresolved", "target": "localRoutes.routes", "note": "same"},
+                  {"item": "static-routes", "disposition": "mapped", "target": "localRoutes.routes", "note": "2 configured local routes"}]
+        reconcile(ledger, {"localRoutes": {}})
+        self.assertEqual([(e["note"], e.get("converted")) for e in ledger], [("below", None), ("same (the converter had read it: 2 configured local routes)", True)])
+
+    def test_multicast_on_a_release_without_the_section_says_so(self):
+        from test_mappers import DEP
+        from translate import allowed_paths, observed_paths, prune, reconcile, scope_by_template, template_enums, template_types
+        from common import find_default_template, load_yaml
+        data = copy.deepcopy(DATA)
+        data.update({"deployment": DEP, "multicast-enable": [{"vrf_id": 0, "enable": True}, {"vrf_id": 1, "enable": False}],
+                     "multicast-config": [{"vrf_id": 0, "rp": "192.0.2.9", "pim": {"lan0": {"dr_priority": 1, "enable": True, "hello_interval": 30, "join_prune_interval": 30}}, "igmp": {}, "filter_name": None},
+                                          {"vrf_id": 1, "pim": {}, "igmp": {}}]})
+        target = "9.6.4.40046"
+        ledger = []
+        out = prune(build(FakeCap(data), ledger), allowed_paths(target), ledger, types=template_types(target), observed=observed_paths(), enums=template_enums(target))
+        self.assertNotIn("multicast", out)
+        reconcile(ledger, out)
+        scope_by_template(ledger, set(load_yaml(find_default_template(target)[0])))
+        lines = [(e["disposition"], e.get("converted")) for e in ledger if e["target"] == "multicast"]
+        self.assertIn(("outside-preconfig", True), lines)
+        self.assertTrue(any("has no multicast section" in e["note"] for e in ledger if e["target"] == "multicast"))
+
+    def test_every_mapped_target_names_a_path_of_the_preconfig_format(self):
+        """A mapped line whose target skips a level (ipSlaRule.routeLabel for ipSlaRule.ruleEntries[].routeLabel) is read as not written."""
+        import re
+        from common import DEFAULT_TEMPLATES_DIR, load_yaml
+        from translate import TEMPLATE_OMISSIONS, _written, flat_paths
+        paths = set(TEMPLATE_OMISSIONS)
+        for template in DEFAULT_TEMPLATES_DIR.glob("orchestrator-*.yml"):
+            paths |= flat_paths(load_yaml(template))
+        scripts = Path(__file__).resolve().parents[1] / "toolkit" / "scripts"
+        src = "".join((scripts / name).read_text() for name in ("mappers.py", "translate.py"))
+        targets = set(re.findall(r'"mapped", "([^"{]+)"', src)) | set(re.findall(r'route_label\(.*, "([A-Za-z][\w.\[\]]*)"\)', src))
+        missing = sorted(t.strip() for x in targets - {"default-omitted", "from-default-template"} for t in x.split(",") if t.strip() and not _written(t, paths))
+        self.assertEqual(missing, [])
+
+    def reconciled(self, data):
+        from translate import allowed_paths, observed_paths, prune, reconcile, template_enums, template_types, verdict
+        target = "9.7.1.42046"
+        ledger = []
+        out = prune(build(FakeCap(data), ledger), allowed_paths(target), ledger, types=template_types(target), observed=observed_paths(), enums=template_enums(target))
+        before = verdict(copy.deepcopy(ledger))
+        reconcile(ledger, out)
+        return out, ledger, before, verdict(ledger)
+
+    def test_an_ip_sla_route_label_that_is_written_stays_mapped(self):
+        data = copy.deepcopy(DATA)
+        data["running-config"] = {"runningConfig": "interface pass-through max-bandwidth 5000\ninternal set modify - /cn/rtlabels/config/7/name value string \"MPLS\"\n"}
+        data["ipsla-managers"] = {"MGR_1": {"enable": True, "interval": 10, "comment": "", "routeLabelId": 7,
+                                            "operation": {"OPR_1": {"type": "ip-monitor", "ip-monitor-ip": "192.0.2.1", "port-name": "wan0"}}}}
+        out, ledger, before, after = self.reconciled(data)
+        self.assertEqual(out["ipSlaRule"]["ruleEntries"][0]["routeLabel"], "MPLS")
+        self.assertEqual(before, after)
+        self.assertFalse([e for e in ledger if e.get("converted")])
+
+    def test_a_section_a_template_group_owns_is_not_a_gap(self):
+        data = copy.deepcopy(DATA)
+        flags = {"add_local_lan": True, "add_local_wan": True, "add_local_metric": 50, "add_local_communities": False, "local_communities": "1:1", "local_asn_filter": True, "rtmap_to_subshare": "rm"}
+        data["template-groups"][0].update(selectedTemplateNames=["routes"], templates=[{"name": "routes", "value": {"auto_subnet": {"vrf": {"0": flags}}}}])
+        data["system-info"] = {"auto_subnet": {"vrf": {"0": flags}}}
+        data["subnets"] = {"subnets": {"entries": []}}
+        out, ledger, before, after = self.reconciled(data)
+        self.assertNotIn("localRoutes", out)
+        self.assertEqual(before, after)
+        self.assertFalse([e for e in ledger if e["disposition"] == "mapped" and e["target"].startswith("localRoutes")])
+        self.assertTrue([e for e in ledger if e["disposition"] == "template-group" and e["target"] == "localRoutes" and e.get("converted")])
+
+    def test_a_written_section_keeps_its_mapped_line(self):
+        from translate import allowed_paths, observed_paths, prune, reconcile, template_enums, template_types
+        target = "9.7.1.42046"
+        ledger = []
+        out = prune(build(FakeCap(copy.deepcopy(DATA)), ledger), allowed_paths(target), ledger, types=template_types(target), observed=observed_paths(), enums=template_enums(target))
+        before = [e["target"] for e in ledger if e["disposition"] == "mapped"]
+        self.assertEqual(reconcile(ledger, out), [])
+        self.assertEqual([e["target"] for e in ledger if e["disposition"] == "mapped"], before)
 
 
 class NewSourceFields(unittest.TestCase):

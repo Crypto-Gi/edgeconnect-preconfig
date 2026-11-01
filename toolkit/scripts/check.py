@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Stage 8 checks for one site type folder (output of translate.py or generate.py), plus optional /validate.
 
-1 headers match   2 renders and parses   4 variables flow through (and multicast on has an RP)   5 mutation (one column at a time)
+1 headers match   2 renders and parses   4 variables flow through (multicast on has an RP; no value /validate is known to reject)   5 mutation (one column at a time)
 8 example row reproduces reference.yaml   10 validation recorded (with --validate)   7 no secrets in the example row
+11 ledger matches the YAML (translate.py folders: every mapped line written, every written section ledgered)
 Reads <site>.jinja2, <site>.csv, example.csv, columns.json, reference.yaml. Writes checks.json and rendered/.
 Extra rows (--rows CSV) are rendered and checked the same way.
 """
@@ -36,6 +37,31 @@ def no_rp(doc: Any) -> List[str]:
     entries = doc.get("multicast") if isinstance(doc, dict) else None
     return ["multicast[{}] (segment {}): enable true without rpAddresses; Orchestrator /validate rejects it, set the RP".format(i, e.get("segment"))
             for i, e in enumerate(entries if isinstance(entries, list) else []) if isinstance(e, dict) and str(e.get("enable")).lower() == "true" and e.get("rpAddresses") in (None, "", [])]
+
+
+def validate_rejects(doc: Any) -> List[Any]:
+    """(section, reason) for each value the appliance holds that Orchestrator /validate rejects (full-coverage lab, Pass 1, 2026-10-31):
+    named offline, never changed."""
+    if not isinstance(doc, dict):
+        return []
+    out = []
+    ospf = [("ospfSystemConfig", doc.get("ospfSystemConfig"))] + [("segmentOspfConfig", x) for x in (doc.get("segmentOspfConfig") or [])]
+    for section, o in (x for x in ospf if isinstance(x[1], dict)):
+        for a in (x for x in (o.get("areas") or []) if isinstance(x, dict)):
+            if str(a.get("areaType")) not in ("0", "1"):
+                out.append((section, "OSPF area {} (segment {}): areaType {} is not 0 (standard) or 1 (NSSA); Orchestrator /validate rejects it, ECOS 9.6.2.1 has it as a stub area".format(
+                    a.get("areaId"), o.get("segment", "Default"), a.get("areaType"))))
+    info = doc.get("deploymentInfo") if isinstance(doc.get("deploymentInfo"), dict) else {}
+    for d in (x for x in (info.get("dhcpInfo") or []) if isinstance(x, dict)):
+        if d.get("enableOptions82") is True and not any(v is True for k, v in d.items() if k.startswith("option82SubOptions")):
+            out.append(("deploymentInfo", "DHCP relay on {}: option 82 is on with no sub-option; Orchestrator /validate needs at least one option82SubOptions true".format(d.get("dhcpInterfaceName"))))
+    seen: Dict[Any, int] = {}
+    for i in (x for x in (info.get("deploymentInterfaces") or []) if isinstance(x, dict) and x.get("interfaceType") == "wan"):
+        key = (i.get("interfaceName"), i.get("interfaceLabel"))
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] == 2:
+            out.append(("deploymentInfo", "WAN {}: two entries (dual stack) with the same label {}; Orchestrator /validate rejects it, the IPv6 entry needs its own label".format(*key)))
+    return out
 
 
 def run(site_dir: Path, site: str, extra_rows: Optional[Path], validate: Optional[str], substitute: bool = False) -> Dict[str, Any]:
@@ -79,7 +105,7 @@ def run(site_dir: Path, site: str, extra_rows: Optional[Path], validate: Optiona
             text = render_row(template, row)
             doc = parse_yaml(text)
             row_problems.extend(flow_through(doc, columns, row))
-            row_problems.extend(no_rp(doc))
+            row_problems.extend(no_rp(doc) + [why for _, why in validate_rejects(doc)])
         except Exception as error:
             row_problems.append(str(error)[:150])
             text, doc, norm_serial = "", None, None
@@ -134,6 +160,13 @@ def run(site_dir: Path, site: str, extra_rows: Optional[Path], validate: Optiona
             diffs = [p for p in changed_paths(reference, doc0)]
             secret_paths = {c["path"] for c in columns.values() if c["secret"]}
             record("8 example row reproduces reference", set(diffs) <= secret_paths, [d for d in diffs if d not in secret_paths][:8])
+    ledger_file, ref_file = site_dir / "ledger.json", site_dir / "reference.yaml"
+    if ledger_file.exists() and ref_file.exists():  # a translate.py folder: the ledger and the YAML must tell the same story
+        from translate import unledgered_sections, unwritten_mapped
+        entries, reference = json.loads(ledger_file.read_text())["entries"], load_yaml(ref_file)
+        mismatch = ["ledger says mapped, YAML lacks: " + e["target"] for e in unwritten_mapped(entries, reference)] + \
+                   ["YAML writes, no ledger line: " + s for s in unledgered_sections(entries, reference)]
+        record("11 ledger matches the YAML", not mismatch, mismatch[:8])
     leaks = [n for n, c in columns.items() if c["secret"] and rows[0].get(n)]
     record("7 example row holds no secret values", not leaks, leaks)
 

@@ -26,11 +26,11 @@ ok   branch-b_preconfig -> <tmp>/out/branch-a/site-zone-column/rendered/branch-b
 rows that passed are in <tmp>/out/branch-a/site-zone-column/rendered
 --- stderr
 --- files
-e2a177ab7564750f  <tmp>/out/branch-a/site-zone-column/checks.json
+a30732991fe5d674  <tmp>/out/branch-a/site-zone-column/checks.json
 3c71287d679597e8  <tmp>/out/branch-a/site-zone-column/columns.json
 62e6e0c2ebc4b5fa  <tmp>/out/branch-a/site-zone-column/columns.md
 fefc233866ceea07  <tmp>/out/branch-a/site-zone-column/example.csv
-d6af6260ab8bf77e  <tmp>/out/branch-a/site-zone-column/ledger.json
+139bf7386b533031  <tmp>/out/branch-a/site-zone-column/ledger.json
 36a172cb18c56314  <tmp>/out/branch-a/site-zone-column/reference.yaml
 1d95583f6638fb83  <tmp>/out/branch-a/site-zone-column/rendered/branch-a_preconfig.yml
 7bb69bf5e6160a57  <tmp>/out/branch-a/site-zone-column/rendered/branch-b_preconfig.yml

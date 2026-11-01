@@ -27,13 +27,13 @@ Next:
   edgeconnect-preconfig validate <tmp>/out/h1/site-h1 --csv <tmp>/out/h1/site-h1/sites.csv
 --- stderr
 --- files
-bd35a6c0751d9128  <tmp>/out/h1/site-h1/checks.json
+66ecfe56a9217d88  <tmp>/out/h1/site-h1/checks.json
 432bc1acf3565c8c  <tmp>/out/h1/site-h1/columns.json
 1abc142c3bb91f0b  <tmp>/out/h1/site-h1/columns.md
 80a3fcc15ec915b7  <tmp>/out/h1/site-h1/example.csv
 2348741d392f8069  <tmp>/out/h1/site-h1/h1.csv
 0fd75bb049837337  <tmp>/out/h1/site-h1/h1.jinja2
-e8bd59d9a8cf47e1  <tmp>/out/h1/site-h1/ledger.json
+3a44d6cdfb6e6ae0  <tmp>/out/h1/site-h1/ledger.json
 661e2288c3a9e474  <tmp>/out/h1/site-h1/reference.yaml
 457b990271caa566  <tmp>/out/h1/site-h1/rendered/h1_preconfig.yml
 80a3fcc15ec915b7  <tmp>/out/h1/site-h1/sites.csv
