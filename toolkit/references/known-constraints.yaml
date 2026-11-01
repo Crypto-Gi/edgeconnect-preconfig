@@ -200,3 +200,16 @@ structural_and_apply_constraints:
     rule: "authenticationString is at most 8 characters (Orchestrator 9.7.1, 2026-10-18 sweep)."
     seen: "(exact message not recorded) /validate rejects a longer string"
     fix: "Keep VRRP authentication strings to 8 characters or fewer; test values use an 8-character placeholder."
+
+  # --- 2026-11-01 full-coverage lab, Pass 3 (ECOS 9.6.2.1_107093, Orchestrator 9.7.1) ---
+  - section: interfaceConfig
+    enforced_by: apply
+    rule: "A fixed interfaceSpeed with interfaceDuplex auto passes /validate and the apply reports COMPLETED, but ECOS 9.6.2.1 keeps the interface's old speed and duplex. The same speeds with duplex full apply exactly."
+    seen: "no error: apply COMPLETED, speed and duplex unchanged on the appliance (10/auto, 10000/auto)"
+    fix: "Write duplex full (or half) with a fixed speed, or check the interface after apply; translate ledgers such an interface."
+
+  - section: multicast
+    enforced_by: apply
+    rule: "The multicast section is refused on ECOS 9.6.2.1, even at its default value."
+    seen: "Template incompatible with VXOA version"
+    fix: "Leave multicast out of a preconfig for an ECOS 9.6.2.1 appliance, or upgrade ECOS first."

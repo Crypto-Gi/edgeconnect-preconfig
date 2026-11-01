@@ -2147,3 +2147,9 @@ class SourceCoverageRun3(unittest.TestCase):
         info = [{"ifname": "lan1", "ifSpeed": "auto", "ifDuplex": "auto", "admin": True, "comboPortSupported": "SFP", "comboPortConfig": 3},
                 {"ifname": "lan0", "ifSpeed": "1000", "ifDuplex": "full", "admin": True, "comboPortSupported": "RJ45", "comboPortConfig": 0}]
         self.assertEqual(m_interfaceConfig(ctx({"interface-state": {"ifInfo": info}})[0])["interfaces"], [{"interfaceName": "lan0", "interfaceSpeed": 1000, "interfaceDuplex": "full", "admin": "up"}])
+
+    def test_a_fixed_speed_with_auto_duplex_is_ledgered(self):
+        info = [{"ifname": "lan0", "ifSpeed": "1000", "ifDuplex": "auto", "admin": True}, {"ifname": "lan1", "ifSpeed": "100", "ifDuplex": "full", "admin": True}]
+        c, notes = ctx({"interface-state": {"ifInfo": info}})
+        self.assertEqual(len(m_interfaceConfig(c)["interfaces"]), 2)
+        self.assertEqual([n["item"] for n in notes if "duplex auto" in n["note"]], ["interface-state[lan0]"])
