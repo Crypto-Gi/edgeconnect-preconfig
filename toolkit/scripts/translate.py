@@ -197,6 +197,10 @@ def ledger_local_nac(value: Optional[Dict[str, Any]], owned: Dict[str, Any], not
              "/validate requires all six NAC lists non-empty (HTTP 500 otherwise) and the other lists hold only the template's objects; set them on the target by hand".format(", ".join(mine)))
 
 
+def ids_of(vrfs: Dict[str, str]) -> Dict[str, str]:
+    return {n: i for i, n in vrfs.items()}
+
+
 def drop_template_fields(out: Dict[str, Any], owned: Dict[str, Dict[Optional[str], set]], vrfs: Dict[str, str], note: Any) -> None:
     """Leave out of the written sections the fields a template sets; drop a route section left with nothing of its own."""
     def strip(entry: Dict[str, Any], fields: set) -> List[str]:
@@ -219,6 +223,10 @@ def drop_template_fields(out: Dict[str, Any], owned: Dict[str, Dict[Optional[str
             if value is None:
                 continue
             gone = set()
+            if name == "bfd":  # /validate: "MinTxInterval of BFD ... must be a number between 300 and 5000": an entry needs its timers
+                if any(f in e for e in value for f in by_segment.get(ids_of(vrfs).get(e.get("segment")), set())):
+                    note("template bfd", "mapped", section, "the appliance's BFD timers are written although the 'bfd' template sets them: the format requires them in every entry")
+                continue
             if name == "vrrp":
                 targets = [(None, e) for e in value.get("vrrpEntries", [])]
             elif name == "vxlan":

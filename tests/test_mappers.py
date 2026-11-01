@@ -540,7 +540,9 @@ class AuditRegressions(unittest.TestCase):
                "ospfSystemConfig": {"enable": True, "routerId": "192.0.2.1", "areas": [], "interfaces": [dict(iface)]}}
         notes = []
         drop_template_fields(out, owned, {"0": "Default", "1": "corp"}, lambda *a: notes.append(a))
-        self.assertEqual(out["segmentBfdConfigs"], [{"segment": "Default", "enable": True}, {"segment": "corp", "enable": True, "minRxInterval": 300, "minTxInterval": 300, "detectMultiplier": 3}])
+        # Lab delta 2026-11-01: /validate refuses a BFD entry without its timers, so they stay written with a "mapped" line
+        self.assertEqual(out["segmentBfdConfigs"][0], {"segment": "Default", "enable": True, "minRxInterval": 600, "minTxInterval": 600, "detectMultiplier": 4})
+        self.assertTrue(any(n[:2] == ("template bfd", "mapped") for n in notes), notes)
         self.assertEqual(out["ospfSystemConfig"]["interfaces"], [{"interfaceName": "lan1", "areaId": "0.0.0.0", "cost": 10, "authentication": "None"}])
         self.assertEqual(out["ospfSystemConfig"]["enable"], True)
         self.assertTrue(any(n[0] == "template ospf" and n[1] == "template-group" and "interfaces[].helloInterval" in n[3] for n in notes), notes)
