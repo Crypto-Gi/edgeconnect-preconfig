@@ -2,6 +2,7 @@
 
 ## Unreleased (`gui` branch)
 
+- **The EdgeHA unresolved line names the HA group** by its Orchestrator key; it printed `?`.
 - **lessons.md: a preconfig is for a fresh box.** Re-apply results on a configured box are not proof of how the YAML behaves; when re-applying deployment settings, keep `vrrp` in the same YAML (a `deploymentInfo` apply can drop VRRP on an interface whose device number it renumbers).
 
 ## 1.4.0-rc.4 (2026-11-01, pre-release from the `gui` branch; rc.3 was not published)

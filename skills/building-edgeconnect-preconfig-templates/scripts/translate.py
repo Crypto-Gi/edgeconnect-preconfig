@@ -634,11 +634,11 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
         if ha_if and ha_mode_entries:
             unreadable_read(ctx, "ha-groups", "haConfig is not written", "deploymentInfo.haConfig")
         ha_groups, groups_read = {}, False
-    my_ha = None
+    my_ha, my_ha_key = None, None
     for key, group in ha_groups.items():
         with guarded(ctx, "ha-groups[{}]".format(key), "deploymentInfo.haConfig"):
             if any(m.get("nePk") == nepk for m in group.get("appliances", [])):
-                my_ha = group
+                my_ha, my_ha_key = group, key
                 break
     try:
         if write_di and ha_if and my_ha and ha_mode_entries:
@@ -702,7 +702,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
         item_failed(ctx, "ha-groups, deployment.modeIfs[haIf]", "deploymentInfo.haConfig", err)
     if write_di and my_ha and not (ha_if and ha_mode_entries):  # lab 2026-11-01: in an EdgeHA group with no HA interface in the deployment
         note("ha-groups", "unresolved", "deploymentInfo.haConfig", "the appliance is in EdgeHA group {} but its deployment has {}: haConfig is not written; "
-             "set the HA pairing by hand".format(my_ha.get("id", "?"), "no HA interface (haIf)" if not ha_if else "no HA subinterfaces on '{}'".format(ha_if)))
+             "set the HA pairing by hand".format(my_ha_key, "no HA interface (haIf)" if not ha_if else "no HA subinterfaces on '{}'".format(ha_if)))
     elif write_di and groups_read and not my_ha and ha_if and ha_mode_entries:  # lab 2026-11-01: haIf set, but the appliance is in no HA group
         note("ha-groups", "unresolved", "deploymentInfo.haConfig", "the deployment has EdgeHA on '{}' ({} HA subinterfaces, left out of deploymentInterfaces) but the appliance "
              "is in no Orchestrator EdgeHA group: haConfig is not written; set the HA pairing by hand".format(ha_if, len(ha_mode_entries)))

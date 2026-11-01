@@ -394,7 +394,7 @@ class Ecos95(unittest.TestCase):
         cap.folder = "fake"
         ledger = []
         self.assertNotIn("haConfig", build(cap, ledger)["deploymentInfo"])
-        self.assertTrue(any(e["disposition"] == "unresolved" and e["target"] == "deploymentInfo.haConfig" for e in ledger), ledger)
+        self.assertTrue(any(e["disposition"] == "unresolved" and e["target"] == "deploymentInfo.haConfig" and "group g1" in e["note"] for e in ledger), ledger)
 
     def test_ha_interface_in_no_ha_group_is_unresolved(self):
         """Lab 2026-11-01: haIf set with HA subinterfaces, but /haGroups lists the appliance in no group: haConfig and the subinterfaces went with no line."""
