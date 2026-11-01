@@ -59,7 +59,7 @@ class MapperRules(unittest.TestCase):
     def test_a_vrrp_key_is_never_copied_in_clear(self):
         group = {"groupId": 1, "interface": "lan0", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 100, "priority": 101, "tracker": False, "version": 3, "preempt": True,
                  "desc": "", "pkt_trace": False, "holddown": 10}
-        for auth, want in (("<SECRET:$.vrrp[0].auth>", "<SECRET:$.vrrp[0].auth>"), ("LabKey1", "<SECRET:vrrp.auth>")):  # an older capture holds it in clear
+        for auth, want in (("<SECRET:$[0].auth>", "<SECRET:vrrp.auth>"), ("LabKey1", "<SECRET:vrrp.auth>")):  # one name whatever the capture path; an older capture holds it in clear
             self.assertEqual(m_vrrp(ctx({"vrrp": [dict(group, auth=auth)]})[0])["vrrpEntries"][0]["authenticationString"], want)
 
     def test_vrrp_drops_runtime_state(self):
@@ -866,6 +866,13 @@ class AuditRegressions(unittest.TestCase):
         r = m_segmentLocalRoutes(c)[0]["routes"][0]
         self.assertEqual((r["advertiseToBgp"], r["comment"], r["tag"]), (False, "corp app", "FROM_WAN"))
         self.assertEqual(len([n for n in notes if n["item"] == "subnets-all-vrfs[1]"]), 1)  # route_list runs twice here
+        seg = {"1": {"prefix": {"203.0.113.0/24": {"advert": False, "advert_bgp": True, "advert_ospf": True,
+                                                    "nhop": {"192.0.2.250": {"interface": {"lan0.203": {"comment": "corp cfg", "dir": "FROM_LAN"}}}}}}}}
+        c, notes = ctx({"deployment": dep, "static-routes-configured": configured, "static-routes-configured-vrfs": seg,
+                        "subnets-all-vrfs": {"subnets": {"1": {"entries": [{"state": st, "config": {"comment": "corp app", "tag": "FROM_WAN"}}]}}}})
+        r = m_segmentLocalRoutes(c)[0]["routes"][0]  # lab 2026-11-01: the segment's own configured table wins over route state
+        self.assertEqual((r["advertise"], r["advertiseToBgp"], r["advertiseToOspf"], r["comment"], r["tag"]), (False, True, True, "corp cfg", "FROM_LAN"))
+        self.assertFalse([n for n in notes if n["item"] == "subnets-all-vrfs[1]"])
 
     def test_segment_without_routes_keeps_its_subnet_sharing(self):
         from mappers import m_localRoutes, m_segmentLocalRoutes
@@ -900,6 +907,10 @@ class AuditRegressions(unittest.TestCase):
         c, _ = ctx({"deployment": DEP, "ipsla-managers": {"MGR_1": {"enable": True, "interval": 10, "comment": "", "routeLabelId": 0, "operation": {"OPR_1": op}}}})
         m = m_ipSlaRule(c)["ruleEntries"][0]["ipslaMonitor"]
         self.assertEqual((m["proxyAddress"], m["proxyPort"], m["userAgent"]), ("192.0.2.9", 3128, "Mozilla/5.0"))
+        self.assertNotIn("forceDnsThroughProbePath", m)
+        op["force-dns"] = "true"  # lab 2026-11-01: was dropped silently on an http monitor
+        self.assertTrue(m_ipSlaRule(ctx({"deployment": DEP, "ipsla-managers": {"MGR_1": {"enable": True, "interval": 10, "comment": "", "routeLabelId": 0, "operation": {"OPR_1": op}}}})[0])["ruleEntries"][0]["ipslaMonitor"]["forceDnsThroughProbePath"])
+        del op["force-dns"]
         rule = {"enable": True, "interval": "10", "comment": "", "routeLabelId": 0, "upAction": "def-subnet", "operation": {"OPR_2": {"type": "port-monitor", "port-name": "wan1"}},
                 "downAction": {"DN_ACTION_subnet-adv_3": {"type": "subnet-adv", "port-name": "lan0.201"}}}
         c2, notes = ctx({"deployment": DEP, "ipsla-managers": {"MGR_2": rule}})
