@@ -783,7 +783,9 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
     READ_SECTIONS = {"passthrough-tunnels": "tunnelConfiguration, ipSlaRule", "ids-profile-state": "idsIpsConfig", "appexpress-group-association": "appExpressGroups"}
     for ident in sorted({i.get("id") for i in getattr(cap, "index", None) or [] if isinstance(i, dict)}):
         if read_failed(cap, ident) and not any(ident in re.split(r"[\s,\[]+", str(e["item"])) for e in ledger):
-            note(ident, "not-readable", READ_SECTIONS.get(ident, ""), "the {} read failed (no usable live or cached copy), so nothing built from it is written; check by hand what it holds".format(ident))
+            fed = READ_SECTIONS.get(ident)  # gate 2026-11-01: other reads may feed nothing directly (dhcp-* when /deployment was read)
+            note(ident, "not-readable", fed or "", "the {} read failed (no usable live or cached copy), so {}; check by hand what it holds".format(
+                ident, "nothing built from it is written" if fed else "anything that needs it may be incomplete"))
     order = list(load_yaml(DEFAULT_TEMPLATE))
     return {k: out[k] for k in sorted(out, key=lambda s: order.index(s) if s in order else 999)}
 
