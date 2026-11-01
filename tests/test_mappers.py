@@ -68,6 +68,13 @@ class MapperRules(unittest.TestCase):
         self.assertTrue(notes)
         self.assertNotIn("LabKey1", repr(notes))
 
+    def test_a_toolkit_error_line_never_quotes_a_conversion_error_value(self):
+        from mappers import item_failed
+        c, notes = ctx({})
+        item_failed(c, "x", "s", ValueError("invalid literal for int() with base 10: 'LabKey1'"))  # approver 2026-11-01: str(err) can quote a key
+        self.assertIn("ValueError", repr(notes))
+        self.assertNotIn("LabKey1", repr(notes))
+
     def test_vrrp_drops_runtime_state(self):
         c, notes = ctx({"vrrp": [{"groupId": 1, "interface": "lan0", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 100, "priority": 101, "tracker": False, "version": 3, "preempt": True,
                                   "auth": "", "desc": "", "pkt_trace": False, "holddown": 10, "mode": "master", "uptime": "1 day", "vmac": "00:00:5e:00:01:01"}]})

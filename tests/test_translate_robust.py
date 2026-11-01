@@ -451,6 +451,20 @@ class FailedReads(unittest.TestCase):
             with self.subTest(ident):
                 out, ledger = translate(lambda d: d.update({ident: {}}), failed=(ident,))
                 self.assertLedgered(ledger, "not-readable", ident)
+                line = [e for e in ledger if e["item"] == ident]
+                self.assertEqual(len(line), 1)
+                self.assertTrue(line[0]["target"])  # names the section the read feeds
+
+    def test_a_404_or_an_already_named_failed_read_adds_no_line(self):
+        out, ledger = translate()
+        cap_index = [{"id": "passthrough-tunnels", "label": "live", "status": "error", "http": 404}]
+        cap = FakeCap(copy.deepcopy(DATA))
+        cap.index += cap_index
+        ledger = []
+        build(cap, ledger)
+        self.assertFalse(any(e["item"] == "passthrough-tunnels" and e["disposition"] == "not-readable" for e in ledger))
+        out, ledger = translate(failed=("groups",))  # groups has its own failed_read line: no second one
+        self.assertEqual(sum(1 for e in ledger if e["disposition"] == "not-readable" and e["item"] == "groups"), 1)
 
     def test_names_from_reads_of_another_shape_are_not_written_as_ids(self):
         for ident, field in (("groups", "group"), ("cluster-profiles", "clusterProfile"), ("cluster-profile-mapping", "clusterProfile")):

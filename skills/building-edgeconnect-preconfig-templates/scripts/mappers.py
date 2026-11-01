@@ -161,6 +161,11 @@ class Unresolved(ValueError):
     """An id in the item names nothing the capture knows (a vrf id of a deleted segment): the item is not written, never with a null name."""
 
 
+def err_text(err: Exception) -> str:
+    """An error for a ledger line: a ValueError's message can quote the value it failed on, which may be a key, so only its type (approver 2026-11-01)."""
+    return type(err).__name__ if isinstance(err, ValueError) else "{}: {}".format(type(err).__name__, err)
+
+
 def item_failed(ctx: Ctx, item: str, section: str, err: Exception) -> None:
     """One source item the mapper could not read: ledgered and skipped, so the rest of its section is still written."""
     if isinstance(err, Unreadable):
@@ -169,7 +174,7 @@ def item_failed(ctx: Ctx, item: str, section: str, err: Exception) -> None:
     if isinstance(err, Unresolved):
         ctx.note(item, "unresolved", section, "{} not written: {}; set it by hand if it is still wanted".format(item, err))
         return
-    ctx.note(item, "toolkit-error", section, "{} not written: the mapper could not read it ({}: {}); a toolkit bug to report".format(item, type(err).__name__, err))
+    ctx.note(item, "toolkit-error", section, "{} not written: the mapper could not read it ({}); a toolkit bug to report".format(item, err_text(err)))
 
 
 @contextmanager
@@ -1510,7 +1515,7 @@ def m_tunnelConfiguration(ctx: Ctx) -> Optional[Dict[str, Any]]:
             item_failed(ctx, "passthrough-tunnels[{}]".format(k), "tunnelConfiguration", err)
             continue
         except (KeyError, TypeError, ValueError) as err:
-            ctx.note("passthrough-tunnels[{}]".format(k), "toolkit-error", "tunnelConfiguration", "tunnel {} not written: the mapper could not read it ({}: {}); a toolkit bug to report".format(v.get("alias", k), type(err).__name__, err))
+            ctx.note("passthrough-tunnels[{}]".format(k), "toolkit-error", "tunnelConfiguration", "tunnel {} not written: the mapper could not read it ({}); a toolkit bug to report".format(v.get("alias", k), err_text(err)))
             continue
         tunnels.append(t)
         ctx.unmapped("passthrough-tunnels[{}]".format(k), v, {"id", "alias", "mode", "adminStatus", "sourceIpAddress", "destIpAddress", "natMode", "peerName", "max_bw_auto", "max_bw", "presharedkey", "ike_aalg", "ike_ealg", "dhgroup",

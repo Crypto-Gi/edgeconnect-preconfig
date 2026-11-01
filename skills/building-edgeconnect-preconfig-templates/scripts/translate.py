@@ -23,7 +23,7 @@ from common import CATALOGUE, DEFAULT_TEMPLATES_DIR, RunContext, dump_yaml, find
 from generate import generate  # noqa: E402
 from decisions import list_mode, make_decide, propose  # noqa: E402
 from variables import classify, only_at, read_sheet, sheet_items, write_sheet  # noqa: E402  guard-ok: imported after the sys.path insert
-from mappers import ECOS_RELEASE, ITEM_ERRORS, MAPPERS, Ctx, cli_lines, failed_read, guarded, id_names, item_failed, own_sharing, passthrough_max_bandwidth, read_failed, Unreadable, unreadable_read  # noqa: E402  guard-ok: imported after the sys.path insert
+from mappers import ECOS_RELEASE, ITEM_ERRORS, MAPPERS, Ctx, cli_lines, err_text, failed_read, guarded, id_names, item_failed, own_sharing, passthrough_max_bandwidth, read_failed, Unreadable, unreadable_read  # noqa: E402  guard-ok: imported after the sys.path insert
 
 HARDEN = {0: "All", 1: "harden", 2: "stateful", 3: "statefulSNAT"}  # verified via Swagger + live apply-and-diff
 NETWORK_ROLE = {0: "non-hub", 1: "hub", 3: "nrhub"}  # 0/1 verified across Orchestrators; 3 = nrhub: set live on the full-coverage lab, Pass 1, 2026-10-31
@@ -768,7 +768,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
             note("mapper " + section, "not-readable", section, "the {} section is not written: {}; check it by hand".format(section, err))
             continue
         except Exception as err:
-            note("mapper " + section, "toolkit-error", section, "the {} mapper failed ({}: {}), so the section was not written: a toolkit bug to report, not a limit of preconfig".format(section, type(err).__name__, err))
+            note("mapper " + section, "toolkit-error", section, "the {} mapper failed ({}), so the section was not written: a toolkit bug to report, not a limit of preconfig".format(section, err_text(err)))
             continue
         if value is not None:
             out[section] = value
@@ -779,10 +779,11 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
             for section in FIELD_TEMPLATES[name]["sections"]:
                 out.pop(section, None)
             item_failed(ctx, "template " + name, ", ".join(FIELD_TEMPLATES[name]["sections"]), err)
-    # fuzz 2026-11-01: a failed read that no mapper named dropped its section with no line
+    # fuzz 2026-11-01: a failed read that no mapper named dropped its section with no line (approver: name the section it feeds)
+    READ_SECTIONS = {"passthrough-tunnels": "tunnelConfiguration, ipSlaRule", "ids-profile-state": "idsIpsConfig", "appexpress-group-association": "appExpressGroups"}
     for ident in sorted({i.get("id") for i in getattr(cap, "index", None) or [] if isinstance(i, dict)}):
         if read_failed(cap, ident) and not any(ident in re.split(r"[\s,\[]+", str(e["item"])) for e in ledger):
-            note(ident, "not-readable", "", "the {} read failed (no usable live or cached copy), so nothing built from it is written; check by hand what it holds".format(ident))
+            note(ident, "not-readable", READ_SECTIONS.get(ident, ""), "the {} read failed (no usable live or cached copy), so nothing built from it is written; check by hand what it holds".format(ident))
     order = list(load_yaml(DEFAULT_TEMPLATE))
     return {k: out[k] for k in sorted(out, key=lambda s: order.index(s) if s in order else 999)}
 
