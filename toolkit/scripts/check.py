@@ -61,6 +61,12 @@ def validate_rejects(doc: Any) -> List[Any]:
         seen[key] = seen.get(key, 0) + 1
         if seen[key] == 2:
             out.append(("deploymentInfo", "WAN {}: two entries (dual stack) with the same label {}; Orchestrator /validate rejects it, the IPv6 entry needs its own label".format(*key)))
+    vrrp = doc.get("vrrp") if isinstance(doc.get("vrrp"), dict) else {}
+    for v in (x for x in (vrrp.get("vrrpEntries") or []) if isinstance(x, dict)):
+        key = v.get("authenticationString")
+        if isinstance(key, str) and not key.startswith("<SECRET:") and len(key) > 8:  # the length only, never the key
+            out.append(("vrrp", "VRRP group {} on {}: the authentication key is {} characters; Orchestrator /validate allows at most 8 (full-coverage lab)".format(
+                v.get("groupId"), v.get("interfaceName"), len(key))))
     return out
 
 

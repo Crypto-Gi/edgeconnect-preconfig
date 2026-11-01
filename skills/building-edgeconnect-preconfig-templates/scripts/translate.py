@@ -1251,6 +1251,7 @@ def convert(args: argparse.Namespace, template: Path, template_why: str, default
     except NothingToConvert as error:
         print(error, file=sys.stderr)
         return 2
+    ledger[:] = [e for i, e in enumerate(ledger) if e not in ledger[:i]]  # a mapper run twice (a check, then the build) repeats its lines
     drop_broken_nac(ledger, reference)
     reconcile(ledger, reference)
     from check import validate_rejects
