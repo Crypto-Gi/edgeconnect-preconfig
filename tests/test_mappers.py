@@ -45,10 +45,12 @@ class MapperRules(unittest.TestCase):
         dep["sysConfig"]["vrfs"].append({"id": "1", "name": "corp"})
         dep["sysConfig"]["vrfZonesMap"] = {"0": {"a": {"id": 0, "name": "Default"}, "b": {"id": 5, "name": "TRUSTED"}}, "1": {"a": {"id": 0, "name": "Default"}}}
         lo = {"ipaddr": "198.19.1.1", "nmask": 32, "admin": True, "label": "", "vrf_id": 1, "zone": 5}
-        c, notes = ctx({"deployment": dep, "loopbacks": {"lo2": lo, "lo3": dict(lo, zone=77)}})
+        dep["sysConfig"]["vrfZonesMap"]["2"] = {"a": {"id": 6, "name": "GUEST"}}
+        dep["sysConfig"]["vrfZonesMap"]["0"]["c"] = {"id": 6, "name": "OTHER"}
+        c, notes = ctx({"deployment": dep, "loopbacks": {"lo2": lo, "lo3": dict(lo, zone=77), "lo4": dict(lo, zone=6), "lo5": dict(lo, zone=65534)}})
         out = m_loopbackInterface(c)
-        self.assertEqual([x["zone"] for x in out["loopbacks"]], ["TRUSTED", None])
-        self.assertEqual([(n["disposition"], n["target"]) for n in notes if "zone" in n["target"]], [("unresolved", "loopbackInterface.loopbacks[].zone")])
+        self.assertEqual([x["zone"] for x in out["loopbacks"]], ["TRUSTED", None, None, None])  # found once; nowhere; two names for one id; none
+        self.assertEqual([(n["item"], n["disposition"]) for n in notes if "zone" in n["target"]], [("loopbacks[lo2]", "context"), ("loopbacks[lo3]", "unresolved"), ("loopbacks[lo4]", "unresolved")])
 
     def test_vrrp_drops_runtime_state(self):
         c, notes = ctx({"vrrp": [{"groupId": 1, "interface": "lan0", "enable": "Up", "vipaddr": "192.0.2.1", "adv_timer": 100, "priority": 101, "tracker": False, "version": 3, "preempt": True,

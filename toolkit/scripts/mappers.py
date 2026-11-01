@@ -114,15 +114,21 @@ class Ctx:
             raise Unresolved("vrf id {} names no segment".format(vrf))
         return name
 
-    def zone(self, vrf: Any, zone: Any, item: str = "", target: str = "") -> Optional[str]:
-        """Zone name; zone ids are global, and a segment's vrfZonesMap can lack a zone another segment lists (lab: lo2 in corp, zone TRUSTED).
-        With a target, a zone found nowhere is ledgered instead of written as null unnoticed."""
+    def zone(self, vrf: Any, zone: Any, item: str = "", target: str = "", gap: bool = True) -> Optional[str]:
+        """Zone name. A segment's vrfZonesMap can lack a zone other segments list (lab: lo2 in corp, zone TRUSTED): the name is taken from them
+        only when every map that has the id gives the same name, with a context line. With a target, a zone found nowhere is a gap line
+        (gap=False: the caller ledgers it), never a null nobody sees; 65534 is "none"."""
         self.readable("vrfZonesMap")
         name = self.zones.get(str(vrf), {}).get(str(zone))
-        if name is None:
-            name = next((m[str(zone)] for m in self.zones.values() if m.get(str(zone)) is not None), None)
-        if name is None and target and zone not in (None, ""):
-            self.note(item, "unresolved", target, "zone id {} of segment {} is not among the zones (deployment.sysConfig.vrfZonesMap); written as null, set it by hand".format(zone, vrf))
+        if name is None and str(zone) not in ("", "None", "65534"):
+            names = {m[str(zone)] for m in self.zones.values() if m.get(str(zone)) is not None}
+            if len(names) == 1:
+                name = names.pop()
+                if target:
+                    self.note(item, "context", target, "zone id {} is not in segment {}'s zone map; written as {}, the name every other segment's map gives it".format(zone, vrf, name))
+            elif target and gap:
+                self.note(item, "unresolved", target, "zone id {} of segment {} is {} (deployment.sysConfig.vrfZonesMap); written as null, set it by hand".format(
+                    zone, vrf, "named differently by different segments ({})".format(", ".join(sorted(names))) if names else "not among the zones"))
         return name
 
     def role(self, ident: Any) -> Optional[str]:
@@ -711,7 +717,7 @@ def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.
                  "shows as none on the appliance, ECOS ignores a zone on a route without an interface (docs/decisions/0016)".format(st.get("prefix"), ctx.segment(vrf, strict=False) or vrf, if_name, next_hop))
         if_name = None
     zone_id = conf.get("zone_id", st.get("zone_id"))  # the state reports the zone of the interface in use
-    zone = None if str(zone_id) in ("65534", "") else ctx.zone(vrf, zone_id)
+    zone = None if str(zone_id) in ("65534", "") else ctx.zone(vrf, zone_id, "subnets", target + "[].zone")
     # subnets3/configured holds the Default segment only and ignores segment parameters (ECOS 9.6.2.1)
     cfg_prefix, cfg = configured_route(ctx, st["prefix"], next_hop, cfg_if) if vrf == "0" else ({}, {})
     route = {"routeIpSubnet": st["prefix"], "nextHop": nul(next_hop), "interfaceName": nul(if_name), "metric": st["metric"], "advertise": cfg_prefix.get("advert", st["advert"]),
@@ -1142,7 +1148,7 @@ def m_ipSlaRule(ctx: Ctx) -> Optional[Dict[str, Any]]:
                     monitor["tunnelName"] = op["tunnel-name"]
                 if op.get("src-port-label") or op.get("src-port-name"):
                     monitor["sourceInterfaceName"] = op.get("src-port-label") or op.get("src-port-name")
-                    note_ref(ctx, "ipsla-managers[{}]".format(k), "ipSlaRule.ipslaMonitor.sourceInterfaceName", "IP SLA rule " + k, monitor["sourceInterfaceName"])
+                    note_ref(ctx, "ipsla-managers[{}]".format(k), "ipSlaRule.ruleEntries[].ipslaMonitor.sourceInterfaceName", "IP SLA rule " + k, monitor["sourceInterfaceName"])
                 if str(op.get("force-dns")).lower() == "true":
                     monitor["forceDnsThroughProbePath"] = True
                 if monitor.get("sourceInterfaceName") and not monitor.get("interfaceName") and not monitor.get("tunnelName"):
@@ -1151,7 +1157,7 @@ def m_ipSlaRule(ctx: Ctx) -> Optional[Dict[str, Any]]:
                         ctx.note("ipsla-managers[{}]".format(k), "unresolved", "ipSlaRule", "probe sourced from {} names no interface or tunnel and no single passthrough tunnel is sourced there; rule not written (the validator requires one)".format(monitor["sourceInterfaceName"]))
                         continue
                     monitor["tunnelName"] = tunnel
-                    ctx.note("ipsla-managers[{}]".format(k), "mapped", "ipSlaRule.ipslaMonitor.tunnelName", "the appliance stores no tunnel for a tunnel-sourced probe; {} is the only passthrough tunnel sourced from {} (assumption)".format(tunnel, monitor["sourceInterfaceName"]))
+                    ctx.note("ipsla-managers[{}]".format(k), "mapped", "ipSlaRule.ruleEntries[].ipslaMonitor.tunnelName", "the appliance stores no tunnel for a tunnel-sourced probe; {} is the only passthrough tunnel sourced from {} (assumption)".format(tunnel, monitor["sourceInterfaceName"]))
             dn_raw = v.get("downAction")
             if isinstance(dn_raw, dict) and dn_raw:
                 act = next(iter(dn_raw.values()))
@@ -1184,7 +1190,7 @@ def m_ipSlaRule(ctx: Ctx) -> Optional[Dict[str, Any]]:
                     up_act = {"upActionType": "clearAlarm"}
             else:
                 up_act = {"upActionType": up_str.get(str(up_raw), "clearAlarm")}
-            rules.append({"enable": v["enable"], "samplingInterval": int(v["interval"]), "comment": nul(v["comment"]), "routeLabel": ctx.route_label(v.get("routeLabelId"), "ipsla-managers[{}]".format(k), "IP SLA rule {}".format(k), "ipSlaRule.routeLabel"),
+            rules.append({"enable": v["enable"], "samplingInterval": int(v["interval"]), "comment": nul(v["comment"]), "routeLabel": ctx.route_label(v.get("routeLabelId"), "ipsla-managers[{}]".format(k), "IP SLA rule {}".format(k), "ipSlaRule.ruleEntries[].routeLabel"),
                           "ipslaMonitor": monitor, "downAction": down_act, "upAction": up_act})
         except ITEM_ERRORS as err:
             item_failed(ctx, "ipsla-managers[{}]".format(k), "ipSlaRule", err)

@@ -479,7 +479,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
                     item["firewallMode"] = HARDEN[a["harden"]]
                     item["behindNat"] = a["behindNAT"]
                 item["segment"] = vrfs[str(a["vrf"])]
-                zone = zones.get(str(a["vrf"]), {}).get(str(a["zone"]))
+                zone = ctx.zone(a["vrf"], a["zone"], "deployment.modeIfs[{}]".format(if_name), "deploymentInfo.deploymentInterfaces[].zone", gap=False)  # its own gap line below
                 item["zone"] = zone
                 if roles.get(str(a.get("role", 0)), "default") != "default":
                     item["role"] = roles[str(a.get("role", 0))]
@@ -994,15 +994,30 @@ def unledgered_sections(ledger: List[Dict[str, Any]], reference: Any) -> List[st
     return [s for s in (reference or {}) if s not in named]
 
 
+EXPLAINS = ["template-group", "orchestrator-managed", "outside-preconfig", "unresolved", "not-readable", "toolkit-error", "default-omitted"]  # first wins
+
+
+def _covers(a: str, b: str) -> bool:
+    """Two ledger targets name the same path, or one lies below the other (at a `.` boundary)."""
+    a, b = a.strip().replace("[]", ""), b.strip().replace("[]", "")
+    return bool(a and b) and (a == b or a.startswith(b + ".") or b.startswith(a + "."))
+
+
 def reconcile(ledger: List[Dict[str, Any]], reference: Any) -> List[str]:
-    """Turn every `mapped` line whose value the format checks (prune) left out into a gap that says so; returns the targets."""
+    """A `mapped` line whose value the YAML does not hold: when another line already says why it is not written (a template group owns it,
+    the format has no place for it, it was never seen in the field), the mapped line is dropped and that line marked `converted`; otherwise
+    the mapped line becomes a gap that says so. The ledger never claims a value it did not write; returns the targets."""
     out = []
     for e in unwritten_mapped(ledger, reference):
-        targets = [t.strip() for t in e["target"].split(",") if t.strip()]
-        why = [x["note"].split(";")[0] for x in ledger if x is not e and x["disposition"] != "mapped"
-               and any(x["target"].strip().replace("[]", "").startswith(t.replace("[]", "")) for t in targets)]
-        e["disposition"] = "unresolved"
-        e["note"] = "converted, but not written: {}; was: {}".format(why[0] if why else "the target release's format checks left it out", e["note"])
+        targets = [t for t in e["target"].split(",") if t.strip()]
+        why = sorted((x for x in ledger if x is not e and x["disposition"] in EXPLAINS and any(_covers(x["target"], t) for t in targets)),
+                     key=lambda x: EXPLAINS.index(x["disposition"]))
+        if why:
+            ledger.remove(e)
+            why[0]["converted"] = True
+            why[0]["note"] += " (the converter had read it: {})".format(e["note"])
+        else:
+            e.update(disposition="unresolved", converted=True, note="converted, but not written: the target release's format checks left it out; was: " + e["note"])
         out.append(e["target"])
     return out
 
@@ -1093,7 +1108,7 @@ def summary_md(ledger: List[Dict[str, Any]], reference: Dict[str, Any], source: 
     lines += ["- Default template: {} ({}).".format(e["target"], e["note"]) for e in ledger if e["item"] == "default template"]
     lines.append("- {}.".format(ecos_line(target_ecos)))
     lines += ["- **Warning: apply will fail**: " + w for w in apply_warnings(ledger)]
-    left = [e["target"] for e in ledger if e["disposition"] == "unresolved" and e["note"].startswith("converted, but not written")]
+    left = [e["target"] for e in ledger if e.get("converted") and e["disposition"] == "unresolved"]
     if left:  # the converter read these, but the format checks left them out: never only inside the Gaps list
         lines.append("- **Converted but not written ({})**: {}. The appliance has them; set them by hand (see Gaps).".format(len(left), ", ".join(left)))
     lines.append("")
