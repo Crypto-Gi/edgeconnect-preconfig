@@ -4,9 +4,10 @@
 check 11 proves the other half (a ledger "mapped" line has its YAML value). This harness runs translate.py on each capture with every
 read wrapped so that each key the converter takes is recorded, then lists the leaves it never took, less:
   * keys a ledger line names as not mapped (unmapped-source-key) for that capture;
+  * leaves under a ledger item "read.path" that says why the path is not written (deployment.dhcpFailover runtime);
   * reads whose sections the ledger hands to a template group, or calls outside the preconfig format, not readable or empty;
   * reads of Orchestrator objects and state, not appliance settings (translate.NOT_SETTINGS: template groups, cluster state, overlays...);
-  * entries of tests/harnesses/source_ignore.yaml (read id, path with * wildcards, reason).
+  * entries of tests/harnesses/source_ignore.yaml (read id, path with * wildcards, optional except patterns, reason).
 A leaf is taken when its key is read with [] or get(), or its value is handed out by items()/values()/iteration of a list.
 dict(x) and {**x} copies count as takes; json.dumps of a mapping is not seen: such leaves show up here and go on the ignore list with that reason.
 Writes key paths only, never values; a key of a mapping the converter walks (items()/values()), a record map, or a key that is not a
@@ -29,7 +30,8 @@ from common import CATALOGUE, load_yaml, toolkit_version  # noqa: E402  guard-ok
 
 IGNORE = Path(__file__).with_name("source_ignore.yaml")
 NAME = re.compile(r"^(?![a-z]+[0-9]+$)[a-z][a-zA-Z0-9_-]*$")  # a field name (as translate.SOURCE_KEY, hyphens kept); ids, prefixes and interface names such as lan0 are collection keys, "*"
-EXPLAINED = ("template-group", "outside-preconfig", "not-readable", "empty-or-absent", "orchestrator-managed")
+EXPLAINED = ("template-group", "outside-preconfig", "not-readable", "empty-or-absent", "orchestrator-managed", "default-omitted", "unresolved", "toolkit-error", "runtime")
+READ_ID = re.compile(r"^([a-z0-9-]+)(\[[^\]]*\])?$")  # a ledger item that names a whole read, or one entry of it: "bgp-system", "bgp-system-all-vrfs[1]"
 
 
 def glob(pattern: str, path: str) -> bool:
@@ -183,9 +185,31 @@ def unmapped_keys(ledger: List[Dict[str, Any]]) -> Set[str]:
     return keys
 
 
+def named_reads(item: Any) -> Set[str]:
+    """Read ids a ledger item names whole ("bgp-system, bgp-neighbors", "vrrp[2]"); an item on a path inside a read names none."""
+    return {m.group(1) for part in str(item).split(",") for m in [READ_ID.match(part.strip())] if m}
+
+
+def explained_paths(ledger: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """read id -> key paths a ledger line explains: an item "read.path" or "read.path (note)" with a disposition that says why it is not written."""
+    out: Dict[str, List[str]] = defaultdict(list)
+    for e in ledger:
+        m = re.match(r"^([a-z0-9-]+)\.([^ ,]+)", str(e.get("item")))
+        if m and e.get("disposition") in EXPLAINED:
+            out[m.group(1)].append(re.sub(r"\[[^\]]*\]", "", m.group(2)))
+    return out
+
+
+def under(leaf: str, paths: List[str]) -> bool:
+    bare = leaf.replace("[]", "")
+    return any(bare == p or bare.startswith(p + ".") for p in paths)
+
+
 def explained_reads(ledger: List[Dict[str, Any]], catalogue: Dict[str, Dict[str, Any]]) -> Set[str]:
-    """Reads the ledger accounts for as a whole: the read's own line, or every one of its sections handed elsewhere."""
-    whole = {e["item"] for e in ledger if e.get("disposition") in EXPLAINED}
+    """Reads the ledger accounts for as a whole: a line on the read (or one of its entries) saying why nothing of it is written, with no
+    "mapped" line on it (a read that is partly written must account for each field), or every one of its sections handed elsewhere."""
+    mapped = {r for e in ledger if e.get("disposition") == "mapped" for r in named_reads(e.get("item"))}
+    whole = {r for e in ledger if e.get("disposition") in EXPLAINED for r in named_reads(e.get("item"))} - mapped
     owned = {s for e in ledger if e.get("disposition") == "template-group" for s in str(e.get("target", "")).split(",")}
     return whole | {i for i, c in catalogue.items() if c.get("sections") and all(s in owned for s in c["sections"])}
 
@@ -194,13 +218,13 @@ def untraced(capture: Path, target: str, rules: List[Dict[str, str]], catalogue:
     left, ledger, error = run_one(capture, target)
     if error:
         return {}, error
-    named, whole = unmapped_keys(ledger), explained_reads(ledger, catalogue)
+    named, whole, parts = unmapped_keys(ledger), explained_reads(ledger, catalogue), explained_paths(ledger)
     out: Dict[str, List[str]] = {}
     for ident, leaves in left.items():
         if ident in whole:
             continue
-        keep = sorted(p for p in leaves if p.rsplit(".", 1)[-1].rstrip("[]") not in named
-                      and not any(r.get("read") in (ident, "*") and glob(r.get("path", ""), p) for r in rules))
+        keep = sorted(p for p in leaves if p.rsplit(".", 1)[-1].rstrip("[]") not in named and not under(p, parts.get(ident, []))
+                      and not any(r.get("read") in (ident, "*") and glob(r.get("path", ""), p) and not any(glob(x, p) for x in r.get("except") or []) for r in rules))
         if keep:
             out[ident] = keep
     return out, None
@@ -220,8 +244,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     for i, capture in enumerate(args.captures):
         for target in targets:
             result, error = untraced(capture, target, rules, catalogue)
-            if error:
-                errors.append("capture #{} target {}: {}".format(i + 1, target, error))
+            if error:  # the message may hold the capture's absolute path, which names the user's folders
+                errors.append("capture #{} target {}: {}".format(i + 1, target, error.replace(str(capture.resolve()), "<capture>").replace(str(capture), "<capture>")))
             for ident, paths in result.items():
                 for p in paths:
                     found[(ident, p)].add("#{}@{}".format(i + 1, target))

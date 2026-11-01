@@ -31,6 +31,15 @@ class SourceCoverageTest(unittest.TestCase):
             peer["priority"]
         self.assertEqual(seen.untaken(), {"peers.*.metric", "sites.*.a"})  # two records with the same fields: a record map
 
+    def test_a_read_is_explained_whole_only_without_a_mapped_line(self):
+        ledger = [{"item": "bgp-system, bgp-neighbors", "disposition": "default-omitted"}, {"item": "nac", "disposition": "default-omitted"},
+                  {"item": "vrrp[2]", "disposition": "unresolved"}, {"item": "vrrp", "disposition": "mapped"},
+                  {"item": "deployment.modeIfs[].dhcpd.server (relay)", "disposition": "outside-preconfig"}]
+        self.assertEqual(sc.explained_reads(ledger, {}), {"bgp-system", "bgp-neighbors", "nac"})  # vrrp is partly written; a path item names no read
+        self.assertEqual(dict(sc.explained_paths(ledger)), {"deployment": ["modeIfs.dhcpd.server"]})
+        self.assertTrue(sc.under("modeIfs[].dhcpd.server.ipStart", ["modeIfs.dhcpd.server"]))
+        self.assertFalse(sc.under("modeIfs[].dhcpd.serverX", ["modeIfs.dhcpd.server"]))
+
     def test_ignore_paths_are_literal_but_for_the_wildcard(self):
         self.assertTrue(sc.glob("modeIfs[].applianceIPs[].version", "modeIfs[].applianceIPs[].version"))
         self.assertFalse(sc.glob("modeIfs[].version", "modeIfs1.version"))

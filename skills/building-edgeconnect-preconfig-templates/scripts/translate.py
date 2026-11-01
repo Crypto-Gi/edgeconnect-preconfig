@@ -680,7 +680,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
         di["dhcpInfo"] = dhcp
         note("deployment.modeIfs[].dhcpd", "mapped", "deploymentInfo.dhcpInfo", "{} DHCP servers; empty ntp/netbios lists omitted".format(len(dhcp)))
     if relay_leases:
-        note("deployment.modeIfs[].dhcpd.server (relay)", "outside-preconfig", "deploymentInfo.dhcpInfo",
+        note("deployment.modeIfs[].applianceIPs[].dhcpd.server (relay)", "outside-preconfig", "deploymentInfo.dhcpInfo",
              "relay interfaces keep lease times in an inactive DHCP server block, and the preconfig relay entry has no lease fields: {}".format(", ".join(relay_leases)))
     if ra_skipped:
         note("deployment.modeIfs[].ra", "runtime", "deploymentInfo.raInfo", "{} IPv4 interfaces carry a default router-advertisement block; the validator rejects raInfo on IPv4 interfaces".format(len(ra_skipped)))

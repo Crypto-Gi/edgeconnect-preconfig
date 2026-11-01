@@ -1,4 +1,75 @@
 # Source leaves the converter never takes on purpose (tests/harnesses/source_coverage.py, fuzz oracle 2).
-# read: catalogue id ("*" for any); path: the key path as the report prints it, "*" matching anything ; why: the reason, required.
+# read: catalogue id ("*" for any); path: the key path as the report prints it, "*" matching anything; except: paths the rule leaves reported; why: the reason, required.
+# Triage of the first corpus run (2026-11-01: 99 field captures and 10 full-coverage lab captures, 3 targets).
 ignore:
+  # --- markers and echoes every ECOS object carries ---
+  - {read: "*", path: "*self", why: "ECOS repeats an object's own key as self; the key itself is what the converter uses"}
+  - {read: "*", path: "*gms_marked", why: "Orchestrator's marker for objects it pushed; mappers use it only to skip those objects (orchestrator-managed lines)"}
+  - {read: "*", path: "*gmsMarked", why: "Orchestrator's marker for objects it pushed; mappers use it only to skip those objects (orchestrator-managed lines)"}
+  - {read: "*", path: "*enable_gms_marked", why: "Orchestrator's marker that a template pushed the object; ownership comes from the template groups"}
+  - {read: "*", path: "scalars.*", why: "model and licence limits the appliance reports (port counts, table sizes, disk layout): facts of the hardware, not settings"}
+
+  # --- /deployment fields the preconfig format has no place for, or takes from elsewhere ---
   - {read: deployment, path: "modeIfs[].applianceIPs[].version", why: "the address family is taken from the address itself where the format needs it (ipVersion, addressingMode)"}
+  - {read: deployment, path: "dpRoutes*", why: "management and data-plane default routes: managementRoutes comes from the running-config, WAN next hops from each interface; the management plane is never written from /deployment"}
+  - {read: deployment, path: "mgmtIfData*", why: "management interface addressing: managementIp comes from the running-config; the management plane is never written from /deployment"}
+  - {read: deployment, path: "sysConfig.useMgmt0", why: "management plane setting; never written (a preconfig must not move management)"}
+  - {read: deployment, path: "sysConfig.license.*", why: "licence tier and boost are assigned by Orchestrator licensing (ecLicensing comes from the running-config)"}
+  - {read: deployment, path: "sysConfig.maxInSysBW", why: "the model's maximum inbound bandwidth, a hardware limit; the configured value is maxInBW (totalInboundBandwidth)"}
+  - {read: deployment, path: "sysConfig.maxObSysBW", why: "the model's maximum outbound bandwidth, a hardware limit; the configured value is maxBW (totalOutboundBandwidth)"}
+  - {read: deployment, path: "sysConfig.zones[]*", why: "zone names are resolved from the Orchestrator /zones read"}
+  - {read: deployment, path: "sysConfig.tenG", why: "model capability flag, not a setting; no field in any default template"}
+  - {read: deployment, path: "sysConfig.bonding", why: "link aggregation is read from /linkAggregation (linkAggregation section)"}
+  - {read: deployment, path: "vifs.bondedIfs*", why: "link aggregation is read from /linkAggregation (linkAggregation section); ECOS 9.7.1 ignores writes here (lab)"}
+  - {read: deployment, path: "vifs.pppoe*", why: "PPPoE is read from /pppoe (pppoe section)"}
+  - {read: deployment, path: "sysConfig.singleBridge", why: "bridge-mode internals; deploymentMode carries the mode; no field in any default template"}
+  - {read: deployment, path: "sysConfig.propagateLinkDown", why: "bridge-mode link propagation; no field in any default template"}
+  - {read: deployment, path: "sysConfig.vrfEnable", why: "segments are on whenever the appliance has segments; written as segment names, no field of its own"}
+  - {read: deployment, path: "modeIfs[].devNum", why: "the appliance's internal port number; interfaces are written by name"}
+  - {read: deployment, path: "modeIfs[].applianceIPs[].lanSide", why: "the interface type is written from wanSide (interfaceType lan/wan)"}
+  - {read: deployment, path: "modeIfs[].applianceIPs[].proxy_arp", why: "no deploymentInterfaces field in any default template"}
+  - {read: deployment, path: "modeIfs[].applianceIPs[].wanNexthop", why: "read for a static WAN address only; a DHCP or PPPoE WAN learns its next hop"}
+  - {read: deployment, path: "modeIfs[].applianceIPs[].dhcp", why: "the DHCP client flag is read for WAN interfaces only; a LAN address is static"}
+  - {read: deployment, path: "modeIfs[].applianceIPs[].dhcpd.relay*", why: "an inactive relay block: relay settings are read only when the interface's DHCP type is relay"}
+  - {read: deployment, path: "modeIfs[].applianceIPs[].ra.*", why: "router advertisements are written for IPv6 addresses only; an IPv4 entry's RA block is inactive (ra_skipped)"}
+
+  # --- reads used for one thing, the rest being runtime state ---
+  - {read: interface-state, path: "*", except: ["ifInfo[].comboPort*"], why: "runtime interface state; interfaceConfig takes only ifname, ifSpeed, ifDuplex and admin (comboPort fields stay reported: interfaceConfig has comboPortMode), addresses come from /deployment"}
+  - {read: running-config, path: "*", why: "metadata of the stored backup (id, time, file, version, count); the converter reads its runningConfig text"}
+  - {read: subnets, path: "moduleInfo*", why: "routing module state"}
+  - {read: subnets, path: "peers*", why: "SD-WAN peers learned at run time"}
+  - {read: subnets, path: "subnets.count", why: "table counter"}
+  - {read: subnets, path: "subnets.max", why: "table limit"}
+  - {read: subnets, path: "subnets.disabledByIPSLA", why: "IP SLA run-time state"}
+  - {read: subnets, path: "subnets.metricAddedByIPSLA", why: "IP SLA run-time state"}
+  - {read: subnets, path: "subnets.entries[].state.*", why: "fields of learned and automatic routes, which are routing state and never written; a configured local route has its fields read"}
+  - {read: subnets-all-vrfs, path: "moduleInfo*", why: "routing module state"}
+  - {read: subnets-all-vrfs, path: "peers*", why: "SD-WAN peers learned at run time"}
+  - {read: subnets-all-vrfs, path: "subnets.*.count", why: "table counter"}
+  - {read: subnets-all-vrfs, path: "subnets.*.max", why: "table limit"}
+  - {read: subnets-all-vrfs, path: "subnets.*.disabledByIPSLA", why: "IP SLA run-time state"}
+  - {read: subnets-all-vrfs, path: "subnets.*.metricAddedByIPSLA", why: "IP SLA run-time state"}
+  - {read: subnets-all-vrfs, path: "subnets.*.entries[].state.*", why: "fields of learned and automatic routes, which are routing state and never written; a configured local route has its fields read"}
+  - {read: subnets-all-vrfs, path: "subnets.*.entries[].config.metric", why: "the same as the route's state metric, which is read"}
+  - {read: subnets-all-vrfs, path: "subnets.*.entries[].config.label", why: "the same as the route's state label, which is read"}
+  - {read: subnets-all-vrfs, path: "subnets.*.entries[].config.prefix", why: "the same as the route's state prefix, which is read"}
+  - {read: subnets-all-vrfs, path: "subnets.*.entries[].config.local", why: "the same as the route's state local flag, which is read"}
+  - {read: subnets-all-vrfs, path: "subnets.*.entries[].config.nextHop", why: "read only when the state shows no next hop (0.0.0.0 shown empty); otherwise the same value"}
+  - {read: subnets-all-vrfs, path: "subnets.*.entries[].config.comment", why: "taken from the segment's configured table (subnets3/configured/vrfs) when it was read"}
+  - {read: subnets-all-vrfs, path: "subnets.*.entries[].config.tag", why: "taken from the segment's configured table (subnets3/configured/vrfs) when it was read"}
+  - {read: static-routes-configured, path: "prefix.*.local", why: "the same as the route state's local flag, which is read"}
+  - {read: static-routes-configured, path: "prefix.*.nhop.*.interface.*.metric", why: "the same as the route state's metric, which is read"}
+  - {read: static-routes-configured, path: "prefix.*.nhop.*.interface.*.label", why: "the same as the route state's label, which is read"}
+  - {read: static-routes-configured, path: "prefix.*.nhop.*.interface.*.zone_id", why: "the route config's zone_id from /subnets is read"}
+  - {read: static-routes-configured, path: "prefix.*.nhop.*.interface.*.comment", why: "read for the route's own next hop and interface; another interface's entry belongs to another route"}
+  - {read: static-routes-configured, path: "prefix.*.nhop.*.interface.*.dir", why: "read for the route's own next hop and interface; another interface's entry belongs to another route"}
+  - {read: vrrp, path: "[].master_transitions", why: "VRRP run-time state (m_vrrp's runtime set)"}
+  - {read: vrrp, path: "[].masterip", why: "VRRP run-time state (m_vrrp's runtime set)"}
+  - {read: vrrp, path: "[].mode", why: "VRRP run-time state (m_vrrp's runtime set)"}
+  - {read: vrrp, path: "[].priorityState", why: "VRRP run-time state (m_vrrp's runtime set)"}
+  - {read: vrrp, path: "[].uptime", why: "VRRP run-time state (m_vrrp's runtime set)"}
+  - {read: vrrp, path: "[].vipowner", why: "VRRP run-time state (m_vrrp's runtime set)"}
+  - {read: vrrp, path: "[].vmac", why: "VRRP run-time state (m_vrrp's runtime set)"}
+  - {read: security-maps, path: "*", why: "zone firewall rules: rules Orchestrator pushed come from its firewall template; rules it did not push are counted and ledgered whole by translate.local_firewall_rules (preconfig has no firewall section)"}
+  - {read: multicast-config, path: "*pim.*", why: "PIM entries naming no interface of the appliance are ledgered as runtime (stale) and not written; the others are written field by field"}
+  - {read: system-info, path: "*", except: ["auto_subnet*"], why: "system-wide settings of the System template (auto MTU, IPID, SYN, QoS DRC, DNS, shapers, HA map, regions): preconfig has no section for them; the converter reads only auto_subnet (subnet sharing), which stays reported"}
