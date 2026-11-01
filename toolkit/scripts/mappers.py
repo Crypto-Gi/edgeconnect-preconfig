@@ -704,7 +704,7 @@ def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.
         return None
     vti = next((k for k, v in ((ctx.data("vtis") or {}) if isinstance(ctx.data("vtis"), dict) else {}).items() if isinstance(v, dict) and v.get("auto_distribute")
                 and "{}/32".format(v.get("ipaddr")) == st.get("prefix") and str(v.get("vrf_id", 0)) == vrf), None)
-    if vti and not st.get("nextHop") and conf.get("ifName") == "default" and conf.get("nextHop") in ("0.0.0.0", None, ""):
+    if vti and not st.get("nextHop") and conf.get("nextHop") in ("0.0.0.0", None, ""):
         # lab 2026-11-01: ECOS adds this route itself (comment "auto distributable VTI subnet route", no next hop, any interface); a user route on the prefix is kept
         ctx.note("subnets", "default-omitted", target, "route {} is the one ECOS creates for {}'s auto-distribute setting, which makes it again; not written as a static route".format(st["prefix"], vti))
         return None
