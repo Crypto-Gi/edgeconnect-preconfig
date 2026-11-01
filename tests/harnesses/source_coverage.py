@@ -51,6 +51,12 @@ class Seen:
         self.taken: Set[str] = set()
         self.leaves: Set[str] = set()
         self.collections: Set[str] = set()  # paths of mappings the converter walked with items()/values(): their keys are ids or names
+        self.tops: Dict[str, Set[str]] = defaultdict(set)  # leaf path -> the top-level keys (entries) it is found under
+
+    def leaf(self, path: str, top: Optional[str]) -> None:
+        self.leaves.add(path)
+        if top is not None:
+            self.tops[path].add(top)
 
     def name(self, path: str) -> str:
         """path with each key under a walked mapping as "*", so a key path never shows a site, host or peer name."""
@@ -60,17 +66,19 @@ class Seen:
             raw = join(raw, seg)
         return ".".join(out)
 
-    def untaken(self) -> Set[str]:
-        return {self.name(p) for p in self.leaves} - {self.name(p) for p in self.taken}
+    def untaken(self, entries: Set[str] = frozenset()) -> Set[str]:  # type: ignore[assignment]
+        """Leaves never taken, less those found only under entries (top-level keys) that a ledger line explains."""
+        keep = {p for p in self.leaves if not (self.tops.get(p) and self.tops[p] <= entries)}
+        return {self.name(p) for p in keep} - {self.name(p) for p in self.taken}
 
 
-def wrap(value: Any, path: str, seen: Seen) -> Any:
+def wrap(value: Any, path: str, seen: Seen, top: Optional[str] = None) -> Any:
     if isinstance(value, dict):
-        return TDict(value, path, seen)
+        return TDict(value, path, seen, top)
     if isinstance(value, list):
-        return TList(value, path, seen)
+        return TList(value, path, seen, top)
     if path:  # a read that is absent (None) or a bare value has no fields to account for
-        seen.leaves.add(path)
+        seen.leaf(path, top)
     return value
 
 
@@ -79,16 +87,16 @@ def join(path: str, key: str) -> str:
 
 
 class TDict(dict):
-    def __init__(self, src: Dict[str, Any], path: str, seen: Seen) -> None:
-        if src.get("gms_marked") is True or src.get("gmsMarked") is True:  # an object Orchestrator pushed: mappers skip it and ledger the count (orchestrator-managed)
+    def __init__(self, src: Dict[str, Any], path: str, seen: Seen, top: Optional[str] = None) -> None:
+        if src.get("gms_marked") or src.get("gmsMarked"):  # an object Orchestrator pushed (as mappers.managed): mappers skip it and ledger the count (orchestrator-managed)
             seen = Seen()
         self._path, self._seen = path, seen
         records = [v for v in src.values() if isinstance(v, dict) and v]  # two or more records with the same fields, keyed by name or id (as translate._record_map)
         collection = (len(src) > 0 and all(not NAME.match(str(k)) for k in src)) or (len(src) >= 2 and len(records) == len(src) and len({tuple(sorted(v)) for v in records}) == 1)
         self._parts = {k: part(k, collection) for k in src}
-        super().__init__({k: wrap(v, join(path, self._parts[k]), seen) for k, v in src.items()})
+        super().__init__({k: wrap(v, join(path, self._parts[k]), seen, str(k) if not path else top) for k, v in src.items()})
         if not src and path:
-            seen.leaves.add(path)  # an empty mapping is one leaf: taken when it is read
+            seen.leaf(path, top)  # an empty mapping is one leaf: taken when it is read
 
     def _take(self, key: Any) -> None:
         if key in self._parts:
@@ -127,11 +135,11 @@ class TDict(dict):
 
 
 class TList(list):
-    def __init__(self, src: List[Any], path: str, seen: Seen) -> None:
-        super().__init__(wrap(v, path + "[]", seen) for v in src)
+    def __init__(self, src: List[Any], path: str, seen: Seen, top: Optional[str] = None) -> None:
+        super().__init__(wrap(v, path + "[]", seen, top) for v in src)
         self._path, self._seen = path, seen
         if not src and path:
-            seen.leaves.add(path)
+            seen.leaf(path, top)
 
     def _take(self) -> None:
         self._seen.taken.add(self._path + "[]")
@@ -150,6 +158,21 @@ def ignore_rules() -> List[Dict[str, str]]:
     if not IGNORE.is_file():
         return []
     return list((load_yaml(IGNORE) or {}).get("ignore") or [])
+
+
+def explained_entries(ledger: List[Dict[str, Any]]) -> Dict[str, Set[str]]:
+    """read id -> entries (top-level keys) a ledger line "read[entry]" says are not written, with no "mapped" line on the same entry."""
+    out: Dict[str, Set[str]] = defaultdict(set)
+    mapped: Set[Tuple[str, str]] = set()
+    for e in ledger:
+        for part in str(e.get("item")).split(","):
+            m = READ_ID.match(part.strip())
+            if m and m.group(2):
+                if e.get("disposition") == "mapped":
+                    mapped.add((m.group(1), m.group(2)[1:-1]))
+                elif e.get("disposition") in EXPLAINED:
+                    out[m.group(1)].add(m.group(2)[1:-1])
+    return {r: {k for k in keys if (r, k) not in mapped} for r, keys in out.items()}
 
 
 def run_one(capture: Path, target: str) -> Tuple[Dict[str, Set[str]], List[Dict[str, Any]], Optional[str]]:
@@ -172,7 +195,8 @@ def run_one(capture: Path, target: str) -> Tuple[Dict[str, Set[str]], List[Dict[
         return {}, [], "{}: {}".format(type(error).__name__, error)
     finally:
         translate.Capture.data = real  # type: ignore[method-assign]
-    return {ident: s.untaken() for ident, s in seen.items() if ident not in translate.NOT_SETTINGS}, ledger, None
+    entries = explained_entries(ledger)
+    return {ident: s.untaken(entries.get(ident, set())) for ident, s in seen.items() if ident not in translate.NOT_SETTINGS}, ledger, None
 
 
 def unmapped_keys(ledger: List[Dict[str, Any]]) -> Set[str]:
@@ -204,7 +228,7 @@ def explained_paths(ledger: List[Dict[str, Any]]) -> Dict[str, List[str]]:
 
 
 def under(leaf: str, paths: List[str]) -> bool:
-    bare = leaf.replace("[]", "")
+    bare = leaf.replace("[]", "").lstrip(".")  # "[].failover.x": a list read's entry
     return any(bare == p or bare.startswith(p + ".") for p in paths)
 
 

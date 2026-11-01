@@ -291,10 +291,11 @@ def deployed(ctx: Ctx, item: str, target: str, ifs: Dict[str, Any]) -> Dict[str,
     loopbacks/VTIs (gms_marked), and interfaces nothing in the preconfig deploys, which apply cannot configure."""
     names, gms = carried_ifs(ctx)
     for name in sorted(set(ifs) - names):
+        entry = item if "[" in item else "{}[{}]".format(item, name)  # the interface's own entry, so the ledger accounts for its fields
         if name in gms:
-            ctx.note(item, "orchestrator-managed", target, "OSPF interface {} is an Orchestrator-managed interface (gms_marked); not written".format(name))
+            ctx.note(entry, "orchestrator-managed", target, "OSPF interface {} is an Orchestrator-managed interface (gms_marked); not written".format(name))
         else:
-            ctx.note(item, "unresolved", target, "OSPF interface {} is not deployed in this preconfig (no deployment interface, loopback or VTI); not written".format(name))
+            ctx.note(entry, "unresolved", target, "OSPF interface {} is not deployed in this preconfig (no deployment interface, loopback or VTI); not written".format(name))
     return {k: v for k, v in ifs.items() if k in names}
 
 
@@ -707,6 +708,11 @@ def route_list(ctx: Ctx, entries: List[Dict[str, Any]], vrf: str, target: str = 
     return kept
 
 
+# A route's VXLAN next-hop fields and their defaults (every route in the field corpus but one, which had no_subshared true)
+VXLAN_HOP = {"vxlan": lambda v: not v, "vni": lambda v: v in (None, "", 0, 16777216, "16777216"), "dest_mac": lambda v: v is None or str(v).replace(":", "").strip("0") == "",
+             "no_subshared": lambda v: not v}
+
+
 def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.routes") -> Optional[Dict[str, Any]]:
     """One configured local route, or None when it is not written (the reason is ledgered)."""
     st = e["state"]
@@ -746,6 +752,10 @@ def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.
     if vrf != "0" and configured_table(ctx, vrf) is None:
         ctx.note("subnets-all-vrfs[{}]".format(vrf), "mapped", "segmentLocalRoutes.routes", "route {}: the segment's configured table (subnets3/configured/vrfs/{}) was not read, so the advertise flags "
                  "are taken from route state, which reports them as false (assumption: confirm the flags)".format(st["prefix"], vrf))
+    vx = sorted({k for src in (cfg, conf) for k in VXLAN_HOP if not VXLAN_HOP[k](src.get(k))})  # source coverage 2026-11-01: never read before
+    if vx:
+        ctx.note("subnets", "outside-preconfig", target, "route {}: VXLAN next-hop settings ({}) differ from the defaults; a preconfig route has no field for them, so the route is "
+                 "written without them; set them by hand".format(st["prefix"], ", ".join(vx)))
     for key, value in (("comment", cfg.get("comment") or conf.get("comment")), ("tag", cfg.get("dir") or conf.get("tag"))):  # subnets3 calls the tag dir, /subnets/all calls it tag
         if value:
             route[key] = value
@@ -975,13 +985,20 @@ def m_interfaceConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
             ctx.note("interface-state[mgmt0]", "outside-preconfig", "interfaceConfig", "mgmt0 is admin down; management ports are never carried (the management plane stays as the target has it)")
         if not re.match(r"^(lan|wan|tlan|twan|twlan|blan|bwan)\d+$", name):
             continue
-        if i.get("ifSpeed") in ("auto", "") and i.get("ifDuplex") in ("auto", "") and i.get("admin"):  # "": a bonded blanN/bwanN has no speed of its own
+        # a combo port (both RJ45 and SFP supported) runs in RJ45 (0) or SFP (3) mode
+        combo = i.get("comboPortConfig") if {x.strip() for x in str(i.get("comboPortSupported") or "").split(",")} == {"RJ45", "SFP"} else None
+        if combo is not None and str(combo) not in ("0", "3"):
+            ctx.note("interface-state[{}]".format(name), "unresolved", "interfaceConfig.interfaces.comboPortMode", "combo port mode {!r} is neither 0 (RJ45) nor 3 (SFP); not written".format(combo))
+            combo = None
+        if i.get("ifSpeed") in ("auto", "") and i.get("ifDuplex") in ("auto", "") and i.get("admin") and str(combo) in ("None", "0"):  # "": a bonded blanN/bwanN has no speed of its own
             continue
         speed = i.get("ifSpeed")
         if speed != "auto" and not str(speed).isdigit():
             ctx.note("interface-state[{}]".format(name), "unresolved", "interfaceConfig.interfaces", "speed {!r} is neither auto nor a number; interface not written".format(speed))
             continue
         entry = {"interfaceName": name, "interfaceSpeed": speed if speed == "auto" else int(speed), "interfaceDuplex": i["ifDuplex"], "admin": "up" if i["admin"] else "down"}
+        if str(combo) == "3":  # RJ45 (0) is the default and is left out, as before
+            entry["comboPortMode"] = 3
         out.append(entry)
     if not out:
         ctx.note("interface-state", "default-omitted", "interfaceConfig", "every LAN and WAN interface is admin up with auto speed and duplex (management ports are not carried)")
@@ -1285,6 +1302,10 @@ def m_flowRedirection(ctx: Ctx) -> Optional[Dict[str, Any]]:
 def m_vxlan(ctx: Ctx) -> Optional[Dict[str, Any]]:
     live = ctx.data("vxlan") or {}
     seg_map = ctx.data("vxlan-vni-map") or {}
+    if isinstance(live, dict) and "ERROR" in live:  # an error answer instead of /vxlan; NOT_AVAILABLE: the release has no VXLAN, nothing to ledger
+        if live["ERROR"] != "NOT_AVAILABLE":
+            ctx.note("vxlan", "not-readable", "vxlan", "the VXLAN read returned an error ({}); the VTEP interface is taken from the running-config when it has one".format(str(live["ERROR"])[:120]))
+        live = {"ERROR": live["ERROR"]}
     if isinstance(live, dict) and live.get("vtepIf") and isinstance(seg_map, dict):
         maps = []
         for seg_id, v in sorted(seg_map.items(), key=lambda kv: num_key(kv[0])):

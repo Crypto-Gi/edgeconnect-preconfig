@@ -80,3 +80,6 @@ ignore:
   - {read: secure-web-services, path: "isWebccSupported", why: "a model capability flag the appliance reports, not a setting; no field in any default template"}
   - {read: vxlan, path: "port", why: "the UDP port is read when the appliance has a VTEP interface; without one VXLAN is not written (the format requires vtepSrcInterface) and the VNI maps are ledgered"}
   - {read: multicast-config, path: "[].igmp", why: "an empty IGMP table; IGMP is written per PIM interface (igmpEnable), and a non-empty table stays reported field by field"}
+
+  # Triage of the third corpus run (2026-11-01, 48 leaves)
+  - {read: vtis, path: "*.nmask_alias", why: "the alias address's mask, read when the VTI has an alias address (ipAddressAliasMask); always 32 in the field corpus"}

@@ -51,6 +51,17 @@ class SourceCoverageTest(unittest.TestCase):
                   {"item": "vrrp.vmac", "disposition": "mapped"}]
         self.assertEqual(dict(sc.explained_paths(ledger)), {"bgp-system-all-vrfs": ["*.log_nbr_msgs"], "nac": ["applyPolicies"]})
 
+    def test_an_entry_the_ledger_explains_is_not_reported(self):
+        seen = sc.Seen()
+        d = sc.wrap({"lan0": {"cost": 1, "area": 0}, "lan9": {"cost": 1, "area": 0}, "t1": {"gmsMarked": 1, "id": 4}}, "", seen)
+        d["lan0"]["cost"]
+        self.assertEqual(seen.untaken(), {"*.area"})
+        self.assertEqual(seen.untaken({"lan9"}), {"*.area"})  # lan0's area is still untaken
+        self.assertEqual(seen.untaken({"lan0", "lan9"}), set())
+        ledger = [{"item": "ospf-interfaces[lan9]", "disposition": "unresolved"}, {"item": "vrrp[2]", "disposition": "unresolved"}, {"item": "vrrp[2]", "disposition": "mapped"}]
+        self.assertEqual(sc.explained_entries(ledger), {"ospf-interfaces": {"lan9"}, "vrrp": set()})
+        self.assertTrue(sc.under("[].failover.failoverEnabled", ["failover"]))
+
     def test_ignore_paths_are_literal_but_for_the_wildcard(self):
         self.assertTrue(sc.glob("modeIfs[].applianceIPs[].version", "modeIfs[].applianceIPs[].version"))
         self.assertFalse(sc.glob("modeIfs[].version", "modeIfs1.version"))

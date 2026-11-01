@@ -385,6 +385,9 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
         di["totalOutboundBandwidth"] = int(sys_cfg.get("maxBW") or 100000)
     with guarded(ctx, "deployment.sysConfig.maxInBW", "deploymentInfo.totalInboundBandwidth"):
         di["totalInboundBandwidth"] = int(sys_cfg.get("maxInBW") or sys_cfg.get("maxBW") or 100000)
+    if sys_cfg.get("maxInBWEnabled") is False:  # source coverage 2026-11-01: seen on one ECOS 9.3 capture, never read before
+        di_note("deployment.sysConfig.maxInBWEnabled", "outside-preconfig", "deploymentInfo.totalInboundBandwidth", "the appliance reports its inbound bandwidth limit as switched off; the "
+                "preconfig format has no switch, so totalInboundBandwidth {} is written as a limit; check by hand".format(di.get("totalInboundBandwidth")))
     if extra is not None:
         with guarded(ctx, "extra-info.overlaySettings", "deploymentInfo.ipsecUdpPort"):
             extra_ipsec = (extra.get("overlaySettings") or {})

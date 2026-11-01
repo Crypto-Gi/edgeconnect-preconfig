@@ -2085,3 +2085,45 @@ class InterfaceReferences(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SourceCoverageRun3(unittest.TestCase):
+    """Fields the third source coverage run found taken nowhere (2026-11-01)."""
+
+    def test_a_combo_port_in_sfp_mode_is_written(self):
+        info = [{"ifname": "lan2", "ifSpeed": "auto", "ifDuplex": "auto", "admin": True, "comboPortSupported": "RJ45,SFP", "comboPortConfig": 3},
+                {"ifname": "wan2", "ifSpeed": "auto", "ifDuplex": "auto", "admin": True, "comboPortSupported": "RJ45,SFP", "comboPortConfig": 0},
+                {"ifname": "lan0", "ifSpeed": "auto", "ifDuplex": "auto", "admin": True, "comboPortSupported": "SFP", "comboPortConfig": 3}]
+        c, notes = ctx({"interface-state": {"ifInfo": info}})
+        self.assertEqual(m_interfaceConfig(c)["interfaces"], [{"interfaceName": "lan2", "interfaceSpeed": "auto", "interfaceDuplex": "auto", "admin": "up", "comboPortMode": 3}])
+        c, notes = ctx({"interface-state": {"ifInfo": [dict(info[0], comboPortConfig=7)]}})
+        self.assertIsNone(m_interfaceConfig(c))
+        self.assertEqual([n["target"] for n in notes if n["disposition"] == "unresolved"], ["interfaceConfig.interfaces.comboPortMode"])
+
+    def test_a_route_with_vxlan_next_hop_settings_is_ledgered(self):
+        from mappers import m_localRoutes
+        st = {"configured": True, "local": True, "automatic": False, "prefix": "198.51.100.0/24", "nextHop": "192.0.2.254", "ifName": "lan0", "metric": 50, "advert": True, "advert_bgp": False, "advert_ospf": False}
+        hop = {"metric": 50, "dest_mac": "00:00:00:00:00:00", "vni": 16777216, "vxlan": False, "no_subshared": False}
+        for extra, flagged in (({}, []), ({"no_subshared": True}, ["no_subshared"]), ({"vxlan": True, "vni": 5001}, ["vni", "vxlan"])):
+            with self.subTest(extra=extra):
+                table = {"prefix": {"198.51.100.0/24": {"nhop": {"192.0.2.254": {"interface": {"lan0": dict(hop, **extra)}}}}}}
+                c, notes = ctx({"deployment": DEP, "subnets": {"subnets": {"entries": [{"state": st}]}}, "static-routes-configured": table})
+                self.assertEqual([r["routeIpSubnet"] for r in m_localRoutes(c)["routes"]], ["198.51.100.0/24"])
+                lines = [n["note"] for n in notes if n["disposition"] == "outside-preconfig"]
+                self.assertEqual(len(lines), 1 if flagged else 0, lines)
+                if flagged:
+                    self.assertIn("({})".format(", ".join(flagged)), lines[0])
+
+    def test_an_error_answer_from_vxlan_is_not_readable(self):
+        c, notes = ctx({"deployment": DEP, "vxlan": {"ERROR": "appliance did not answer"}, "vxlan-vni-map": {}})
+        self.assertIsNone(m_vxlan(c))
+        self.assertEqual([n["item"] for n in notes if n["disposition"] == "not-readable"], ["vxlan"])
+
+    def test_an_ospf_interface_not_written_is_ledgered_by_name(self):
+        from mappers import deployed
+        c, notes = ctx({"deployment": DEP})
+        self.assertEqual(deployed(c, "ospf-interfaces", "ospfSystemConfig.interfaces", {"lan9": {"cost": 1}}), {})
+        self.assertEqual([n["item"] for n in notes], ["ospf-interfaces[lan9]"])
+        c, notes = ctx({"deployment": DEP})
+        deployed(c, "ospf-interfaces-all-vrfs[2]", "segmentOspfConfig.interfaces", {"lan9": {"cost": 1}})
+        self.assertEqual([n["item"] for n in notes], ["ospf-interfaces-all-vrfs[2]"])
