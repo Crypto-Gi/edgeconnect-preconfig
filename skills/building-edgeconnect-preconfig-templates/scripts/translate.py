@@ -225,7 +225,7 @@ def drop_template_fields(out: Dict[str, Any], owned: Dict[str, Dict[Optional[str
             gone = set()
             if name == "bfd":  # /validate: "MinTxInterval of BFD ... must be a number between 300 and 5000": an entry needs its timers
                 if any(f in e for e in value for f in by_segment.get(ids_of(vrfs).get(e.get("segment")), set())):
-                    note("template bfd", "mapped", section, "the appliance's BFD timers are written although the 'bfd' template sets them: the format requires them in every entry")
+                    note("template bfd", "mapped", section, "the appliance's BFD timers (minTxInterval, minRxInterval, detectMultiplier) are written although the 'bfd' template sets them: the format requires them in every entry")
                 continue
             if name == "vrrp":
                 targets = [(None, e) for e in value.get("vrrpEntries", [])]

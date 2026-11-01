@@ -56,7 +56,7 @@ class BrowserTests(unittest.TestCase):
         cls.tmp = Path(tempfile.mkdtemp())
         cls.server, cls.patches = gui_launcher.start(cls.tmp)
         cls.playwright = sync_playwright().start()
-        cls.browser = cls.playwright.chromium.launch(executable_path=os.environ.get("EDGECONNECT_BROWSER_PATH") or None)
+        cls.browser = getattr(cls.playwright, os.environ.get("EDGECONNECT_BROWSER", "chromium")).launch(executable_path=os.environ.get("EDGECONNECT_BROWSER_PATH") or None)  # chromium, firefox or webkit
 
     @classmethod
     def tearDownClass(cls):
