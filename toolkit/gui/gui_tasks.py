@@ -649,9 +649,18 @@ def _watched(task: Task, folder: Path, appliance: str, call: Callable[[], engine
                     logs = [p for p in folder.glob(".incomplete-*/requests.jsonl") if own.match(p.parent.name) and p.stat().st_mtime >= task.created - 1]
                     log = max(logs, key=lambda p: p.stat().st_mtime) if logs else None
                 if log is not None:
-                    with log.open(encoding="utf-8") as handle:
-                        handle.seek(offset)
-                        text = handle.read()
+                    try:
+                        with log.open(encoding="utf-8") as handle:
+                            handle.seek(offset)
+                            text = handle.read()
+                    except FileNotFoundError:  # the capture ended: capture.py renamed its folder to <nePk>/<stamp>; read the lines not yet shown there
+                        moved = list(folder.glob("*/{}/requests.jsonl".format(log.parent.name.split("-")[-2])))
+                        if len(moved) != 1:
+                            raise
+                        log = moved[0]
+                        with log.open(encoding="utf-8") as handle:
+                            handle.seek(offset)
+                            text = handle.read()
                     complete = text[:text.rfind("\n") + 1]
                     offset += len(complete.encode("utf-8"))
                     for line in complete.splitlines():

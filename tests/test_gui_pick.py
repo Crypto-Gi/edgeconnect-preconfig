@@ -124,8 +124,11 @@ class PickTests(Fixture):
             for path in ("/gms/versions", "/appliance", "/reachability/gms"):
                 with log.open("a", encoding="utf-8") as handle:
                     handle.write(json.dumps({"method": "GET", "path": path, "status": "ok", "message": "never shown"}) + "\n")
-                time.sleep(0.3)
-            shutil.rmtree(str(log.parent))
+                if path != "/reachability/gms":  # the last line lands just before the rename: shown only from the renamed folder
+                    time.sleep(0.3)
+            final = out_root / "9.NE" / "20261030T000000Z"  # as capture.py ends: the folder is renamed, so the last line may not have been shown yet
+            final.parent.mkdir(parents=True)
+            log.parent.rename(final)
             return write_capture(Path(tempfile.mkdtemp(dir=str(self.tmp))) / "cap")
         patch = mock.patch.object(capture, "capture", side_effect=reading)
         patch.start()

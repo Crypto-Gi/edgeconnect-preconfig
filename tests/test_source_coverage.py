@@ -31,6 +31,37 @@ class SourceCoverageTest(unittest.TestCase):
             peer["priority"]
         self.assertEqual(seen.untaken(), {"peers.*.metric", "sites.*.a"})  # two records with the same fields: a record map
 
+    def test_a_read_is_explained_whole_only_without_a_mapped_line(self):
+        ledger = [{"item": "bgp-system, bgp-neighbors", "disposition": "default-omitted"}, {"item": "nac", "disposition": "default-omitted"},
+                  {"item": "vrrp[2]", "disposition": "unresolved"}, {"item": "vrrp", "disposition": "mapped"},
+                  {"item": "deployment.modeIfs[].dhcpd.server (relay)", "disposition": "outside-preconfig"}]
+        self.assertEqual(sc.explained_reads(ledger, {}), {"bgp-system", "bgp-neighbors", "nac"})  # vrrp is partly written; a path item names no read
+        self.assertEqual(dict(sc.explained_paths(ledger)), {"deployment": ["modeIfs.dhcpd.server"]})
+        self.assertTrue(sc.under("modeIfs[].dhcpd.server.ipStart", ["modeIfs.dhcpd.server"]))
+        self.assertFalse(sc.under("modeIfs[].dhcpd.serverX", ["modeIfs.dhcpd.server"]))
+
+    def test_an_object_orchestrator_pushed_is_not_reported(self):
+        seen = sc.Seen()
+        d = sc.wrap({"own": {"metric": 1, "tag": 2}, "pushed": {"gms_marked": True, "metric": 1, "tag": 2}}, "", seen)
+        d["own"]["metric"], d["pushed"]["gms_marked"]
+        self.assertEqual(seen.untaken(), {"own.tag"})
+
+    def test_entry_and_space_ledger_items_explain_paths(self):
+        ledger = [{"item": "bgp-system-all-vrfs[2].log_nbr_msgs", "disposition": "outside-preconfig"}, {"item": "nac applyPolicies", "disposition": "default-omitted"},
+                  {"item": "vrrp.vmac", "disposition": "mapped"}]
+        self.assertEqual(dict(sc.explained_paths(ledger)), {"bgp-system-all-vrfs": ["*.log_nbr_msgs"], "nac": ["applyPolicies"]})
+
+    def test_an_entry_the_ledger_explains_is_not_reported(self):
+        seen = sc.Seen()
+        d = sc.wrap({"lan0": {"cost": 1, "area": 0}, "lan9": {"cost": 1, "area": 0}, "t1": {"gmsMarked": 1, "id": 4}}, "", seen)
+        d["lan0"]["cost"]
+        self.assertEqual(seen.untaken(), {"*.area"})
+        self.assertEqual(seen.untaken({"lan9"}), {"*.area"})  # lan0's area is still untaken
+        self.assertEqual(seen.untaken({"lan0", "lan9"}), set())
+        ledger = [{"item": "ospf-interfaces[lan9]", "disposition": "unresolved"}, {"item": "vrrp[2]", "disposition": "unresolved"}, {"item": "vrrp[2]", "disposition": "mapped"}]
+        self.assertEqual(sc.explained_entries(ledger), {"ospf-interfaces": {"lan9"}, "vrrp": set()})
+        self.assertTrue(sc.under("[].failover.failoverEnabled", ["failover"]))
+
     def test_ignore_paths_are_literal_but_for_the_wildcard(self):
         self.assertTrue(sc.glob("modeIfs[].applianceIPs[].version", "modeIfs[].applianceIPs[].version"))
         self.assertFalse(sc.glob("modeIfs[].version", "modeIfs1.version"))

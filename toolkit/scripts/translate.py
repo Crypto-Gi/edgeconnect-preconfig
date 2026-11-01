@@ -385,6 +385,9 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
         di["totalOutboundBandwidth"] = int(sys_cfg.get("maxBW") or 100000)
     with guarded(ctx, "deployment.sysConfig.maxInBW", "deploymentInfo.totalInboundBandwidth"):
         di["totalInboundBandwidth"] = int(sys_cfg.get("maxInBW") or sys_cfg.get("maxBW") or 100000)
+    if sys_cfg.get("maxInBWEnabled") is False:  # source coverage 2026-11-01: seen on one ECOS 9.3 capture, never read before
+        di_note("deployment.sysConfig.maxInBWEnabled", "outside-preconfig", "deploymentInfo.totalInboundBandwidth", "the appliance reports its inbound bandwidth limit as switched off; the "
+                "preconfig format has no switch, so totalInboundBandwidth {} is written as a limit; check by hand".format(di.get("totalInboundBandwidth")))
     if extra is not None:
         with guarded(ctx, "extra-info.overlaySettings", "deploymentInfo.ipsecUdpPort"):
             extra_ipsec = (extra.get("overlaySettings") or {})
@@ -680,7 +683,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
         di["dhcpInfo"] = dhcp
         note("deployment.modeIfs[].dhcpd", "mapped", "deploymentInfo.dhcpInfo", "{} DHCP servers; empty ntp/netbios lists omitted".format(len(dhcp)))
     if relay_leases:
-        note("deployment.modeIfs[].dhcpd.server (relay)", "outside-preconfig", "deploymentInfo.dhcpInfo",
+        note("deployment.modeIfs[].applianceIPs[].dhcpd.server (relay)", "outside-preconfig", "deploymentInfo.dhcpInfo",
              "relay interfaces keep lease times in an inactive DHCP server block, and the preconfig relay entry has no lease fields: {}".format(", ".join(relay_leases)))
     if ra_skipped:
         note("deployment.modeIfs[].ra", "runtime", "deploymentInfo.raInfo", "{} IPv4 interfaces carry a default router-advertisement block; the validator rejects raInfo on IPv4 interfaces".format(len(ra_skipped)))

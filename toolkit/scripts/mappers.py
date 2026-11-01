@@ -291,21 +291,22 @@ def deployed(ctx: Ctx, item: str, target: str, ifs: Dict[str, Any]) -> Dict[str,
     loopbacks/VTIs (gms_marked), and interfaces nothing in the preconfig deploys, which apply cannot configure."""
     names, gms = carried_ifs(ctx)
     for name in sorted(set(ifs) - names):
+        entry = item if "[" in item else "{}[{}]".format(item, name)  # the interface's own entry, so the ledger accounts for its fields
         if name in gms:
-            ctx.note(item, "orchestrator-managed", target, "OSPF interface {} is an Orchestrator-managed interface (gms_marked); not written".format(name))
+            ctx.note(entry, "orchestrator-managed", target, "OSPF interface {} is an Orchestrator-managed interface (gms_marked); not written".format(name))
         else:
-            ctx.note(item, "unresolved", target, "OSPF interface {} is not deployed in this preconfig (no deployment interface, loopback or VTI); not written".format(name))
+            ctx.note(entry, "unresolved", target, "OSPF interface {} is not deployed in this preconfig (no deployment interface, loopback or VTI); not written".format(name))
     return {k: v for k, v in ifs.items() if k in names}
 
 
 def m_ospfSystemConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
     all_systems, all_ifs = ctx.data("ospf-system-all-vrfs") or {}, ctx.data("ospf-interfaces-all-vrfs")
     if any(vrf != "0" and ospf_runs(all_systems, all_ifs, vrf) for vrf in all_systems):
-        ctx.note("ospf-system", "default-omitted", "ospfSystemConfig", "non-default segment OSPF exists, so Default segment OSPF is included in segmentOspfConfig (Orchestrator ignores ospfSystemConfig when segmentOspfConfig is present)")
+        ctx.note("ospf-system, ospf-interfaces", "default-omitted", "ospfSystemConfig", "non-default segment OSPF exists, so Default segment OSPF is included in segmentOspfConfig (Orchestrator ignores ospfSystemConfig when segmentOspfConfig is present)")
         return None
     system, areas, ifs = ctx.data("ospf-system"), ctx.data("ospf-areas"), ctx.data("ospf-interfaces")
     if not system or (not system.get("enable") and not ifs):
-        ctx.note("ospf-system", "default-omitted", "ospfSystemConfig", "OSPF disabled and no interfaces")
+        ctx.note("ospf-system, ospf-areas, ospf-interfaces", "default-omitted", "ospfSystemConfig", "OSPF disabled and no interfaces")
         return None
     if ifs is None:  # interfaces replace on apply: an unread list is never written as an empty one
         ctx.note("ospf-interfaces", "not-readable", "ospfSystemConfig.interfaces", "OSPF is enabled but its interfaces could not be read, so ospfSystemConfig is not written; check it by hand")
@@ -453,6 +454,10 @@ def m_secureWebServicesConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
 BGP_NEIGHBOR_USED = {"remote_as", "type", "enable", "hold", "ka", "lcl_interface", "next_hop_self", "password", "rtmap_inbound", "rtmap_outbound", "evpn", "bfd_desired", "directly_connected", "store_received_routes"}
 
 
+def target_of(vrf: Optional[str]) -> str:
+    return "segmentBgpSystems" if vrf is not None else "bgpSystemConfig"
+
+
 def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str, Any], vrf: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """BGP of the Default segment, or with vrf of that segment (segmentBgpSystems)."""
     live = [(ip, n) for ip, n in sorted((neighbors or {}).items()) if not managed(n)]
@@ -478,6 +483,8 @@ def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str,
         out["importRouteTarget"], out["exportRouteTarget"] = rt.get("import"), rt.get("export")
     elif rt:
         ctx.note(label, "default-omitted", "bgpSystemConfig.import/exportRouteTarget", "0:0 means no route target (the validator rejects ASN 0)")
+    if system.get("log_nbr_msgs") and label != "check":  # source coverage 2026-11-01: was marked used but never written
+        ctx.note(label + ".log_nbr_msgs", "outside-preconfig", target_of(vrf), "logging of BGP neighbor changes is on; the preconfig format has no field for it; set it by hand or with a template")
     ctx.unmapped(label, system, {"enable", "asn", "rtr_id", "graceful_restart_en", "max_restart_time", "stale_path_time", "remote_as_path_advertise", "route_target", "neighbor", "enable_gms_marked", "log_nbr_msgs"}, "bgpSystemConfig")
     out["neighbors"] = []
     target = "segmentBgpSystems.neighbors" if vrf is not None else "bgpSystemConfig.neighbors"
@@ -530,7 +537,7 @@ def m_segmentBgpSystems(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
     systems, neighbors = ctx.data("bgp-system-all-vrfs") or {}, ctx.data("bgp-neighbors-all-vrfs")
     non_default = [vrf for vrf in sorted(systems) if vrf != "0" and has_bgp(ctx, systems[vrf], neighbors, vrf)]
     if not non_default:
-        ctx.note("bgp-system-all-vrfs", "default-omitted", "segmentBgpSystems", "0 non-default segments with BGP")
+        ctx.note("bgp-system-all-vrfs, bgp-neighbors-all-vrfs", "default-omitted", "segmentBgpSystems", "0 non-default segments with BGP (the Default segment's BGP comes from the Default reads)")
         return None
     out = [v for v in each(ctx, "bgp-system-all-vrfs", "segmentBgpSystems", sorted(systems.items()),
                            lambda vrf, s: bgp_value(ctx, "bgp-system-all-vrfs[{}]".format(vrf), s, block(neighbors, vrf), vrf)) if v]
@@ -634,7 +641,7 @@ def m_segmentOspfConfig(ctx: Ctx) -> Optional[List[Dict[str, Any]]]:
         elif runs[vrf] and s and not s.get("enable") and enabled and isinstance((interfaces or {}).get(vrf, {}), dict) and interfaces is not None:
             ctx.note("ospf-system-all-vrfs[{}]".format(vrf), "mapped", "segmentOspfConfig", "segment {}: OSPF switched off but configured on interfaces; written with enable false".format(ctx.segment(vrf, strict=False)))
     if not enabled:
-        ctx.note("ospf-system-all-vrfs", "default-omitted", "segmentOspfConfig", "0 non-default segments with OSPF")
+        ctx.note("ospf-system-all-vrfs, ospf-interfaces-all-vrfs", "default-omitted", "segmentOspfConfig", "0 non-default segments with OSPF (the Default segment's OSPF comes from the Default reads)")
         return None
     out = []
     for vrf in sorted(systems):
@@ -701,6 +708,11 @@ def route_list(ctx: Ctx, entries: List[Dict[str, Any]], vrf: str, target: str = 
     return kept
 
 
+# A route's VXLAN next-hop fields and their defaults (every route in the field corpus but one, which had no_subshared true)
+VXLAN_HOP = {"vxlan": lambda v: not v, "vni": lambda v: v in (None, "", 0, 16777216, "16777216"), "dest_mac": lambda v: v is None or str(v).replace(":", "").strip("0") == "",
+             "no_subshared": lambda v: not v}
+
+
 def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.routes") -> Optional[Dict[str, Any]]:
     """One configured local route, or None when it is not written (the reason is ledgered)."""
     st = e["state"]
@@ -740,6 +752,10 @@ def one_route(ctx: Ctx, e: Dict[str, Any], vrf: str, target: str = "localRoutes.
     if vrf != "0" and configured_table(ctx, vrf) is None:
         ctx.note("subnets-all-vrfs[{}]".format(vrf), "mapped", "segmentLocalRoutes.routes", "route {}: the segment's configured table (subnets3/configured/vrfs/{}) was not read, so the advertise flags "
                  "are taken from route state, which reports them as false (assumption: confirm the flags)".format(st["prefix"], vrf))
+    vx = sorted({k for src in (cfg, conf) for k in VXLAN_HOP if not VXLAN_HOP[k](src.get(k))})  # source coverage 2026-11-01: never read before
+    if vx:
+        ctx.note("subnets", "outside-preconfig", target, "route {}: VXLAN next-hop settings ({}) differ from the defaults; a preconfig route has no field for them, so the route is "
+                 "written without them; set them by hand".format(st["prefix"], ", ".join(vx)))
     for key, value in (("comment", cfg.get("comment") or conf.get("comment")), ("tag", cfg.get("dir") or conf.get("tag"))):  # subnets3 calls the tag dir, /subnets/all calls it tag
         if value:
             route[key] = value
@@ -926,6 +942,9 @@ def m_dhcpRemoteAddressPoolConfig(ctx: Ctx) -> Optional[Any]:
     if options:
         pools[-1]["options"] = options
     for p in source:
+        if isinstance(p.get("failover"), dict) and p["failover"].get("failoverEnabled"):  # source coverage 2026-11-01: was marked used but never written
+            ctx.note("dhcp-remote-subnets.failover", "outside-preconfig", "dhcpRemoteAddressPoolConfig",
+                     "pool {} has DHCP failover on; the preconfig remote pool has no failover fields, so the target keeps its own; set failover by hand".format(p["subnet"]))
         ctx.unmapped("dhcp-remote-subnets", p, {"interface", "subnet", "scopeName", "ipRange", "gatewayIp", "dnsServers", "ntpServers", "netbiosNameServers", "netbiosNodeType", "maxLeaseTime", "defaultLeaseTime", "failover", "options"}, "dhcpRemoteAddressPoolConfig")
     ctx.note("dhcp-remote-subnets", "mapped", "dhcpRemoteAddressPoolConfig", "latest of {} remote pool(s)".format(len(pools)))
     if len(pools) > 1:
@@ -966,13 +985,24 @@ def m_interfaceConfig(ctx: Ctx) -> Optional[Dict[str, Any]]:
             ctx.note("interface-state[mgmt0]", "outside-preconfig", "interfaceConfig", "mgmt0 is admin down; management ports are never carried (the management plane stays as the target has it)")
         if not re.match(r"^(lan|wan|tlan|twan|twlan|blan|bwan)\d+$", name):
             continue
-        if i.get("ifSpeed") in ("auto", "") and i.get("ifDuplex") in ("auto", "") and i.get("admin"):  # "": a bonded blanN/bwanN has no speed of its own
+        # a combo port (both RJ45 and SFP supported) runs in RJ45 (0) or SFP (3) mode; on a single-media port the mode is fixed by the hardware
+        mode, media = i.get("comboPortConfig"), {x.strip() for x in str(i.get("comboPortSupported") or "").split(",")}
+        combo = mode if media == {"RJ45", "SFP"} else None
+        if combo is not None and str(combo) not in ("0", "3"):
+            ctx.note("interface-state[{}]".format(name), "unresolved", "interfaceConfig.interfaces.comboPortMode", "combo port mode {!r} is neither 0 (RJ45) nor 3 (SFP); not written".format(combo))
+            combo = None
+        if i.get("ifSpeed") in ("auto", "") and i.get("ifDuplex") in ("auto", "") and i.get("admin") and str(combo) in ("None", "0"):  # "": a bonded blanN/bwanN has no speed of its own
             continue
         speed = i.get("ifSpeed")
         if speed != "auto" and not str(speed).isdigit():
             ctx.note("interface-state[{}]".format(name), "unresolved", "interfaceConfig.interfaces", "speed {!r} is neither auto nor a number; interface not written".format(speed))
             continue
         entry = {"interfaceName": name, "interfaceSpeed": speed if speed == "auto" else int(speed), "interfaceDuplex": i["ifDuplex"], "admin": "up" if i["admin"] else "down"}
+        if str(combo) == "3":  # RJ45 (0) is the default and is left out, as before
+            entry["comboPortMode"] = 3
+        if speed != "auto" and i["ifDuplex"] == "auto":  # lab 2026-11-01: ECOS 9.6.2.1 applies this without error but keeps the old speed and duplex
+            ctx.note("interface-state[{}]".format(name), "mapped", "interfaceConfig.interfaces", "{}: speed {} with duplex auto is written as the source has it; ECOS 9.6.2.1 has been seen to keep the "
+                     "old speed and duplex for this pair with no error (references/known-constraints.yaml); check the interface after apply".format(name, speed))
         out.append(entry)
     if not out:
         ctx.note("interface-state", "default-omitted", "interfaceConfig", "every LAN and WAN interface is admin up with auto speed and duplex (management ports are not carried)")
@@ -1276,6 +1306,10 @@ def m_flowRedirection(ctx: Ctx) -> Optional[Dict[str, Any]]:
 def m_vxlan(ctx: Ctx) -> Optional[Dict[str, Any]]:
     live = ctx.data("vxlan") or {}
     seg_map = ctx.data("vxlan-vni-map") or {}
+    if isinstance(live, dict) and "ERROR" in live:  # an error answer instead of /vxlan; NOT_AVAILABLE: the release has no VXLAN, nothing to ledger
+        if live["ERROR"] != "NOT_AVAILABLE":
+            ctx.note("vxlan", "not-readable", "vxlan", "the VXLAN read returned an error ({}); the VTEP interface is taken from the running-config when it has one".format(str(live["ERROR"])[:120]))
+        live = {"ERROR": live["ERROR"]}
     if isinstance(live, dict) and live.get("vtepIf") and isinstance(seg_map, dict):
         maps = []
         for seg_id, v in sorted(seg_map.items(), key=lambda kv: num_key(kv[0])):
@@ -1457,6 +1491,13 @@ def m_tunnelConfiguration(ctx: Ctx) -> Optional[Dict[str, Any]]:
             encap = ENCAP.get(v["mode"], v["mode"])
             t: Dict[str, Any] = {"tunnelName": v["alias"], "tunnelType": "passthrough", "tunnelEncap": encap, "admin": "Up" if v["adminStatus"] == "up" else "Down", "localIp": v["sourceIpAddress"],
                                  "remoteIp": nul(v["destIpAddress"]), "natMode": v["natMode"], "peerName": nul(v["peerName"]), "enableAutoMaxBandwidth": v["max_bw_auto"], "maxBandwidth": v["max_bw"]}
+            if str(v.get("local_vrf", 0)) not in ("0", "None"):  # source coverage 2026-11-01: was never read, so a segment's tunnel was written into Default
+                t["segment"] = ctx.segment(str(v["local_vrf"]))
+            fec_on = v.get("fecStatus") not in (None, "", "disable", "disabled", "off")  # the ratio means nothing while FEC is off (every corpus tunnel: disable, 10)
+            extra = {key: v.get(key) for key in (("fecStatus", "fecRatio") if fec_on else ()) + ("tag", "max_bw_unshaped") if v.get(key) not in (None, "", False, 0)}
+            if extra:
+                ctx.note("passthrough-tunnels[{}]".format(k), "outside-preconfig", "tunnelConfiguration", "tunnel {}: {}; a preconfig tunnel has no field for these, so the target keeps its own; "
+                         "set them by hand".format(v["alias"], ", ".join("{} {}".format(key, val) for key, val in sorted(extra.items()))))
             if encap == "ipsec":
                 id_val = None if v.get("ike_version") == 2 and v.get("id_type") == "address" and v.get("id_str") == v.get("ike_id_local") else nul(v["id_str"])
                 t["ikeConfig"] = {"presharedKey": v.get("presharedkey") or "<SECRET:not-captured>", "ikeAuthAlgorithm": v["ike_aalg"], "ikeEncryptAlgorithm": v["ike_ealg"], "diffHellManGroup": int(v["dhgroup"]),
@@ -1464,6 +1505,9 @@ def m_tunnelConfiguration(ctx: Ctx) -> Optional[Dict[str, Any]]:
                                   "exchangeMode": v["exchange_mode"], "ikeVersion": v["ike_version"], "localIkeIdentifier": nul(v["ike_id_local"]), "remoteIkeIdentifier": nul(v["ike_id_remote"]), "ikePrf": v["ike_prf"]}
                 t["ipsecConfig"] = {"ipsecAuthAlgorithm": v["ah"], "ipsecEncryptAlgorithm": "null" if "gmac" in str(v["ah"]) else {"": "auto", None: "auto", "null": "none"}.get(v.get("esp"), v.get("esp")), "enableIpSecArcWindow": 0 if v["ipsecAntiReplayWindow"] == "disable" else int(v["ipsecAntiReplayWindow"]), "ipsecLifetime": v["lifetime"],
                                     "ipsecLifetimeBytes": v["lifebytes"], "secrecyGroup": int(v["pfsgroup"]) if v.get("pfs") else "disable", "ipsecSuiteB": v["ipsec_Suite_b"]}  # null lets the appliance default (PFS on, group 2)
+        except Unresolved as err:  # a segment id that names no segment
+            item_failed(ctx, "passthrough-tunnels[{}]".format(k), "tunnelConfiguration", err)
+            continue
         except (KeyError, TypeError, ValueError) as err:
             ctx.note("passthrough-tunnels[{}]".format(k), "toolkit-error", "tunnelConfiguration", "tunnel {} not written: the mapper could not read it ({}: {}); a toolkit bug to report".format(v.get("alias", k), type(err).__name__, err))
             continue

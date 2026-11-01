@@ -1082,6 +1082,13 @@ class ItemIsolation(IsolationCheck, unittest.TestCase):
         data = {"deployment": DEP, "bgp-system": {"enable": True, "asn": 65000}, "bgp-neighbors": {"192.0.2.1": n, "192.0.2.2": {"type": "Branch"}}}
         self.check(m_bgpSystemConfig, data, lambda o: [x["peerIpAddress"] for x in o["neighbors"]], ["192.0.2.1"], "bgpSystemConfig.neighbors")
 
+    def test_bgp_neighbor_logging_is_ledgered(self):
+        from mappers import m_bgpSystemConfig
+        for on in (True, False):
+            c, notes = ctx({"deployment": DEP, "bgp-system": {"enable": True, "asn": 65000, "log_nbr_msgs": on}, "bgp-neighbors": {}})
+            m_bgpSystemConfig(c)
+            self.assertEqual([n["item"] for n in notes if n["disposition"] == "outside-preconfig"], ["bgp-system.log_nbr_msgs"] if on else [])
+
     def test_port_forwarding_rule(self):
         from mappers import m_inboundPortForwarding
         r = {"srcSubnet": "0.0.0.0/0", "destSubnet": "192.0.2.10/32", "destPort": "443", "protocol": "tcp", "targetIp": "", "targetPort": "", "srcIf": "any", "vrf_id": 0, "comment": ""}
@@ -1718,6 +1725,14 @@ class DhcpRemotePoolOptions(unittest.TestCase):
         self.assertEqual(m_dhcpRemoteAddressPoolConfig(c)["dhcpAddressMask"], "192.168.8.0/24")
         self.assertEqual([n["item"] for n in notes if n["disposition"] == "toolkit-error"], ["dhcp-remote-subnets.options[0]"])
 
+    def test_failover_on_a_remote_pool_is_ledgered(self):
+        c, notes = ctx({"dhcp-remote-subnets": [dict(self.POOL, failover={"failoverEnabled": True})]})
+        self.assertEqual(m_dhcpRemoteAddressPoolConfig(c)["dhcpAddressMask"], "192.168.8.0/24")
+        self.assertEqual([n["item"] for n in notes if n["disposition"] == "outside-preconfig"], ["dhcp-remote-subnets.failover"])
+        c, notes = ctx({"dhcp-remote-subnets": [dict(self.POOL, failover={"failoverEnabled": False})]})
+        m_dhcpRemoteAddressPoolConfig(c)
+        self.assertFalse([n for n in notes if n["disposition"] == "outside-preconfig"])
+
     def test_an_option_with_its_code_is_written_as_is(self):
         c, notes = ctx({"dhcp-remote-subnets": [dict(self.POOL, options=[{"option": 6, "value": "192.0.2.53"}])]})
         self.assertEqual(m_dhcpRemoteAddressPoolConfig(c).get("options"), [{"option": 6, "value": "192.0.2.53"}])
@@ -2070,3 +2085,71 @@ class InterfaceReferences(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SourceCoverageRun3(unittest.TestCase):
+    """Fields the third source coverage run found taken nowhere (2026-11-01)."""
+
+    def test_a_combo_port_in_sfp_mode_is_written(self):
+        info = [{"ifname": "lan2", "ifSpeed": "auto", "ifDuplex": "auto", "admin": True, "comboPortSupported": "RJ45,SFP", "comboPortConfig": 3},
+                {"ifname": "wan2", "ifSpeed": "auto", "ifDuplex": "auto", "admin": True, "comboPortSupported": "RJ45,SFP", "comboPortConfig": 0},
+                {"ifname": "lan0", "ifSpeed": "auto", "ifDuplex": "auto", "admin": True, "comboPortSupported": "SFP", "comboPortConfig": 3}]
+        c, notes = ctx({"interface-state": {"ifInfo": info}})
+        self.assertEqual(m_interfaceConfig(c)["interfaces"], [{"interfaceName": "lan2", "interfaceSpeed": "auto", "interfaceDuplex": "auto", "admin": "up", "comboPortMode": 3}])
+        c, notes = ctx({"interface-state": {"ifInfo": [dict(info[0], comboPortConfig=7)]}})
+        self.assertIsNone(m_interfaceConfig(c))
+        self.assertEqual([n["target"] for n in notes if n["disposition"] == "unresolved"], ["interfaceConfig.interfaces.comboPortMode"])
+
+    def test_a_route_with_vxlan_next_hop_settings_is_ledgered(self):
+        from mappers import m_localRoutes
+        st = {"configured": True, "local": True, "automatic": False, "prefix": "198.51.100.0/24", "nextHop": "192.0.2.254", "ifName": "lan0", "metric": 50, "advert": True, "advert_bgp": False, "advert_ospf": False}
+        hop = {"metric": 50, "dest_mac": "00:00:00:00:00:00", "vni": 16777216, "vxlan": False, "no_subshared": False}
+        for extra, flagged in (({}, []), ({"no_subshared": True}, ["no_subshared"]), ({"vxlan": True, "vni": 5001}, ["vni", "vxlan"])):
+            with self.subTest(extra=extra):
+                table = {"prefix": {"198.51.100.0/24": {"nhop": {"192.0.2.254": {"interface": {"lan0": dict(hop, **extra)}}}}}}
+                c, notes = ctx({"deployment": DEP, "subnets": {"subnets": {"entries": [{"state": st}]}}, "static-routes-configured": table})
+                self.assertEqual([r["routeIpSubnet"] for r in m_localRoutes(c)["routes"]], ["198.51.100.0/24"])
+                lines = [n["note"] for n in notes if n["disposition"] == "outside-preconfig"]
+                self.assertEqual(len(lines), 1 if flagged else 0, lines)
+                if flagged:
+                    self.assertIn("({})".format(", ".join(flagged)), lines[0])
+
+    def test_an_error_answer_from_vxlan_is_not_readable(self):
+        c, notes = ctx({"deployment": DEP, "vxlan": {"ERROR": "appliance did not answer"}, "vxlan-vni-map": {}})
+        self.assertIsNone(m_vxlan(c))
+        self.assertEqual([n["item"] for n in notes if n["disposition"] == "not-readable"], ["vxlan"])
+
+    def test_an_ospf_interface_not_written_is_ledgered_by_name(self):
+        from mappers import deployed
+        c, notes = ctx({"deployment": DEP})
+        self.assertEqual(deployed(c, "ospf-interfaces", "ospfSystemConfig.interfaces", {"lan9": {"cost": 1}}), {})
+        self.assertEqual([n["item"] for n in notes], ["ospf-interfaces[lan9]"])
+        c, notes = ctx({"deployment": DEP})
+        deployed(c, "ospf-interfaces-all-vrfs[2]", "segmentOspfConfig.interfaces", {"lan9": {"cost": 1}})
+        self.assertEqual([n["item"] for n in notes], ["ospf-interfaces-all-vrfs[2]"])
+
+    def test_a_tunnel_keeps_its_segment_and_ledgers_fec_and_tag(self):
+        gre = {"alias": "G1", "mode": "gre", "adminStatus": "up", "sourceIpAddress": "192.0.2.1", "destIpAddress": "198.51.100.1", "natMode": "none", "peerName": "", "max_bw_auto": True, "max_bw": 0,
+               "local_vrf": 0, "fecStatus": "disable", "fecRatio": 10, "tag": "", "max_bw_unshaped": False, "gmsMarked": False}
+        c, notes = ctx({"deployment": DEP, "passthrough-tunnels": {"a": gre}})
+        t = m_tunnelConfiguration(c)["tunnels"][0]
+        self.assertNotIn("segment", t)
+        self.assertFalse([n for n in notes if n["disposition"] == "outside-preconfig"])
+        dep = dict(DEP, sysConfig=dict(DEP["sysConfig"], vrfs=[{"id": "0", "name": "Default"}, {"id": "2", "name": "corp"}]))
+        c, notes = ctx({"deployment": dep, "passthrough-tunnels": {"a": dict(gre, local_vrf=2, fecStatus="enable", fecRatio=10, tag="t1")}})
+        self.assertEqual(m_tunnelConfiguration(c)["tunnels"][0]["segment"], "corp")
+        self.assertEqual([n["note"].split(";")[0] for n in notes if n["disposition"] == "outside-preconfig"], ["tunnel G1: fecRatio 10, fecStatus enable, tag t1"])
+        c, notes = ctx({"deployment": DEP, "passthrough-tunnels": {"a": dict(gre, local_vrf=9)}})
+        self.assertIsNone(m_tunnelConfiguration(c))
+        self.assertEqual([n["disposition"] for n in notes if n["item"] == "passthrough-tunnels[a]"], ["unresolved"])
+
+    def test_a_single_media_port_keeps_its_hardware_mode_out(self):
+        info = [{"ifname": "lan1", "ifSpeed": "auto", "ifDuplex": "auto", "admin": True, "comboPortSupported": "SFP", "comboPortConfig": 3},
+                {"ifname": "lan0", "ifSpeed": "1000", "ifDuplex": "full", "admin": True, "comboPortSupported": "RJ45", "comboPortConfig": 0}]
+        self.assertEqual(m_interfaceConfig(ctx({"interface-state": {"ifInfo": info}})[0])["interfaces"], [{"interfaceName": "lan0", "interfaceSpeed": 1000, "interfaceDuplex": "full", "admin": "up"}])
+
+    def test_a_fixed_speed_with_auto_duplex_is_ledgered(self):
+        info = [{"ifname": "lan0", "ifSpeed": "1000", "ifDuplex": "auto", "admin": True}, {"ifname": "lan1", "ifSpeed": "100", "ifDuplex": "full", "admin": True}]
+        c, notes = ctx({"interface-state": {"ifInfo": info}})
+        self.assertEqual(len(m_interfaceConfig(c)["interfaces"]), 2)
+        self.assertEqual([n["item"] for n in notes if "duplex auto" in n["note"]], ["interface-state[lan0]"])
