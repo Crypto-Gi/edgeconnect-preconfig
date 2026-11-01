@@ -39,6 +39,14 @@ def no_rp(doc: Any) -> List[str]:
             for i, e in enumerate(entries if isinstance(entries, list) else []) if isinstance(e, dict) and str(e.get("enable")).lower() == "true" and e.get("rpAddresses") in (None, "", [])]
 
 
+VRRP_KEY_MAX = 8  # Orchestrator /validate: "VRRP - authenticationString is maximum 8 characters" (full-coverage lab)
+
+
+def dummy_secret(path: str) -> str:
+    """The stand-in for an empty secret cell in a /validate run: one /validate accepts for that field."""
+    return "TestOnl1" if path.endswith("authenticationString") else "Test-Only-Secret-1"
+
+
 def validate_rejects(doc: Any) -> List[Any]:
     """(section, reason) for each value the appliance holds that Orchestrator /validate rejects (full-coverage lab, Pass 1, 2026-10-31):
     named offline, never changed."""
@@ -64,9 +72,9 @@ def validate_rejects(doc: Any) -> List[Any]:
     vrrp = doc.get("vrrp") if isinstance(doc.get("vrrp"), dict) else {}
     for v in (x for x in (vrrp.get("vrrpEntries") or []) if isinstance(x, dict)):
         key = v.get("authenticationString")
-        if isinstance(key, str) and not key.startswith("<SECRET:") and len(key) > 8:  # the length only, never the key
-            out.append(("vrrp", "VRRP group {} on {}: the authentication key is {} characters; Orchestrator /validate allows at most 8 (full-coverage lab)".format(
-                v.get("groupId"), v.get("interfaceName"), len(key))))
+        if isinstance(key, str) and not key.startswith("<SECRET:") and len(key) > VRRP_KEY_MAX:  # the length only, never the key
+            out.append(("vrrp", "VRRP group {} on {}: the authentication key is {} characters; Orchestrator /validate allows at most {} (full-coverage lab)".format(
+                v.get("groupId"), v.get("interfaceName"), len(key), VRRP_KEY_MAX)))
     return out
 
 
@@ -120,7 +128,7 @@ def run(site_dir: Path, site: str, extra_rows: Optional[Path], validate: Optiona
             row_for_validation = dict(row)
             for n, c in columns.items():
                 if c["secret"] and c["had_value"] and not row_for_validation[n]:
-                    row_for_validation[n] = "Test-Only-Secret-1"
+                    row_for_validation[n] = dummy_secret(c["path"])
             val_text = render_row(template, row_for_validation)
             if inv is not None:
                 val_text = dump(swap(parse_yaml(val_text), inv, subst_notes))

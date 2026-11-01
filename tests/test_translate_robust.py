@@ -777,6 +777,9 @@ class ValidateRejectsNamedOffline(unittest.TestCase):
         self.assertEqual([section for section, _ in validate_rejects(doc)], ["ospfSystemConfig", "deploymentInfo", "deploymentInfo"])
         vrrp = {"vrrp": {"vrrpEntries": [{"groupId": 1, "interfaceName": "lan0", "authenticationString": k} for k in ("Abcdefg9", "Abcdefgh9", "<SECRET:vrrp.auth>")]}}
         self.assertEqual(validate_rejects(vrrp), [("vrrp", "VRRP group 1 on lan0: the authentication key is 9 characters; Orchestrator /validate allows at most 8 (full-coverage lab)")])
+        from check import dummy_secret  # the --validate stand-in for an empty secret cell must pass the same rule (gate rc.3: 3.NE, 4.NE)
+        vrrp["vrrp"]["vrrpEntries"] = [{"groupId": 1, "interfaceName": "lan0", "authenticationString": dummy_secret("vrrp.vrrpEntries[0].authenticationString")}]
+        self.assertEqual(validate_rejects(vrrp), [])
         self.assertEqual(len(got), 3, got)
         self.assertTrue(got[0].startswith("OSPF area 0.0.0.2 (segment Default): areaType 2"), got[0])
         self.assertTrue(got[1].startswith("DHCP relay on lan1.212: option 82 is on with no sub-option"), got[1])
