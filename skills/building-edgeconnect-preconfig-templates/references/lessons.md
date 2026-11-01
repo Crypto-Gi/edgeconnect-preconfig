@@ -145,6 +145,8 @@ Verified across HPE Aruba EdgeConnect Orchestrator releases `9.6.4`, `9.7.1`, an
 
 22. **Interface references the YAML does not create:** OSPF interfaces are written only on interfaces the preconfig creates (deployment entries `ifName`/`ifName.vlan`, user loopbacks and VTIs; `mappers.carried_ifs`), since apply cannot configure OSPF elsewhere. Other fields that name an interface (BGP neighbor `sourceIpInterface`, VRRP `interfaceName`, route `interfaceName`, VXLAN `vtepSrcInterface`, IP SLA `sourceInterfaceName`) keep the source's value, because the target may already have the interface, and are ledgered: `orchestrator-managed` for a gms_marked loopback such as lo20000 (Orchestrator loopback orchestration must create it on the target), `unresolved` otherwise (for example lo20001 that exists nowhere in the capture). An interface label name counts as carried (2026-10-28).
 
+23. **Re-applying deployment settings to a live box:** keep the `vrrp` section in the same YAML. A `deploymentInfo` apply can drop the VRRP groups on an interface whose Orchestrator device number it renumbers (the apply numbers interfaces with no gaps), while VRRP on the other interfaces stays (lab, ECOS 9.6.2.1, 2026-11-01). The deployment settings overwrite what is on the box by design.
+
 ## 4. Diagnosis Playbook: investigate, then report
 
 Using the skill, you diagnose and report; you never edit the toolkit (`SKILL.md`, "You never edit the toolkit"). Changes to `scripts/` and `references/` are made by the toolkit's maintainers in its own repository, each with a test.

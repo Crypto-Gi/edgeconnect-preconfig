@@ -2,6 +2,8 @@
 
 ## Unreleased (`gui` branch)
 
+- **lessons.md: keep `vrrp` in the same YAML when re-applying deployment settings.** A `deploymentInfo` apply can drop VRRP on an interface whose device number it renumbers.
+
 ## 1.4.0-rc.4 (2026-11-01, pre-release from the `gui` branch; rc.3 was not published)
 
 - **EdgeHA that cannot be written now gets a ledger line.** haConfig needs both the deployment's HA interface (`haIf`) and the appliance's Orchestrator HA group, as in 1.3.2. When only one was there, haConfig and the HA subinterfaces it creates were left out with no line. Each case is now an unresolved line: set the HA pairing by hand. The YAML is unchanged.
