@@ -148,6 +148,8 @@ Verified across HPE Aruba EdgeConnect Orchestrator releases `9.6.4`, `9.7.1`, an
 23. **A preconfig is for a fresh box:** management settings in place, nothing else configured. Applied to a box that already has configuration, results can depend on what is there, so a re-apply result is not proof of how the YAML behaves. If you do re-apply deployment settings, keep the `vrrp` section in the same YAML: a `deploymentInfo` apply can drop the VRRP groups on an interface whose Orchestrator device number it renumbers, while VRRP on other interfaces stays (lab, ECOS 9.6.2.1, 2026-11-01).
    - **NAC on a box that already has NAC bound to an interface:** ECOS 9.7.1 refuses the `nac` section ("Can't modify <server> Server, already in use in [<if>] interfaces") whenever the body carries a RADIUS key and binds an interface to that server, even after a detach. A first apply to a box with no NAC works. Nothing is silently blanked: the apply fails loudly (lab, non-clean box, 2026-11-01; not re-tested on a clean box).
 
+24. **An empty list never deletes:** Orchestrator skips a preconfig section whose list is empty (no apply step for `peerPriority`, `vrrp`, VTIs, tunnels, BFD, `appExpressGroups` or `templateGroups`), so a blank list leaves the target's existing entries in place. Remove entries on the appliance or with a template (lab, clean box, 2026-11-01).
+
 ## 4. Diagnosis Playbook: investigate, then report
 
 Using the skill, you diagnose and report; you never edit the toolkit (`SKILL.md`, "You never edit the toolkit"). Changes to `scripts/` and `references/` are made by the toolkit's maintainers in its own repository, each with a test.
