@@ -199,3 +199,10 @@ class MutationCheck(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LicenceColumns(unittest.TestCase):
+    def test_licence_tier_and_boost_are_columns(self):
+        """field review 2026-11-02: licences come from the account's pool, so a template must not fix one site's tier for every site."""
+        rows = {r["path"]: r for r in classify({"applianceInfo": {"hostname": "h"}, "ecLicensing": {"useDefaultAccount": True, "bandwidthLevel": 2000000, "boost": 800000}}, set())}
+        self.assertEqual([rows["ecLicensing." + k]["decision"] for k in ("bandwidthLevel", "boost", "useDefaultAccount")], ["variable", "variable", "fixed"])

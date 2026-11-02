@@ -79,7 +79,10 @@ def validate_text(client: Any, text: str, serial: Optional[str] = None) -> Dict[
         name, status = type(error).__name__, getattr(error, "status", None)
         # HTTP 400 rejects the YAML; HTTP 5xx is also a per-document result (e.g. nac with an empty sub-list). Neither is a failure.
         if name in ("ValidationError", "ServerError"):
-            return {"accepted": False, "http": status or 400, "error": str(error)[:1000]}
+            text = str(error)[:1000]
+            if "does not exist" in text:  # field review 2026-11-02: a name from another Orchestrator, rejected with no hint
+                text += " (the name must exist on this Orchestrator: create it there or change its column; check.py and render.py take --substitute to test with this Orchestrator's names)"
+            return {"accepted": False, "http": status or 400, "error": text}
         raise Stop("{} (HTTP {}) from {}: {}".format(name, status, PATH, str(error)[:300])) from None
     finally:
         if client.write_requests:

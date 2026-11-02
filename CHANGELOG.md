@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased (1.4.1)
+
+From a review of every summary.md line of 18 field appliances on Orchestrator 10.0 (918 lines, checked against the YAML, the capture and the default template).
+
+- **The licence tier is written** (`ecLicensing.bandwidthLevel`), from the running config's `system eclicense tier bandwidth` line: 50000, 200000, 500000, 1000000, 2000000, and `unlimited` for ECOS's 1000000000; `plus` for `system eclicense plus enable`. Before, it was never read, and the ledger wrongly called the tier "not documented", so a new appliance came up on tier `base`. A tier that is not a documented value (100000 and 20000 were seen) is a gap line, not a guess.
+- **Feature licences are written** (`ecLicensing.ecFeatureLicenses`, for example `adv_sec_unlimited`), and were dropped with no line before. An undocumented feature key is a gap line.
+- **Licensing with boost switched off is no longer dropped.** The tier and feature licences are written, and the set-but-unused boost bandwidth gets a line; boost stays at its default 0 (off). Before, the whole section was dropped with no line.
+- **Tier and boost are CSV columns**, so a template does not give every site the reference site's licence.
+- **Fewer false "set by hand" lines:** a BGP neighbor's `as_override` off, a site priority of 0 and BGP neighbor-change logging on are the defaults and are no longer listed (field corpus of 99 appliances: `as_override` never on, logging never off, site priority other than 0 only on two lab boxes). `as_override` off no longer counts as a gap in the verdict. The other values are still listed.
+- **A /validate rejection for a name that does not exist says how to fix it:** create the name on that Orchestrator, change its column, or test with `check.py`/`render.py --substitute`.
+- **SKILL.md:** an "Incomplete for preconfig" verdict does not mean the YAML is broken. lessons.md item 25 covers licences.
+
 ## 1.4.0 (2026-11-02, Latest; `gui` merged into `main`)
 
 The same code as [1.4.0-rc.5](docs/releases/1.4.0-rc.5.md), with the version set and the docs updated: the GUI is on `main`, so no branch switch is needed. Everything since 1.3.2 is in the rc entries below.

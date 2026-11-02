@@ -739,6 +739,8 @@ class NetworkRole(unittest.TestCase):
         out, ledger = translate(lambda d: d["appliance"].update(sitePriority=100))
         self.assertNotIn("sitePriority", out["applianceInfo"])
         self.assertEqual([(e["disposition"], "100" in e["note"]) for e in ledger if e["target"] == "applianceInfo.sitePriority"], [("outside-preconfig", True)])
+        _, ledger = translate(lambda d: d["appliance"].update(sitePriority=0))  # field review 2026-11-02: 0 is the default, nothing to set by hand
+        self.assertFalse([e for e in ledger if e["target"] == "applianceInfo.sitePriority"], ledger)
 
 class YamlTwelveNumbers(unittest.TestCase):
     """Text a YAML 1.2 reader takes for a number is quoted in every YAML the toolkit writes (full-coverage lab: zipCode 08034 and 1e5 unquoted)."""

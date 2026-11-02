@@ -488,8 +488,8 @@ def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str,
         out["importRouteTarget"], out["exportRouteTarget"] = rt.get("import"), rt.get("export")
     elif rt:
         ctx.note(label, "default-omitted", "bgpSystemConfig.import/exportRouteTarget", "0:0 means no route target (the validator rejects ASN 0)")
-    if system.get("log_nbr_msgs") and label != "check":  # source coverage 2026-11-01: was marked used but never written
-        ctx.note(label + ".log_nbr_msgs", "outside-preconfig", target_of(vrf), "logging of BGP neighbor changes is on; the preconfig format has no field for it; set it by hand or with a template")
+    if system.get("log_nbr_msgs") is False and label != "check":  # on is the ECOS default: on at all 98 field appliances, BGP enabled or not, and on never-configured lab boxes (2026-11-02)
+        ctx.note(label + ".log_nbr_msgs", "outside-preconfig", target_of(vrf), "logging of BGP neighbor changes is off (the default is on); the preconfig format has no field for it; set it by hand or with a template")
     ctx.unmapped(label, system, {"enable", "asn", "rtr_id", "graceful_restart_en", "max_restart_time", "stale_path_time", "remote_as_path_advertise", "route_target", "neighbor", "enable_gms_marked", "log_nbr_msgs"}, "bgpSystemConfig")
     out["neighbors"] = []
     target = "segmentBgpSystems.neighbors" if vrf is not None else "bgpSystemConfig.neighbors"
@@ -508,7 +508,7 @@ def bgp_value(ctx: Ctx, label: str, system: Dict[str, Any], neighbors: Dict[str,
         out["neighbors"].append(nb)
         if label != "check":
             note_ref(ctx, "{} neighbor {}".format(label, ip), target + ".sourceIpInterface", "BGP neighbor " + ip, nb["sourceIpInterface"])
-        ctx.unmapped("{} neighbor {}".format(label, ip), n, BGP_NEIGHBOR_USED, target)
+        ctx.unmapped("{} neighbor {}".format(label, ip), n, BGP_NEIGHBOR_USED | ({"as_override"} if n.get("as_override") is False else set()), target)  # off is the default and the format has no field (field review 2026-11-02)
     if failed and not out["neighbors"]:  # neighbors replace on apply: an empty list would remove the target's
         raise ValueError("no BGP neighbor could be read")
     return out
@@ -1360,14 +1360,40 @@ def m_vxlan(ctx: Ctx) -> Optional[Dict[str, Any]]:
     return {"destinationUdpPort": live.get("port", 4789), "vtepSrcInterface": vtep, "vniVrfMaps": maps}
 
 
+# bandwidthLevel values the three default templates document; ECOS writes "unlimited" as 1000000000 (field review 2026-11-02)
+LICENSE_TIERS = {"50000": 50000, "200000": 200000, "500000": 500000, "1000000": 1000000, "2000000": 2000000, "1000000000": "unlimited"}
+FEATURE_KEYS = {"adv_sec_standard", "adv_sec_unlimited", "adv_sec_dtd"}  # the featureKey list of the default templates
+
+
 def m_ecLicensing(ctx: Ctx) -> Optional[Dict[str, Any]]:
     lines = cli_lines(ctx)
+    out: Dict[str, Any] = {}
+    tier = next((m.group(1) for l in lines for m in [re.match(r"^system eclicense tier bandwidth (\d+)$", l)] if m), None)
+    if tier in LICENSE_TIERS:
+        out["bandwidthLevel"] = LICENSE_TIERS[tier]
+    elif tier is not None:
+        ctx.note("running-config", "unresolved", "ecLicensing.bandwidthLevel", "licence tier {} kbps is not a documented bandwidthLevel value (50000, 200000, 500000, 1000000, 2000000, unlimited); "
+                 "set the tier by hand".format(tier))
+    elif "system eclicense plus enable" in lines:
+        out["bandwidthLevel"] = "plus"
     boost = next((int(m.group(1)) for l in lines for m in [re.match(r"^system eclicense boost bandwidth (\d+)$", l)] if m), None)
-    if boost is None or "system eclicense boost enable" not in lines:
+    if boost is not None and "system eclicense boost enable" in lines:
+        out["boost"] = boost
+    elif boost is not None:
+        ctx.note("running-config", "default-omitted", "ecLicensing.boost", "boost is off (bandwidth {} is kept on the appliance but not in use); left at the default 0, which is off".format(boost))
+    keys = sorted({m.group(1) for l in lines for m in [re.match(r"^system eclicense feature (\S+) req-value 1$", l)] if m})  # no line: not licensed
+    for key in keys:
+        if key not in FEATURE_KEYS:
+            ctx.note("running-config", "unresolved", "ecLicensing.ecFeatureLicenses", "feature licence {} is not a documented featureKey; set it by hand".format(key))
+    if any(k in FEATURE_KEYS for k in keys):
+        out["ecFeatureLicenses"] = [{"featureKey": k, "featureEnable": True} for k in keys if k in FEATURE_KEYS]
+    if not out:
         return None
-    ctx.note("running-config", "unresolved", "ecLicensing.bandwidthLevel", "the tier name for bandwidthLevel is not documented; only the boost bandwidth is mapped")
-    cli_note(ctx, "ecLicensing", "boost bandwidth; useDefaultAccount true is an assumption (the validator requires either it or an account name and key)")
-    return {"useDefaultAccount": True, "boost": boost}
+    cli_note(ctx, "ecLicensing", "{}; useDefaultAccount true is an assumption (the validator requires either it or an account name and key)".format(
+        ", ".join(w for w, k in (("licence tier", "bandwidthLevel"), ("boost bandwidth", "boost"), ("feature licences", "ecFeatureLicenses")) if k in out)))
+    return dict({"useDefaultAccount": True}, **out)
+
+
 
 
 def m_managementRoutes(ctx: Ctx) -> Optional[Dict[str, Any]]:

@@ -238,6 +238,8 @@ def classify(reference: Dict[str, Any], secret_paths: Set[str], all_sections: Op
                 row(path, value, "fixed", "same at every site you gave")
         elif BANDWIDTH_KEY.search(key) and not isinstance(value, bool):
             row(path, value, "variable", "bandwidth differs per link", unique(column_name(reference, path)))
+        elif section == "ecLicensing" and key in ("bandwidthLevel", "boost"):  # licences come from the account's pool: per site (field review 2026-11-02)
+            row(path, value, "variable", "licence bandwidth differs per site", unique(column_name(reference, path)))
         elif SITE_NUMBER_KEY.match(key):
             row(path, value, "variable", "identifier or peer of this site ({})".format(key), unique(column_name(reference, path)))
         elif value is None:
