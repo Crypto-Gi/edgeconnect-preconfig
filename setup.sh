@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install or update the EdgeConnect toolkit from main (a clone already on another branch, such as gui, stays on it), in one folder (macOS and Linux): you pick
+# Install or update the EdgeConnect toolkit from main (a re-run puts every clone on main), in one folder (macOS and Linux): you pick
 # the repositories (the edgeconnect-auto CLI, the edgeconnect-preconfig CLI, the MCP server's guide and report skills) and each
 # one's agent skill, plus, if you want it, the MCP server run locally (stdio) for the agents you
 # choose. The same file ships in edgeconnect-orchestrator-automation, edgeconnect-preconfig and
@@ -238,22 +238,32 @@ case "$SCOPE" in
 esac
 PRECONFIG_SCRIPTS="$ROOT/edgeconnect-preconfig/toolkit/scripts"
 
-# A clean clone is updated on the branch it is on (a clone on gui stays on gui); a detached one is left alone.
+# A re-run leaves every clean clone on main, pulled from GitHub. A clone with uncommitted edits, or detached on a commit
+# main does not have, is left alone so no edit or commit is lost; a branch it was on is kept.
 update_clone() {
   if [ -n "$(git -C "$ROOT/$1" status --porcelain --untracked-files=no)" ]; then
     echo "$1: already cloned, has local changes, not updated (commit or discard them, then run again)"
     return 0
   fi
+  git -C "$ROOT/$1" fetch -q origin main || die "$1: could not fetch main (not on GitHub, or no network)"
   branch=$(git -C "$ROOT/$1" symbolic-ref --short -q HEAD) || branch=""
-  if [ -z "$branch" ]; then
-    echo "$1: already cloned, not on a branch (detached at $(git -C "$ROOT/$1" rev-parse --short HEAD)), not updated (git -C $ROOT/$1 checkout main, then run again)"
+  if [ -z "$branch" ] && ! git -C "$ROOT/$1" merge-base --is-ancestor HEAD origin/main; then
+    echo "$1: already cloned, not on a branch (detached at $(git -C "$ROOT/$1" rev-parse --short HEAD), a commit main does not have), not updated (put it on a branch, then run again)"
     return 0
   fi
-  git -C "$ROOT/$1" pull -q --ff-only origin "$branch" || die "$1: could not update $branch (diverged, not on GitHub, or no network; git -C $ROOT/$1 checkout main to go back to main)"
-  echo "$1: already cloned, updated $branch to $(git -C "$ROOT/$1" rev-parse --short HEAD)"
+  if [ "$branch" != "main" ]; then
+    if git -C "$ROOT/$1" show-ref --verify -q refs/heads/main; then
+      git -C "$ROOT/$1" checkout -q main -- || die "$1: could not switch to main"
+    else
+      git -C "$ROOT/$1" checkout -q -b main --track origin/main || die "$1: could not switch to main"
+    fi
+    echo "$1: switched ${branch:-detached HEAD} to main"
+  fi
+  git -C "$ROOT/$1" pull -q --ff-only origin main || die "$1: could not update main (diverged from GitHub's main, or no network)"
+  echo "$1: already cloned, updated main to $(git -C "$ROOT/$1" rev-parse --short HEAD)"
 }
 
-say "Repositories in $ROOT (a new clone is main; a clone you have keeps its branch)"
+say "Repositories (main) in $ROOT"
 mkdir -p "$ROOT"
 for repo in $REPOS; do
   if [ -d "$ROOT/$repo/.git" ]; then
@@ -381,7 +391,7 @@ else
   for repo in $REPOS; do
     for skill_dir in "$ROOT/$repo"/skills/*/; do
       skill="$(basename "$skill_dir")"
-      # Installed or not, every picked skill goes to every chosen agent: that also updates it from the clone's branch.
+      # Installed or not, every picked skill goes to every chosen agent: that also updates it from main.
       # shellcheck disable=SC2086
       (cd "$SKILLS_CWD" && npx -y skills add "$ROOT/$repo" -s "$skill" $SCOPE_FLAG $AGENT_FLAGS -y >/dev/null) || die "$skill: the skills installer failed"
       echo "$skill: installed for $SKILL_AGENTS"

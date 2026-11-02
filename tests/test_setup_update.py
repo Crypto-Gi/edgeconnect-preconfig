@@ -1,4 +1,4 @@
-"""setup.sh's re-run update step (update_clone): a clean clone keeps its branch, so a gui clone stays on gui."""
+"""setup.sh's re-run update step (update_clone): a clean clone ends on main, pulled from origin/main; no edit or commit is lost."""
 import os
 import shutil
 import subprocess
@@ -49,24 +49,47 @@ class UpdateClone(unittest.TestCase):
         git("push", "-q", "origin", branch, cwd=self.work)
         return git("rev-parse", "HEAD", cwd=self.work)
 
-    def test_a_clone_on_gui_stays_on_gui_and_is_updated(self):
+    def branch(self):
+        return git("rev-parse", "--abbrev-ref", "HEAD", cwd=self.root / "repo")
+
+    def test_a_clone_on_gui_is_switched_to_main_and_updated(self):
         repo = self.root / "repo"
         git("checkout", "-q", "gui", cwd=repo)
-        new = self.advance("gui")
+        new = self.advance("main")
         code, out = self.update()
         self.assertEqual(code, 0, out)
-        self.assertEqual(git("rev-parse", "--abbrev-ref", "HEAD", cwd=repo), "gui")
+        self.assertEqual(self.branch(), "main")
         self.assertEqual(git("rev-parse", "HEAD", cwd=repo), new)
-        self.assertIn("updated gui to", out)
+        self.assertIn("switched gui to main", out)
+        self.assertIn("gui", git("branch", "--list", "gui", cwd=repo))  # the old branch is kept
 
     def test_a_clone_on_main_is_updated_on_main(self):
         new = self.advance("main")
         code, out = self.update()
         self.assertEqual(code, 0, out)
-        self.assertEqual(git("rev-parse", "--abbrev-ref", "HEAD", cwd=self.root / "repo"), "main")
+        self.assertEqual(self.branch(), "main")
         self.assertEqual(git("rev-parse", "HEAD", cwd=self.root / "repo"), new)
 
-    def test_a_detached_clone_is_left_alone_and_keeps_its_commits(self):
+    def test_a_clone_without_a_local_main_gets_one_from_origin(self):
+        repo = self.root / "repo"
+        git("checkout", "-q", "gui", cwd=repo)
+        git("branch", "-q", "-D", "main", cwd=repo)
+        new = self.advance("main")
+        code, out = self.update()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.branch(), "main")
+        self.assertEqual(git("rev-parse", "HEAD", cwd=repo), new)
+
+    def test_a_detached_clone_already_on_main_is_switched_to_main(self):
+        repo = self.root / "repo"
+        git("checkout", "-q", "--detach", "HEAD", cwd=repo)
+        new = self.advance("main")
+        code, out = self.update()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.branch(), "main")
+        self.assertEqual(git("rev-parse", "HEAD", cwd=repo), new)
+
+    def test_a_detached_clone_with_its_own_commits_is_left_alone(self):
         repo = self.root / "repo"
         git("checkout", "-q", "--detach", "HEAD", cwd=repo)
         (repo / "mine").write_text("mine")
@@ -77,7 +100,7 @@ class UpdateClone(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("not on a branch (detached at", out)
         self.assertEqual(git("rev-parse", "HEAD", cwd=repo), mine)
-        self.assertEqual(git("rev-parse", "--abbrev-ref", "HEAD", cwd=repo), "HEAD")
+        self.assertEqual(self.branch(), "HEAD")
 
     def test_local_changes_are_left_alone(self):
         repo = self.root / "repo"
@@ -87,14 +110,30 @@ class UpdateClone(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("has local changes, not updated", out)
         self.assertEqual((repo / "gui").read_text(), "mine")
+        self.assertEqual(self.branch(), "gui")
 
-    def test_a_branch_not_on_github_stops_without_switching(self):
+    def test_a_local_branch_is_kept_when_the_clone_is_switched_to_main(self):
         repo = self.root / "repo"
         git("checkout", "-q", "-b", "mine", cwd=repo)
+        (repo / "mine").write_text("mine")
+        git("add", "mine", cwd=repo)
+        git("commit", "-q", "-m", "mine", cwd=repo)
+        mine = git("rev-parse", "HEAD", cwd=repo)
+        code, out = self.update()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.branch(), "main")
+        self.assertEqual(git("rev-parse", "mine", cwd=repo), mine)
+
+    def test_a_diverged_main_stops_without_resetting(self):
+        repo = self.root / "repo"
+        (repo / "main").write_text("local")
+        git("commit", "-q", "-am", "local", cwd=repo)
+        local = git("rev-parse", "HEAD", cwd=repo)
+        self.advance("main")
         code, out = self.update()
         self.assertEqual(code, 1, out)
-        self.assertIn("could not update mine", out)
-        self.assertEqual(git("rev-parse", "--abbrev-ref", "HEAD", cwd=repo), "mine")
+        self.assertIn("could not update main", out)
+        self.assertEqual(git("rev-parse", "HEAD", cwd=repo), local)
 
 
 if __name__ == "__main__":
