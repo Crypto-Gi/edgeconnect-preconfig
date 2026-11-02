@@ -235,7 +235,7 @@ The YAML-level diff saw none of these. Fixed in the converter: route flags and c
 - Ledger only (no preconfig field): firewall rules Orchestrator did not push, business hours, hub membership of overlays.
 - Other: secure web services kept when any value differs from the default, management routes and pass-through shaping read from the running config, IP SLA actions and probe sources, flow-redirection wait time 50 when the running config omits the line.
 
-## Local Web GUI (1.4.0-rc.1)
+## Local Web GUI (1.4.0)
 
 - Offline, in the unit suite: `tests/test_gui_*.py` pin the approval (typed nickname, single use, bound to one batch and one Orchestrator, expiry), the engine (one CLI command line in-process, offline against a fake Orchestrator), the fleet status, the server's security (one-use link, session cookie, Host and Origin checks, JSON-only POSTs, no API key in any response), the tasks, the run log tables, each screen's task (build, pick, compare, make, inventory) and the colour contrast of every text pair in both themes. `tests/test_golden.py` pins that the command line prints and writes what it did before the GUI's additions.
 - In a browser (CI job `browser`, Chromium through Playwright 1.64.1): `tests/e2e/test_browser.py` goes from finding an appliance to written YAML files on the fake Orchestrator of `tests/e2e/gui_launcher.py`, and runs axe-core 4.10.3 on every screen in both themes, failing on any serious or critical violation. How to run it yourself: [CONTRIBUTING.md](../CONTRIBUTING.md#running-the-tests).

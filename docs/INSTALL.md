@@ -67,17 +67,16 @@ Every key, its default and the values it accepts: [`.env.example`](../.env.examp
 
 ## The local web GUI
 
-The GUI (new in 1.4.0-rc.1; the latest pre-release is 1.4.0-rc.5) is on the `gui` branch; `setup.sh` installs `main`, which does not have it yet. Switch the clone `setup.sh` made to `gui` once; later `setup.sh` runs keep it on `gui` and update it, and the `edgeconnect-preconfig` command it installed then has the `gui` command:
+The GUI is part of 1.4.0 and later: the `edgeconnect-preconfig` command that `setup.sh` installs has the `gui` command. A clone that was switched to the `gui` branch for a 1.4.0 pre-release can go back to `main` (`git -C <install folder>/edgeconnect-preconfig checkout main`); later `setup.sh` runs keep the branch the clone is on.
 
 ```bash
-git -C <install folder>/edgeconnect-preconfig checkout gui
 edgeconnect-preconfig gui            # or: edgeconnect-preconfig gui --port 8765 --no-browser
 ```
 
-Without `setup.sh`, clone the branch and install the same two packages:
+Without `setup.sh`, clone the repository and install the same two packages:
 
 ```bash
-git clone -b gui https://github.com/Crypto-Gi/edgeconnect-preconfig.git
+git clone https://github.com/Crypto-Gi/edgeconnect-preconfig.git
 cd edgeconnect-preconfig
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
