@@ -14,7 +14,7 @@ ignore:
   - {read: deployment, path: "dpRoutes*", why: "management and data-plane default routes: managementRoutes comes from the running-config, WAN next hops from each interface; the management plane is never written from /deployment"}
   - {read: deployment, path: "mgmtIfData*", why: "management interface addressing: managementIp comes from the running-config; the management plane is never written from /deployment"}
   - {read: deployment, path: "sysConfig.useMgmt0", why: "management plane setting; never written (a preconfig must not move management)"}
-  - {read: deployment, path: "sysConfig.license.*", why: "licence tier and boost are assigned by Orchestrator licensing (ecLicensing comes from the running-config)"}
+  - {read: deployment, path: "sysConfig.license.*", why: "the same licence tier and boost are read from the running-config (ecLicensing); feature licences exist only there"}
   - {read: deployment, path: "sysConfig.maxInSysBW", why: "the model's maximum inbound bandwidth, a hardware limit; the configured value is maxInBW (totalInboundBandwidth)"}
   - {read: deployment, path: "sysConfig.maxObSysBW", why: "the model's maximum outbound bandwidth, a hardware limit; the configured value is maxBW (totalOutboundBandwidth)"}
   - {read: deployment, path: "sysConfig.zones[]*", why: "zone names are resolved from the Orchestrator /zones read"}

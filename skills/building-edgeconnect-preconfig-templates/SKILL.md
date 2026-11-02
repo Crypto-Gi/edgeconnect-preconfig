@@ -109,7 +109,7 @@ Validation runs on the Orchestrator the appliance was read from (`--validate-on`
 
 Do not report the quiet dispositions (`mapped`, `default-omitted`, `runtime`, `empty-or-absent`, `context`) unless asked: a default value, such as the `65535` no-NAT catch-all or a disabled feature, is not content. Any disposition not in this table counts as a gap.
 
-**5. End with the verdict line** that `summary.md` ends with (`translate.py` also prints it): "Complete for preconfig." when there are no toolkit errors and no gaps (with "K item(s) to check by hand" when the Not readable, Written-not-yet-seen or New settings groups have any), otherwise "Incomplete for preconfig: N gap(s), M toolkit error(s)." followed by their names; then the `check.py` result (how many checks passed, and whether `/validate` accepted the rows).
+**5. End with the verdict line** that `summary.md` ends with (`translate.py` also prints it): "Complete for preconfig." when there are no toolkit errors and no gaps (with "K item(s) to check by hand" when the Not readable, Written-not-yet-seen or New settings groups have any), otherwise "Incomplete for preconfig: N gap(s), M toolkit error(s)." followed by their names; then the `check.py` result (how many checks passed, and whether `/validate` accepted the rows). "Incomplete" does not mean the YAML is broken: it still validates and applies; the gaps name what a new site would lack until it is set by hand.
 
 **6. Stay with the evidence.** Report what the ledger and the checks say. If something looks wrong (a ledger note contradicts the capture, or the user knows the appliance has a setting the ledger calls absent), report it as a suspected toolkit bug with both pieces of evidence; do not work around it.
 

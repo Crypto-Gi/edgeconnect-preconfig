@@ -84,3 +84,25 @@ class StageErrors(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MissingNameHint(unittest.TestCase):
+    """field review 2026-11-02: a name from another Orchestrator failed /validate on another Orchestrator with no hint at --substitute."""
+
+    def test_a_name_missing_on_the_validator_gets_a_hint(self):
+        import common
+
+        class Client:
+            write_requests = 0
+
+            def __init__(self, error):
+                self.error = error
+
+            def request(self, method, path, **kwargs):
+                raise common.ValidationError(self.error, status=400, method=method, path=path)
+
+        missing = validate.validate_text(Client("HTTP 400: Appliance group does not exist: NAM"), "applianceInfo:\n  group: NAM\n")
+        self.assertIn("--substitute", missing["error"])
+        self.assertTrue(missing["error"].startswith("HTTP 400: Appliance group does not exist: NAM"))
+        other = validate.validate_text(Client("HTTP 400: applianceInfo.site: invalid value"), "applianceInfo:\n  site: x\n")
+        self.assertNotIn("--substitute", other["error"])

@@ -150,6 +150,8 @@ Verified across HPE Aruba EdgeConnect Orchestrator releases `9.6.4`, `9.7.1`, an
 
 24. **An empty list never deletes:** Orchestrator skips a preconfig section whose list is empty (no apply step for `peerPriority`, `vrrp`, VTIs, tunnels, BFD, `appExpressGroups` or `templateGroups`), so a blank list leaves the target's existing entries in place. Remove entries on the appliance or with a template (lab, clean box, 2026-11-01).
 
+25. **Licences are per site and come from the account:** the licence tier (`bandwidthLevel`), boost and feature licences (`ecFeatureLicenses`, e.g. `adv_sec_unlimited`) are read from the stored running config, `system eclicense ...` lines. ECOS writes the Unlimited tier as `1000000000`, written as `unlimited`. A tier that is not one of the documented values (100000 and 20000 were seen in the field) is a gap, never written. Tier and boost are CSV columns: a template must not give every site the reference site's tier, and the account must hold the licences a row asks for. A boost bandwidth that is set while boost is off is left at the default 0 (off). The default templates say missing optional fields of `ecLicensing` get their default value on apply: tier `base`, boost 0 (field review, 2026-11-02; /validate on 9.7.1 and 10.0 accepted all 25 licence shapes seen in the field; not yet applied live).
+
 ## 4. Diagnosis Playbook: investigate, then report
 
 Using the skill, you diagnose and report; you never edit the toolkit (`SKILL.md`, "You never edit the toolkit"). Changes to `scripts/` and `references/` are made by the toolkit's maintainers in its own repository, each with a test.

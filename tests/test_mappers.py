@@ -214,6 +214,38 @@ class MapperRules(unittest.TestCase):
                           {"routeIpSubnet": "203.0.113.0/24", "nextHop": "192.0.2.253", "interfaceName": "mgmt0", "metric": 10, "sourceIp": "0.0.0.0"}])
 
 
+class Licensing(unittest.TestCase):
+    """field review 2026-11-02: the licence tier and feature licences were never read, and ecLicensing vanished with no line when boost was off."""
+
+    def run_lines(self, *lines):
+        c, notes = ctx({"running-config": {"fileName": "b", "backupTime": "1", "runningConfig": "\n".join(lines) + "\n"}})
+        return m_ecLicensing(c), notes
+
+    def test_documented_tiers_are_written(self):
+        for tier, level in (("2000000", 2000000), ("50000", 50000), ("1000000000", "unlimited")):
+            out, _ = self.run_lines("system eclicense tier bandwidth " + tier, "system eclicense tier bandwidth {} display X".format(tier),
+                                    "system eclicense boost bandwidth 800000", "system eclicense boost enable")
+            self.assertEqual(out, {"useDefaultAccount": True, "bandwidthLevel": level, "boost": 800000})
+        out, _ = self.run_lines("system eclicense plus enable")
+        self.assertEqual(out, {"useDefaultAccount": True, "bandwidthLevel": "plus"})
+
+    def test_an_undocumented_tier_is_a_gap_not_a_guess(self):
+        out, notes = self.run_lines("system eclicense tier bandwidth 100000", "system eclicense tier bandwidth 100000 display 100 Mbps")
+        self.assertIsNone(out)
+        self.assertEqual([(n["disposition"], n["target"]) for n in notes if "100000" in n["note"]], [("unresolved", "ecLicensing.bandwidthLevel")], notes)
+
+    def test_boost_off_keeps_the_tier_and_says_so(self):
+        out, notes = self.run_lines("system eclicense boost bandwidth 800000", "system eclicense tier bandwidth 1000000000", "system eclicense tier bandwidth 1000000000 display Unlimited")
+        self.assertEqual(out, {"useDefaultAccount": True, "bandwidthLevel": "unlimited"})
+        self.assertTrue([n for n in notes if n["target"] == "ecLicensing.boost" and "800000" in n["note"]], notes)
+
+    def test_feature_licences_are_written(self):
+        out, notes = self.run_lines('system eclicense feature adv_sec_unlimited display-name "EC-AS-UL"', "system eclicense feature adv_sec_unlimited req-value 1",
+                                    "system eclicense feature zz_new req-value 1")
+        self.assertEqual(out, {"useDefaultAccount": True, "ecFeatureLicenses": [{"featureKey": "adv_sec_unlimited", "featureEnable": True}]})
+        self.assertEqual([n["disposition"] for n in notes if "zz_new" in n["note"]], ["unresolved"], notes)
+
+
 class Substitution(unittest.TestCase):
     INV = {"groups": ["G"], "overlays": ["O1", "O2"], "templateGroups": ["T"], "lan": ["Voice", "Data"], "wan": ["MPLS1"], "segments": ["Default", "S1"], "zones": ["Default", "Z1"]}
 
@@ -1152,7 +1184,15 @@ class ItemIsolation(IsolationCheck, unittest.TestCase):
         for on in (True, False):
             c, notes = ctx({"deployment": DEP, "bgp-system": {"enable": True, "asn": 65000, "log_nbr_msgs": on}, "bgp-neighbors": {}})
             m_bgpSystemConfig(c)
-            self.assertEqual([n["item"] for n in notes if n["disposition"] == "outside-preconfig"], ["bgp-system.log_nbr_msgs"] if on else [])
+            self.assertEqual([n["item"] for n in notes if n["disposition"] == "outside-preconfig"], [] if on else ["bgp-system.log_nbr_msgs"])  # on is the default (2026-11-02)
+
+    def test_bgp_neighbor_as_override_off_is_no_gap(self):
+        from mappers import m_bgpSystemConfig
+        n = {"remote_as": 65001, "type": "Branch", "enable": True, "hold": 180, "ka": 60, "next_hop_self": False, "store_received_routes": True, "directly_connected": True}
+        for value, gaps in ((False, []), (True, ["bgp-system neighbor 192.0.2.1"])):  # field review 2026-11-02: false on 6 hubs counted as a gap
+            c, notes = ctx({"deployment": DEP, "bgp-system": {"enable": True, "asn": 65000}, "bgp-neighbors": {"192.0.2.1": dict(n, as_override=value)}})
+            m_bgpSystemConfig(c)
+            self.assertEqual([x["item"] for x in notes if x["disposition"] == "unmapped-source-key"], gaps, notes)
 
     def test_port_forwarding_rule(self):
         from mappers import m_inboundPortForwarding

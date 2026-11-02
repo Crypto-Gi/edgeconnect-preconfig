@@ -330,7 +330,7 @@ def build(cap: Capture, ledger: List[Dict[str, Any]], target_ecos: Optional[str]
         else:
             note("appliance.networkRole", "unresolved", "applianceInfo.networkRole", "code {} has no known meaning".format(app["networkRole"]))
     site_priority = app.get("sitePriority", (cap.data("network-role-and-site") or {}).get("sitePriority") if isinstance(cap.data("network-role-and-site"), dict) else None)
-    if site_priority not in (None, ""):  # no default template has it (lab, 2026-11-01)
+    if site_priority not in (None, "", 0, "0"):  # no default template has it (lab, 2026-11-01); 0 is the default (97 of 99 field appliances, every clean lab box)
         note("appliance.sitePriority", "outside-preconfig", "applianceInfo.sitePriority", "site priority {} has no preconfig field; set it on the new appliance in Orchestrator "
              "(the network role and site setting) by hand".format(site_priority))
     if failed_read(ctx, "region-associations", "the region is not written", "applianceInfo.region"):
@@ -813,10 +813,12 @@ TEMPLATE_OMISSIONS = {
     "ipSlaRule.ruleEntries.ipslaMonitor.forceDnsThroughProbePath", "ipSlaRule.ruleEntries.downAction.subnetMetricDelta",
     # documented but only commented out ("#segment: Default") in every bundled template; /validate 9.7.1 accepts it (lab, clean box, 2026-11-01)
     "tunnelConfiguration.tunnels.segment",
+    # documented only in the comments above an empty "ecFeatureLicenses:" in every bundled template (field review, 2026-11-02)
+    "ecLicensing.ecFeatureLicenses.featureKey", "ecLicensing.ecFeatureLicenses.featureEnable",
 }
 
 
-OMISSION_TYPES = {p: bool for p in TEMPLATE_OMISSIONS if p.endswith(".bfdEnabled")}  # yes/no paths no template shows
+OMISSION_TYPES = {p: bool for p in TEMPLATE_OMISSIONS if p.endswith((".bfdEnabled", ".featureEnable"))}  # yes/no paths no template shows
 
 
 def allowed_paths(target: str) -> set:
