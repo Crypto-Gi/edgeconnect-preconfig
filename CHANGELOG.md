@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.0 (2026-11-02, Latest; `gui` merged into `main`)
+
+The same code as [1.4.0-rc.5](docs/releases/1.4.0-rc.5.md), with the version set and the docs updated: the GUI is on `main`, so no branch switch is needed. Everything since 1.3.2 is in the rc entries below.
+
 ## 1.4.0-rc.5 (2026-11-01, pre-release from the `gui` branch; rc.3 and rc.4 were not published)
 
 - **The BFD ledger line names the three timers it keeps**; lessons.md notes that a NAC re-apply onto a box with NAC bound to an interface is refused.

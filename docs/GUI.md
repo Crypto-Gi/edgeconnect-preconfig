@@ -2,7 +2,7 @@
 
 Back to the [README](../README.md). The command line it runs: [COMMAND_LINE.md](COMMAND_LINE.md). Install and `.env`: [INSTALL.md](INSTALL.md).
 
-The GUI does what the command line does, in a browser on this computer. Every button builds a normal `edgeconnect-preconfig` command line and runs it through the command line's own code, so the checks, the files written and the run log are the same as in the terminal. The browser only shows what that run decided. It is new in 1.4.0-rc.1, a pre-release from the `gui` branch: `setup.sh` installs `main`, which does not have it yet, so switch your clone to the `gui` branch ([INSTALL.md](INSTALL.md#the-local-web-gui)).
+The GUI does what the command line does, in a browser on this computer. Every button builds a normal `edgeconnect-preconfig` command line and runs it through the command line's own code, so the checks, the files written and the run log are the same as in the terminal. The browser only shows what that run decided. It is new in 1.4.0 ([INSTALL.md](INSTALL.md#the-local-web-gui)).
 
 ## Start it
 
