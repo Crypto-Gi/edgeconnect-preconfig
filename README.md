@@ -48,7 +48,7 @@ Rows that fail are reported and skipped; the rest carry on. A row whose name or 
 
 You need an Orchestrator API key: every command reads from or validates on an Orchestrator.
 
-**1. Install** (macOS and Linux; git, Python 3.9+, and Node.js 18+ for the agent skills). The script asks a few questions; [docs/INSTALL.md](docs/INSTALL.md) explains each one and the manual install.
+**1. Install** (macOS and Linux; git, Python 3.9+, and Node.js 18+ for the agent skills). The script asks a few questions; [docs/INSTALL.md](docs/INSTALL.md) explains each one and the manual install. Run it again to update: a re-run puts every clone on `main`.
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/setup.sh)
@@ -197,7 +197,7 @@ Three repositories, one `setup.sh`:
 EC_DOTENV=/nonexistent/.env python3 -m unittest discover -s tests
 ```
 
-The offline tests run in CI on Python 3.9 and 3.13, on Linux and macOS; a second job runs the GUI in Chromium (a smoke test and an accessibility check). What was verified on real appliances, and the apply-time behaviours `/validate` does not catch: [docs/TESTING_AND_VERIFICATION.md](docs/TESTING_AND_VERIFICATION.md). Ground rules, the repository layout and how to rebuild `dist/`: [CONTRIBUTING.md](CONTRIBUTING.md).
+The offline tests run in CI on Python 3.9 and 3.13, on Linux, macOS and Windows (WSL); another job runs the GUI in Chromium, Firefox and WebKit (a smoke test and an accessibility check). What was verified on real appliances, and the apply-time behaviours `/validate` does not catch: [docs/TESTING_AND_VERIFICATION.md](docs/TESTING_AND_VERIFICATION.md). Ground rules, the repository layout and how to rebuild `dist/`: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 If this saves you a day of YAML, a star helps other engineers find it. Bugs and ideas: [open an issue](https://github.com/Crypto-Gi/edgeconnect-preconfig/issues).
 

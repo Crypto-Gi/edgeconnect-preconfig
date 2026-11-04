@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **`setup.sh` re-run puts every clone on `main`** (the same file in all three repositories): a clean clone on another branch, such as `gui`, is switched to `main` (the branch is kept) and pulled fast-forward from GitHub. A clone with uncommitted changes, or detached on a commit `main` does not have, is left alone with a message; a diverged `main` stops the run and is not reset. Both GUIs are on `main` now, so 1.4.0's keep-the-branch rule is no longer needed.
+
 ## 1.4.0 (2026-11-02, Latest; `gui` merged into `main`)
 
 The same code as [1.4.0-rc.5](docs/releases/1.4.0-rc.5.md), with the version set and the docs updated: the GUI is on `main`, so no branch switch is needed. Everything since 1.3.2 is in the rc entries below.
