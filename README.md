@@ -8,7 +8,7 @@
 
 **Turn one HPE Aruba EdgeConnect appliance into a CSV-driven preconfig template for every site.**
 
-For SD-WAN engineers who stage many branches: read a working appliance (GET only), pick which settings change per site, fill one CSV row per site, and get one Orchestrator-validated preconfig YAML per row, ready to upload. It never applies anything.
+For SD-WAN engineers who stage many branches: read a working appliance (GET only), pick which settings change per site, fill one CSV row per site, and get one Orchestrator-validated preconfig YAML per row, ready to upload. It never applies anything. Use it from the command line or from a [local web GUI](#local-web-gui) in your browser.
 
 Verified on real hardware: 65 appliances (ECOS 9.3.7 to 9.7.2) captured and validated across Orchestrator 9.6.4, 9.7.1 and 10.0.0, and rendered preconfigs applied and diffed leaf by leaf on lab appliances ([verification report](docs/TESTING_AND_VERIFICATION.md)).
 
@@ -139,6 +139,11 @@ Every command also appends one line to `reports/preconfig.jsonl` in the current 
 Every option, the messages a command can stop with and what to do, the stage scripts and the output folders: [docs/COMMAND_LINE.md](docs/COMMAND_LINE.md).
 
 ## Local web GUI
+
+<p align="center">
+  <img src="docs/assets/gui-demo.gif" alt="The GUI: build a template from an appliance, tick the settings that change per site beside reference.yaml, then make the preconfig files with /validate: two rows written, one with a bad address skipped with its fix" width="900">
+</p>
+<p align="center"><sub>Build, pick per-site settings, make and validate files; lab run with names and addresses replaced</sub></p>
 
 The same commands in a browser, on this computer only. It is new in 1.4.0, and the `edgeconnect-preconfig` command that `setup.sh` installs has it:
 
