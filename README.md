@@ -15,7 +15,7 @@ Verified on real hardware: 65 appliances (ECOS 9.3.7 to 9.7.2) captured and vali
 <p align="center">
   <img src="docs/assets/demo.gif" alt="edgeconnect-preconfig: list, build, variables, validate and upload in a terminal" width="900">
 </p>
-<p align="center"><sub>A real run on a lab Orchestrator; names and addresses replaced. Upload is shown without <code>--approve</code>, so nothing was sent.</sub></p>
+<p align="center"><sub>A real run on a lab Orchestrator; names and addresses replaced. Upload is shown without <code>--approve</code>, so nothing was sent. The same in a browser: <a href="#local-web-gui">the local web GUI</a>.</sub></p>
 
 ## Contents
 
@@ -139,6 +139,11 @@ Every command also appends one line to `reports/preconfig.jsonl` in the current 
 Every option, the messages a command can stop with and what to do, the stage scripts and the output folders: [docs/COMMAND_LINE.md](docs/COMMAND_LINE.md).
 
 ## Local web GUI
+
+<p align="center">
+  <img src="docs/assets/gui-demo.gif" alt="The GUI: build a template from an appliance, tick the settings that change per site beside reference.yaml, then make the preconfig files with /validate: two rows written, one with a bad address skipped with its fix" width="900">
+</p>
+<p align="center"><sub>A real run on a lab Orchestrator; names and addresses replaced. Uploads are off, so nothing was sent.</sub></p>
 
 The same commands in a browser, on this computer only. It is new in 1.4.0, and the `edgeconnect-preconfig` command that `setup.sh` installs has it:
 
