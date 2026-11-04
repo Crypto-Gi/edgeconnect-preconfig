@@ -6,7 +6,7 @@
 [![Orchestrator 9.6 | 9.7 | 10.0](https://img.shields.io/badge/Orchestrator-9.6%20%7C%209.7%20%7C%2010.0-01a982)](docs/TESTING_AND_VERIFICATION.md)
 [![Agent Skills](https://img.shields.io/badge/Agent%20Skills-SKILL.md-8a2be2)](https://agentskills.io)
 
-**Turn one HPE Aruba EdgeConnect appliance into a CSV-driven preconfig template for every site.**
+**Stop hand-editing a 41-section YAML for every branch.** Read one working HPE Aruba EdgeConnect appliance, fill one CSV row per site, and get one Orchestrator-validated preconfig file per row.
 
 For SD-WAN engineers who stage many branches: read a working appliance (GET only), pick which settings change per site, fill one CSV row per site, and get one Orchestrator-validated preconfig YAML per row, ready to upload. It never applies anything. Use it from the command line or from a [local web GUI](#local-web-gui) in your browser.
 
@@ -16,6 +16,17 @@ Verified on real hardware: 65 appliances (ECOS 9.3.7 to 9.7.2) captured and vali
   <img src="docs/assets/gui-demo.gif" alt="The GUI: build a template from an appliance, tick the settings that change per site beside reference.yaml, then make the preconfig files with /validate: two rows written, one with a bad address skipped with its fix" width="900">
 </p>
 <p align="center"><sub>Build, pick per-site settings, make and validate files; lab run with names and addresses replaced</sub></p>
+
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="edgeconnect-preconfig: list, build, variables, validate and upload in a terminal" width="900">
+</p>
+<p align="center"><sub>A real run on a lab Orchestrator; names and addresses replaced. Upload is shown without <code>--approve</code>, so nothing was sent.</sub></p>
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/setup.sh)
+```
+
+Needs an Orchestrator API key. [Quick start](#quick-start) · [Local web GUI](#local-web-gui)
 
 ## Contents
 
@@ -73,11 +84,6 @@ edgeconnect-preconfig variables preconfig-output/ref-branch --pick top10 --yes -
 edgeconnect-preconfig validate preconfig-output/ref-branch/site-branch --csv preconfig-output/ref-branch/site-branch/sites.csv
 edgeconnect-preconfig upload preconfig-output/ref-branch/site-branch --csv preconfig-output/ref-branch/site-branch/sites.csv
 ```
-
-<p align="center">
-  <img src="docs/assets/demo.gif" alt="edgeconnect-preconfig: list, build, variables, validate and upload in a terminal" width="900">
-</p>
-<p align="center"><sub>A real run on a lab Orchestrator; names and addresses replaced. Upload is shown without <code>--approve</code>, so nothing was sent.</sub></p>
 
 What `build` prints (the run in the terminal demo above):
 
