@@ -13,7 +13,7 @@ If block 1 says `ensurepip is not available`, run `sudo apt install -y python3-v
 ## Block 1: install the gui branch (Terminal 1, on Ubuntu)
 
 ```bash
-git clone --branch gui https://github.com/Crypto-Gi/edgeconnect-preconfig.git ~/ec-preconfig-gui-test
+git clone --branch gui https://github.com/mirwasay/edgeconnect-preconfig.git ~/ec-preconfig-gui-test
 cd ~/ec-preconfig-gui-test
 python3 -m venv .venv
 . .venv/bin/activate

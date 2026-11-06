@@ -1,6 +1,6 @@
 # edgeconnect-preconfig
 
-[![test](https://github.com/Crypto-Gi/edgeconnect-preconfig/actions/workflows/test.yml/badge.svg)](https://github.com/Crypto-Gi/edgeconnect-preconfig/actions/workflows/test.yml)
+[![test](https://github.com/mirwasay/edgeconnect-preconfig/actions/workflows/test.yml/badge.svg)](https://github.com/mirwasay/edgeconnect-preconfig/actions/workflows/test.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue)](requirements.txt)
 [![Orchestrator 9.6 | 9.7 | 10.0](https://img.shields.io/badge/Orchestrator-9.6%20%7C%209.7%20%7C%2010.0-01a982)](docs/TESTING_AND_VERIFICATION.md)
@@ -23,7 +23,7 @@ Verified on real hardware: 65 appliances (ECOS 9.3.7 to 9.7.2) captured and vali
 <p align="center"><sub>A real run on a lab Orchestrator; names and addresses replaced. Upload is shown without <code>--approve</code>, so nothing was sent.</sub></p>
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/mirwasay/edgeconnect-preconfig/main/install.sh)
 ```
 
 Needs an Orchestrator API key. [Quick start](#quick-start) · [Local web GUI](#local-web-gui)
@@ -62,13 +62,13 @@ You need an Orchestrator API key: every command reads from or validates on an Or
 **1. Install** (macOS and Linux; git, Python 3.9+, and Node.js 18+ for the agent skills). `install.sh` installs this repository only: the `edgeconnect-preconfig` command and its agent skill. It asks a few questions; [docs/INSTALL.md](docs/INSTALL.md) explains each one and the manual install.
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/mirwasay/edgeconnect-preconfig/main/install.sh)
 ```
 
 **Install all three** [EdgeConnect repositories](#the-edgeconnect-toolkit) instead: `install-all.sh` asks which ones to install.
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/install-all.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/mirwasay/edgeconnect-preconfig/main/install-all.sh)
 ```
 
 Run either script again to update: a re-run puts every clone on `main`. The old `setup.sh` still works and runs `install-all.sh`.
@@ -188,7 +188,7 @@ Uploads are off until you set `<nickname>_gui_preconfig_uploads=on` in `.env` fo
 The command line needs no agent; it runs from `toolkit/`. The skill in `skills/building-edgeconnect-preconfig-templates/` is its `SKILL.md` only and follows the open [Agent Skills](https://agentskills.io) format; it runs the `edgeconnect-preconfig` command, so it needs the toolkit installed. `install.sh` installs both for the agents you pick; to add the skill to an install that already has the command:
 
 ```bash
-npx skills add Crypto-Gi/edgeconnect-preconfig
+npx skills add mirwasay/edgeconnect-preconfig
 ```
 
 Then ask in plain words, for example *"Read appliance `2.NE` from Orchestrator `lab` and build a preconfig template named `retail-branch`"*. The agent runs the same commands, turns your IP plan spreadsheet into `sites.csv`, and asks before it uploads. Per-agent paths and a full example conversation: [docs/AGENT_SKILLS.md](docs/AGENT_SKILLS.md).
@@ -206,9 +206,9 @@ Three repositories. Each has an `install.sh` that installs it alone, and the sam
 
 | Repository | What it does | Agent skill |
 |---|---|---|
-| [edgeconnect-orchestrator-automation](https://github.com/Crypto-Gi/edgeconnect-orchestrator-automation) | `edgeconnect-auto` CLI: deploys and removes firewall policies, zones, address, service and application groups, application definitions and template-group ACLs from reviewed CSVs, with a dry run, a typed `APPLY` and readback verification. | `managing-edgeconnect-firewall-and-objects` |
-| [edgeconnect-preconfig](https://github.com/Crypto-Gi/edgeconnect-preconfig) (this repository) | Turns an existing appliance into a Jinja2 + CSV preconfiguration template, then renders, validates and uploads one preconfig per site. | `building-edgeconnect-preconfig-templates` |
-| [edgeconnect-mcp](https://github.com/Crypto-Gi/edgeconnect-mcp) | MCP server that lets Claude or any MCP client read, and with your approval change, an Orchestrator through its REST API; since v0.3.0 also the `edgeconnect-mcp report` command. | `edgeconnect-guide`, `edgeconnect-report` |
+| [edgeconnect-orchestrator-automation](https://github.com/mirwasay/edgeconnect-orchestrator-automation) | `edgeconnect-auto` CLI: deploys and removes firewall policies, zones, address, service and application groups, application definitions and template-group ACLs from reviewed CSVs, with a dry run, a typed `APPLY` and readback verification. | `managing-edgeconnect-firewall-and-objects` |
+| [edgeconnect-preconfig](https://github.com/mirwasay/edgeconnect-preconfig) (this repository) | Turns an existing appliance into a Jinja2 + CSV preconfiguration template, then renders, validates and uploads one preconfig per site. | `building-edgeconnect-preconfig-templates` |
+| [edgeconnect-mcp](https://github.com/mirwasay/edgeconnect-mcp) | MCP server that lets Claude or any MCP client read, and with your approval change, an Orchestrator through its REST API; since v0.3.0 also the `edgeconnect-mcp report` command. | `edgeconnect-guide`, `edgeconnect-report` |
 
 ## Tests and contributing
 
@@ -218,7 +218,7 @@ EC_DOTENV=/nonexistent/.env python3 -m unittest discover -s tests
 
 The offline tests run in CI on Python 3.9 and 3.13, on Linux, macOS and Windows (WSL); another job runs the GUI in Chromium, Firefox and WebKit (a smoke test and an accessibility check). What was verified on real appliances, and the apply-time behaviours `/validate` does not catch: [docs/TESTING_AND_VERIFICATION.md](docs/TESTING_AND_VERIFICATION.md). Ground rules, the repository layout and how to rebuild `dist/`: [CONTRIBUTING.md](CONTRIBUTING.md).
 
-If this saves you a day of YAML, a star helps other engineers find it. Bugs and ideas: [open an issue](https://github.com/Crypto-Gi/edgeconnect-preconfig/issues).
+If this saves you a day of YAML, a star helps other engineers find it. Bugs and ideas: [open an issue](https://github.com/mirwasay/edgeconnect-preconfig/issues).
 
 ## License
 

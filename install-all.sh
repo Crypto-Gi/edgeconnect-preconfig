@@ -5,7 +5,7 @@
 # choose. The same file ships in edgeconnect-orchestrator-automation, edgeconnect-preconfig and
 # edgeconnect-mcp. A Docker (HTTPS) MCP server is installed by hand from the edgeconnect-mcp guide.
 #
-#   bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/install-all.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/mirwasay/edgeconnect-preconfig/main/install-all.sh)
 #
 # install.sh in each repository installs only that repository (this script with --repos fixed); setup.sh forwards here.
 #
@@ -121,7 +121,7 @@ NEED_PYTHON=0
 if picked edgeconnect-orchestrator-automation || picked edgeconnect-preconfig; then NEED_PYTHON=1; fi
 echo "Installing: $REPOS"
 
-MCP_GUIDE="https://github.com/Crypto-Gi/edgeconnect-mcp/blob/main/docs/install.md"
+MCP_GUIDE="https://github.com/mirwasay/edgeconnect-mcp/blob/main/docs/install.md"
 MCP_MODE=no
 if picked edgeconnect-mcp; then
   if [ -z "$MCP" ]; then
@@ -271,7 +271,7 @@ for repo in $REPOS; do
   if [ -d "$ROOT/$repo/.git" ]; then
     update_clone "$repo"
   else
-    git clone -q "https://github.com/Crypto-Gi/$repo.git" "$ROOT/$repo" || die "$repo: clone failed; check your network access to github.com and run again"
+    git clone -q "https://github.com/mirwasay/$repo.git" "$ROOT/$repo" || die "$repo: clone failed; check your network access to github.com and run again"
     echo "$repo: cloned at $(git -C "$ROOT/$repo" rev-parse --short HEAD)"
   fi
 done
@@ -323,9 +323,9 @@ lab_api_key=<API_KEY>
 #   <nickname>_mcp_get_only=true    GETs only: refuses the three read-only POSTs (alarms, interface totals,
 #                                   health) and every api_write
 # Every key, its default and accepted values: .env.example in each repository
-#   https://github.com/Crypto-Gi/edgeconnect-mcp/blob/main/.env.example
-#   https://github.com/Crypto-Gi/edgeconnect-orchestrator-automation/blob/main/.env.example
-#   https://github.com/Crypto-Gi/edgeconnect-preconfig/blob/main/.env.example
+#   https://github.com/mirwasay/edgeconnect-mcp/blob/main/.env.example
+#   https://github.com/mirwasay/edgeconnect-orchestrator-automation/blob/main/.env.example
+#   https://github.com/mirwasay/edgeconnect-preconfig/blob/main/.env.example
 EOF
   )
   echo "created: replace the placeholders before the first run"
@@ -494,7 +494,7 @@ for m in re.finditer(r"\u2713 ([^\u2502\n]+)", re.sub(r"\x1b\[[0-9;?]*[A-Za-z]",
     fi
   fi
   if [ -n "$MCP_PASTE" ]; then
-    echo "$(printf '%s' "$MCP_PASTE" | sed 's/ /, /g' | tr '_' ' '): no installer for these; add this to the agent's MCP settings (where most agents keep them: https://github.com/Crypto-Gi/edgeconnect-mcp/blob/main/docs/clients.md):"
+    echo "$(printf '%s' "$MCP_PASTE" | sed 's/ /, /g' | tr '_' ' '): no installer for these; add this to the agent's MCP settings (where most agents keep them: https://github.com/mirwasay/edgeconnect-mcp/blob/main/docs/clients.md):"
     printf '  {"mcpServers": {"edgeconnect": {"command": "%s"}}}\n' "$MCP_CMD"
   fi
   if [ "$ADDED_USER_WIDE" -eq 1 ] || { [ "$MCP_DEVIN" -eq 1 ] && [ "$SCOPE" = home ]; }; then
@@ -668,7 +668,7 @@ EOF
   MCP server: read-only until you allow writes for an Orchestrator:
     lab_mcp_writes=true
   Writes stay two-step (the agent shows the change and asks first). Every option:
-    https://github.com/Crypto-Gi/edgeconnect-mcp#configuration
+    https://github.com/mirwasay/edgeconnect-mcp#configuration
 EOF
   fi
   echo
