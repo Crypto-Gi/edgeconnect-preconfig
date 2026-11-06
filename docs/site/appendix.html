@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Preconfig Toolkit Appendix</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ink: #151517; --panel: #1e1e21; --line: #313136; --text: #ececef; --muted: #9d9da6; --signal: #7fa8e8; --gate: #d4a35a; --ok: #7cbf94; --bad: #df7f78; --violet: #a99ad8; --glow: rgba(127, 168, 232, .14); --tier-teal: #79b8b0; --tier-blue: #8fb0e6; --tier-pink: #c9a0d6; --on-tier: #151517;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) { --ink: #f5f5f7; --panel: #ffffff; --line: #d2d2d7; --text: #1d1d1f; --muted: #6e6e73; --signal: #0071e3; --gate: #c56a00; --ok: #248a3d; --bad: #d70015; --violet: #8944ab; --glow: rgba(0, 113, 227, .08); --tier-teal: #0a8f8f; --tier-blue: #5856d6; --tier-pink: #b4448c; --on-tier: #ffffff; color-scheme: light; }
+}
+:root[data-theme="light"] { --ink: #f5f5f7; --panel: #ffffff; --line: #d2d2d7; --text: #1d1d1f; --muted: #6e6e73; --signal: #0071e3; --gate: #c56a00; --ok: #248a3d; --bad: #d70015; --violet: #8944ab; --glow: rgba(0, 113, 227, .08); --tier-teal: #0a8f8f; --tier-blue: #5856d6; --tier-pink: #b4448c; --on-tier: #ffffff; color-scheme: light; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body { margin: 0; background: var(--ink); color: var(--text); font: 400 1rem/1.6 var(--f-body); }
+a { color: var(--signal); }
+:focus-visible { outline: 2px solid var(--gate); outline-offset: 3px; border-radius: 4px; }
+.wrap { max-width: 72rem; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--f-display); line-height: 1.15; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2rem, 5vw, 3.4rem); font-weight: 800; }
+h2 { font-size: clamp(1.5rem, 3vw, 2.1rem); font-weight: 800; }
+h3 { font-size: 1.08rem; font-weight: 700; }
+p { margin: 0; max-width: 72ch; }
+code { font-family: var(--f-mono); font-size: .88em; }
+.eyebrow { font: 500 .75rem/1 var(--f-mono); letter-spacing: .14em; text-transform: uppercase; color: var(--signal); }
+.muted { color: var(--muted); }
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; background: color-mix(in srgb, var(--ink) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.bar .wrap { display: flex; gap: 1rem; align-items: center; padding-block: .6rem; }
+.bar .brand { font: 700 1rem/1 var(--f-display); white-space: nowrap; }
+.bar nav { display: flex; gap: .2rem; overflow-x: auto; flex: 1; min-width: 0; scrollbar-width: none; }
+.bar nav a { color: var(--muted); text-decoration: none; font-size: .84rem; padding: .35rem .6rem; border-radius: 999px; white-space: nowrap; }
+.bar nav a:hover { color: var(--text); background: var(--panel); }
+.btn { font: 500 .85rem/1 var(--f-body); color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: .5rem .85rem; cursor: pointer; text-decoration: none; white-space: nowrap; }
+.btn:hover { border-color: var(--signal); }
+header.top { padding-block: 3rem 2rem; display: grid; gap: .9rem; }
+section { padding-block: 3rem; border-top: 1px solid var(--line); display: grid; gap: 1.2rem; }
+.tbl { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: .9rem; }
+th, td { text-align: left; vertical-align: top; padding: .6rem .8rem; border-bottom: 1px solid var(--line); }
+th { font: 500 .72rem/1.2 var(--f-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); background: color-mix(in srgb, var(--ink) 40%, var(--panel)); }
+tr:last-child td { border-bottom: 0; }
+td code { color: var(--signal); }
+td.n { font-family: var(--f-mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.flow { display: grid; gap: 0; counter-reset: s; }
+.flow > div { display: grid; grid-template-columns: 2.2rem minmax(0, 1fr); gap: .9rem; padding-block: .7rem; position: relative; }
+.flow > div::before { counter-increment: s; content: counter(s); font: 600 .85rem/2rem var(--f-mono); text-align: center; width: 2rem; height: 2rem; border-radius: 50%; border: 1.5px solid var(--signal); color: var(--signal); background: var(--ink); z-index: 1; }
+.flow > div::after { content: ""; position: absolute; left: 1rem; top: 2.7rem; bottom: -.7rem; width: 1.5px; background: var(--line); }
+.flow > div:last-child::after { display: none; }
+.flow b { font-family: var(--f-mono); font-weight: 500; color: var(--text); }
+.flow p { color: var(--muted); font-size: .94rem; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1rem; }
+.grid2 > * { min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; display: grid; gap: .5rem; align-content: start; }
+.card p, .card li { color: var(--muted); font-size: .93rem; }
+.card ul { margin: 0; padding-left: 1.1rem; display: grid; gap: .3rem; }
+details { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+details > summary { cursor: pointer; padding: .85rem 1rem; font-weight: 600; list-style: none; display: flex; gap: .6rem; align-items: baseline; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content: "+"; font: 600 1rem/1 var(--f-mono); color: var(--signal); width: 1rem; flex: none; }
+details[open] > summary::before { content: "−"; }
+details > summary small { color: var(--muted); font-weight: 400; font-family: var(--f-mono); font-size: .76rem; }
+details .body { padding: 0 1rem 1rem; display: grid; gap: .7rem; }
+.stack { display: grid; gap: .6rem; }
+pre { margin: 0; font: 400 .8rem/1.55 var(--f-mono); background: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: .8rem 1rem; overflow-x: auto; }
+.pill { display: inline-block; font: 500 .7rem/1 var(--f-mono); padding: .25rem .45rem; border-radius: 5px; border: 1px solid var(--c, var(--line)); color: var(--c, var(--muted)); white-space: nowrap; }
+footer { border-top: 1px solid var(--line); padding-block: 2rem 3rem; color: var(--muted); font-size: .85rem; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <div class="wrap">
+    <div class="brand">Appendix</div>
+    <nav aria-label="Appendix sections">
+      <a href="#scripts">Scripts</a><a href="#translate">translate.py</a><a href="#mappers">mappers.py</a><a href="#ledger">Ledger</a><a href="#capture">Capture</a><a href="#method">Methodology</a><a href="#harness">Apply and diff</a><a href="#rules">Rules learned</a><a href="#counting">How we counted</a><a href="#limits">Limits</a>
+    </nav>
+    <button class="btn" id="theme" type="button" aria-label="Switch light or dark theme">Theme</button>
+    <a class="btn" href="index.html">Overview</a>
+  </div>
+</div>
+
+<main class="wrap">
+<header class="top">
+  <div class="eyebrow">Preconfig Toolkit · deep detail</div>
+  <h1>How the toolkit is built and how it was proven</h1>
+  <p class="muted">For the engineer who has to explain it, extend it or challenge it. Every figure here is counted from files; every rule names the experiment behind it. Orchestrator, appliance and site names are lab placeholders.</p>
+</header>
+
+<section id="scripts">
+  <div class="eyebrow">Code map</div>
+  <h2>The scripts: standard library plus Jinja2 and PyYAML</h2>
+  <p class="muted">Each script adds its own folder to the import path; there is no package to install. Python 3.9 is the floor (CI runs 3.9 and 3.13). Every HTTP call goes through one client in <code>common.py</code> that counts writes. Since 1.3.0 (pull request #7) the scripts live only in the top-level <code>toolkit/</code> folder; <code>tools/build_skill.py</code> builds the agent skill's copy and <code>dist/</code>. Line counts below are from 1.2.3 (16 scripts, 4,823 lines).</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Script</th><th>Stage</th><th>Lines (1.2.3)</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>cli.py</code></td><td>all</td><td class="n">693</td><td>The <code>edgeconnect-preconfig</code> command: <code>list</code>, <code>build</code>, <code>variables</code>, <code>compare</code>, <code>validate</code>, <code>upload</code>, each running the stages below; the stage scripts still run by name. Since 1.3.2 <code>validate</code> and <code>upload</code> also take <code>--yaml FILE|FOLDER</code>.</td></tr>
+      <tr><td><code>capture.py</code></td><td>0–1</td><td class="n">211</td><td>Read-only capture of one appliance, live and cached, plus Orchestrator-scope data and the release's default template.</td></tr>
+      <tr><td><code>cache_check.py</code></td><td>2</td><td class="n">85</td><td>Compares the live and cached copy of each endpoint, offline, so a stale cache is visible (<code>edgeconnect-preconfig cache-check</code>; it was the stage <code>compare</code> before 1.2).</td></tr>
+      <tr><td><code>translate.py</code></td><td>4–7</td><td class="n">696</td><td>Capture folder to reference preconfig, ledger, summary and verdict, variables sheet and site type.</td></tr>
+      <tr><td><code>mappers.py</code></td><td>4</td><td class="n">1,021</td><td>One mapper per preconfig section, from captured API data to section values.</td></tr>
+      <tr><td><code>variables.py</code></td><td>6</td><td class="n">281</td><td>One reviewable row per leaf: variable or fixed, with the reason; reads the edited sheet back. Holds the section layout and the Top 10 / Top 20 ranking (<code>references/variable-ranking.json</code>) the <code>variables</code> command offers.</td></tr>
+      <tr><td><code>decisions.py</code></td><td>6</td><td class="n">97</td><td>The older per-section choice of which leaves become columns.</td></tr>
+      <tr><td><code>generate.py</code></td><td>7</td><td class="n">220</td><td>Reference YAML to a Jinja2 template, CSV header, example row and column metadata.</td></tr>
+      <tr><td><code>cells.py</code></td><td>8</td><td class="n">153</td><td>Offline check of each CSV cell against <code>columns.json</code>, by row and column, before rendering.</td></tr>
+      <tr><td><code>render.py</code></td><td>8</td><td class="n">184</td><td>One YAML per CSV row with pyedgeconnect's Jinja settings plus <code>StrictUndefined</code>.</td></tr>
+      <tr><td><code>check.py</code></td><td>8</td><td class="n">159</td><td>Checks one site folder: renders, parses, mutation-tests each column, optional <code>/validate</code>.</td></tr>
+      <tr><td><code>validate.py</code></td><td>9</td><td class="n">114</td><td>Sends rendered YAML to Orchestrator's <code>/validate</code>, counted as a read, only on nicknames listed exactly in <code>EC_VALIDATORS</code>.</td></tr>
+      <tr><td><code>upload.py</code></td><td>9–10</td><td class="n">273</td><td>Row-by-row validation, immediate YAML for valid rows, conflict check, approval-gated upload with <code>autoApply</code> always off. <code>upload --yaml</code> (1.3.2) checks named files and uploads them without <code>--approve</code>, since uploading is not applying; it refuses <code>&lt;SECRET:…&gt;</code> placeholders, warns on <code>0.0.0.0</code> routes with an interface, skips name or serial conflicts and prints a result table per file.</td></tr>
+      <tr><td><code>synth.py</code></td><td>test</td><td class="n">138</td><td>Swaps object names so a configuration from one Orchestrator can be validated on another.</td></tr>
+      <tr><td><code>options.py</code></td><td>test</td><td class="n">76</td><td>Reads the documented options out of the default template's comments, for the option suite.</td></tr>
+      <tr><td><code>gui/</code></td><td>all</td><td class="n">—</td><td>Since 1.4.0: <code>edgeconnect-preconfig gui</code>, a web GUI on 127.0.0.1 with a one-time sign-in link. It calls the same stage code as the command line; uploads need <code>&lt;nickname&gt;_gui_preconfig_uploads=on</code>, and a CSV upload needs the Orchestrator’s nickname typed to approve; and it never applies a preconfig.</td></tr>
+      <tr><td><code>common.py</code></td><td>all</td><td class="n">422</td><td>HTTP client with write counting, <code>.env</code> profiles (every key documented in <code>.env.example</code>), the <code>EC_VALIDATORS</code> list, certificate pins, serial and filename helpers, redaction, YAML 1.2 parser, toolkit version.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="translate">
+  <div class="eyebrow">translate.py, function by function</div>
+  <h2>What happens when you run translate</h2>
+  <p class="muted">In the order <code>main()</code> calls them. Each step adds to one ledger list; nothing is removed from it.</p>
+  <div class="flow">
+    <div><div><b>main()</b><p>Parses the options and stops early, naming the cached releases, if there is no default template for <code>--target-release</code>. The template is picked by release family: the exact build, else the newest of the same major.minor, else the nearest older (untested), else the nearest newer; one downloaded from an Orchestrator goes to the work folder. <code>--target-ecos</code> sets the ECOS release of the target appliances, and the summary states which one was used; since 1.3.2 it no longer changes routes. <code>--compare</code> and <code>--variables</code> are refused together, because compare writes a fresh sheet.</p></div></div>
+    <div><div><b>Capture(folder)</b><p>Opens the capture index. <code>data(id)</code> returns the live copy of an endpoint, falling back to the cached one, so mappers never handle both.</p></div></div>
+    <div><div><b>build(cap, ledger)</b><p>Writes <code>applianceInfo</code> (hostname, group, site, cluster profile, network role, region, location), <code>templateGroups</code>, <code>businessIntentOverlays</code> (overlay ids resolved to names) and <code>deploymentInfo</code> (mode, bandwidths, interfaces, DHCP, EdgeHA). Then it runs every mapper in <code>MAPPERS</code> and applies template ownership. It stops with a clear message if the capture has no appliance or deployment data, as with an offline appliance and no cache.</p></div></div>
+    <div><div><b>selected_templates() · template_fields() · drop_template_fields()</b><p>A section provided by a selected template is not written. For the <code>routes</code>, <code>bgp</code> and <code>vrrp</code> templates, only the fields the template sets are removed, per segment; a route section left with nothing of its own is dropped. Template settings that do not apply (route targets, a VXLAN VTEP) are still written. When the groups' templates cannot be read, every section a template could provide is withheld.</p></div></div>
+    <div><div><b>local_firewall_rules()</b><p>Firewall rules Orchestrator did not push are named in the ledger, since preconfig has no firewall section.</p></div></div>
+    <div><div><b>allow list (target release's default template)</b><p>Since 1.3.0 the preconfig keeps only key paths the target release's default template has, plus a short list of known template omissions. Each path left out is one <em>outside-preconfig</em> ledger line, so a 10.0-only field is not sent to a 9.7 Orchestrator. This fixed ECOS 9.5.x <code>/validate</code> errors and mapper crashes.</p></div></div>
+    <div><div><b>flat_paths()</b><p>Lists key paths of the result that the target's default template does not show, as context: valid optional keys or unverified for that release.</p></div></div>
+    <div><div><b>tag_unmapped(cap, ledger)</b><p>Walks every captured endpoint against the endpoint catalogue. Each one is accounted for: mapped, template-group, empty, holds only the ECOS default (<code>DEFAULT_ONLY</code>), has no section (<em>outside-preconfig</em>), or has a section with no mapper yet (<em>unresolved</em>). <code>NO_GAP_WITHOUT_EVIDENCE</code> reports PoE and USB-LTE only when the running config has matching lines.</p></div></div>
+    <div><div><b>scope_by_template(ledger, sections)</b><p>An unresolved item whose target names no section of the target release's format becomes <em>outside-preconfig</em>: the format cannot hold it, so it is not a gap.</p></div></div>
+    <div><div><b>include_from_default · ordering · --compare</b><p>Sections the owner asks for are copied from the default template's examples, every leaf a column. Sections are put in the default template's order. Other captures given with <code>--compare</code> are built the same way, so fields that differ between sites become variables.</p></div></div>
+    <div><div><b>write: reference.yaml · ledger.json · summary.md</b><p>The ledger carries the toolkit version, the target release and the source. <code>summary_md()</code> groups entries with <code>REPORT_GROUPS</code> and ends with <code>verdict()</code>; an unknown disposition counts as a gap.</p></div></div>
+    <div><div><b>variables sheet → generate()</b><p>Writes or reads <code>variables.csv</code> (an earlier sheet is kept as <code>variables.previous.csv</code>), then <code>generate.py</code> builds the template and CSV. The command prints the sections, column count, ledger counts by group, toolkit version and the verdict.</p></div></div>
+  </div>
+</section>
+
+<section id="mappers">
+  <div class="eyebrow">mappers.py</div>
+  <h2>Rules every mapper follows</h2>
+  <div class="grid2">
+    <div class="card"><h3>Ctx</h3><p>Built once per capture. Resolves interface label, segment, zone and role ids to names, so the YAML carries names that exist on the target Orchestrator, never ids. <code>note()</code> deduplicates ledger entries; <code>unmapped()</code> records any source key the mapper did not use as <em>unmapped-source-key</em>.</p></div>
+    <div class="card"><h3>Return value</h3><p>A mapper returns the section, or <code>None</code> when the appliance does not use the feature, with a ledger line saying why. Returning <code>None</code> instead of an empty list matters: many sections replace on apply. A read that failed or came back malformed is ledgered <em>not-readable</em> and nothing is written from it, never an empty list or a false default. A list mapper skips and ledgers a single bad item; a name map with a bad item is unreadable as a whole.</p></div>
+    <div class="card"><h3>Orchestrator's own objects</h3><p><code>managed()</code> is true for <code>gms_marked</code> or <code>gmsMarked</code> objects. Every mapper skips them and records them as <em>orchestrator-managed</em>.</p></div>
+    <div class="card"><h3>Empty strings and secrets</h3><p><code>nul()</code> turns empty strings into null. Secrets arrive as <code>&lt;SECRET:path&gt;</code>, stay so in <code>reference.yaml</code> and become empty CSV cells.</p></div>
+  </div>
+  <h3 style="margin-top:.6rem">The 34 section mappers, grouped</h3>
+  <div class="stack">
+    <details><summary>Routing <small>localRoutes · segmentLocalRoutes · bgpSystemConfig · segmentBgpSystems · ospfSystemConfig · segmentOspfConfig · segmentBfdConfigs · managementRoutes</small></summary><div class="body">
+      <p class="muted"><code>configured_route()</code> reads routes from the configured table, because the state table reports advertise flags as false and has no comment. <code>per_segment()</code> puts routes in <code>segmentLocalRoutes</code> when a non-Default segment has routes or subnet-sharing settings of its own. Routes with no next hop are left out and ledgered; routes with next hop <code>0.0.0.0</code> are read from their config, which keeps it. When a non-Default segment runs OSPF, Default-segment OSPF moves to <code>segmentOspfConfig</code>, because Orchestrator ignores <code>ospfSystemConfig</code> when both are present. <code>bgp_value()</code> skips Orchestrator-managed neighbours, with a ledger line, and leaves out the empty route target <code>0:0</code>. Since 1.3.2 a route with next hop <code>0.0.0.0</code> or <code>::</code> and a named interface is written without the interface, for every ECOS release: 9.7 and later reject it with the interface, and the interface has no effect (the appliance shows the zone as none). Since 1.3.0: OSPF is written only on interfaces the preconfig deploys; route labels are carried by name on routes and IP SLA, and the summary lists the labels the target Orchestrator must already have.</p></div></details>
+    <details><summary>Interfaces and L2 <small>loopbackInterface · linkAggregation · bridgeGroups · vxlan · virtualTunnelInterface · pppoe · interfaceConfig · managementIp</small></summary><div class="body">
+      <p class="muted">Loopbacks Orchestrator creates for cloud services are skipped as managed. <code>linkAggregation</code> omits <code>isForceDelete</code>, which has no source on the appliance. <code>passthrough_max_bandwidth()</code> reads the pass-through shaping cap from the stored running configuration, since no API read holds it; <code>cli_lines()</code> notes that the backup can be older than the live configuration. Interfaces the preconfig does not create, dormant cluster interfaces and an admin-down <code>mgmt0</code> each get a ledger line. An inline-router deployment without both a LAN and a WAN side is written with a loud "Warning: apply will fail".</p></div></details>
+    <details><summary>Tunnels, NAT and forwarding <small>tunnelConfiguration · branchNatMapsConfig · natPools · inboundPortForwarding · flowRedirection · thirdPartyServicesAssociation</small></summary><div class="body">
+      <p class="muted"><code>m_tunnelConfiguration</code> maps user passthrough tunnels, skips overlay tunnels, and writes no section when no tunnel maps; a tunnel it cannot read is a <em>toolkit-error</em>. <code>m_branchNatMapsConfig</code> reads the live NAT maps first, because the cache lags after an apply; a map listed by name only has no rules and is ledgered <em>default-omitted</em> with its name. EdgeHA port-forward rules are Orchestrator-managed.</p></div></details>
+    <details><summary>Services and security <small>ipSlaRule · idsIpsConfig · nac · ipAllowList · secureWebServicesConfig · vrrp · peerPriority · appExpressGroups · customApplianceTags · multicast · dhcpRemoteAddressPoolConfig · ecLicensing</small></summary><div class="body">
+      <p class="muted"><code>m_idsIpsConfig</code> takes the mode from Orchestrator's IDS state; an appliance missing from that state is a gap and the section is not written. <code>probe_tunnel()</code> links an IP SLA rule to the one user tunnel on its interface; <code>vrrp_prio()</code> reads the priority change as an increase or decrease. <code>System_Rule</code> IP SLA rules are Orchestrator-managed. <code>_nac_fix()</code> fills what the validator requires (a DA server name, a secret placeholder for the RADIUS key Orchestrator never returns) and turns a RADIUS source interface into its label. Since 1.3.2, NAC switched off with only factory-default objects (server <code>0.0.0.1</code>, no key) is left out, and an empty NAC key cell is refused before <code>/validate</code> with "fill it in the CSV". <code>secureWebServicesConfig</code> is written whenever a value differs from the default, because the URL reputation threshold is kept with every feature off. Since 1.3.0: the toolkit never writes <code>segment: null</code> (on apply it turned BFD on in the Default segment); remote DHCP pool option codes come from the stored backup; single-object multicast (ECOS before 9.7) is written as the Default segment; NAC under a merge template is handled.</p></div></details>
+  </div>
+</section>
+
+<section id="ledger">
+  <div class="eyebrow">The ledger</div>
+  <h2>Every disposition and how a report reads it</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Disposition</th><th>Report group</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td><code>mapped</code></td><td><span class="pill" style="--c:var(--ok)">quiet</span></td><td>Carried into the YAML. A note containing "assumption" is listed as mapped on an assumption, for the owner to confirm.</td></tr>
+      <tr><td><code>default-omitted</code></td><td><span class="pill" style="--c:var(--ok)">quiet</span></td><td>Holds only the ECOS default, so there is nothing to carry.</td></tr>
+      <tr><td><code>runtime</code> · <code>empty-or-absent</code> · <code>context</code> · <code>from-default-template</code></td><td><span class="pill" style="--c:var(--ok)">quiet</span></td><td>Runtime state, empty on this appliance, background facts, or a section the owner chose to start from the default template.</td></tr>
+      <tr><td><code>unresolved</code> · <code>unmapped-source-key</code></td><td><span class="pill" style="--c:var(--bad)">gap</span></td><td>The format has a place for it and the value was not carried. The only real defect.</td></tr>
+      <tr><td><code>toolkit-error</code></td><td><span class="pill" style="--c:var(--bad)">toolkit error</span></td><td>A mapper could not read the data. A bug to report, never a limit of preconfig.</td></tr>
+      <tr><td><code>not-readable</code></td><td><span class="pill" style="--c:var(--gate)">check by hand</span></td><td>The format has a place for it, but a GET cannot read it: business hours (POST only), an endpoint the API key's roles refused (HTTP 403), or a read that failed or came back malformed (nothing is written from it), listed with a note to check those sections by hand or widen the key's read roles.</td></tr>
+      <tr><td><code>template-group</code> · <code>orchestrator-managed</code></td><td><span class="pill" style="--c:var(--violet)">owned elsewhere</span></td><td>Provided by a template group, or created by Orchestrator itself.</td></tr>
+      <tr><td><code>outside-preconfig</code> · <code>release-gated</code></td><td><span class="pill">outside preconfig</span></td><td>No section or field for it in the target release.</td></tr>
+    </tbody>
+  </table></div>
+  <pre>Verdict: Complete for preconfig.
+Verdict: Incomplete for preconfig: N gap(s), M toolkit error(s).</pre>
+  <p class="muted">The first line of <code>summary.md</code> names the toolkit version, commit and date, and flags local edits. An agent using the skill reports from this file, never edits the toolkit to make a gap disappear, and says to refresh the toolkit if the version is old.</p>
+</section>
+
+<section id="capture">
+  <div class="eyebrow">Capture</div>
+  <h2>What one capture holds</h2>
+  <div class="grid2">
+    <div class="card"><h3>About 110 GET calls</h3><p>Driven by <code>references/endpoint-catalogue.yaml</code>: each endpoint has a path, the preconfig sections it feeds, and notes. Appliance endpoints are read twice, live through Orchestrator and from Orchestrator's cache, so <code>cache_check.py</code> can show a stale cache.</p></div>
+    <div class="card"><h3>Files written</h3><ul><li><code>capture/&lt;id&gt;.live.json</code>, <code>.cached.json</code></li><li><code>capture-index.json</code>: status, HTTP code, empty flag</li><li><code>requests.jsonl</code>: every call, method and status</li><li><code>run.json</code>: Orchestrator release, appliance model and ECOS version</li></ul></div>
+    <div class="card"><h3>Refused reads</h3><p>A read the API key's roles refuse (HTTP 403) is recorded and reported, not fatal; the verdict then counts the items to check by hand. A refused routes read (<code>/subnets</code>) stops the capture, because the preconfig would lose its routes. An offline appliance with no cached copy stops with one line and leaves no folder.</p></div>
+    <div class="card"><h3>Redaction</h3><p>Keys that hold passwords, PSKs, community strings and similar become <code>&lt;SECRET:path&gt;</code> before the file is written. Since 1.3.0, credentials in free text (banners, notes, JSON text in CLI lines) are redacted too, with linear-time patterns that keep JSON valid. Prose beyond the documented phrasings may not be caught.</p></div>
+    <div class="card"><h3>Default templates</h3><p>The release's default preconfig template is cached once per release. Release 10.0 sends it as JSON with the YAML base64-encoded; capture decodes it and checks it parses before caching.</p></div>
+  </div>
+</section>
+
+<section id="method">
+  <div class="eyebrow">Testing methodology</div>
+  <h2>Thirteen phases, each answering a different question</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>Phase</th><th>Question</th><th>Volume</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>1 · Validator probes</td><td>What does <code>/validate</code> really check?</td><td class="n">20 probes</td><td>20 / 20 behaviours characterised, 0 writes</td></tr>
+      <tr><td>2 · Option and mutation suite</td><td>Does every documented option behave as documented?</td><td class="n">473 cases</td><td>452 as expected; 21 template comments name keys the validator rejects</td></tr>
+      <tr><td>3 · Corpus</td><td>Does every real appliance translate, mutate and validate?</td><td class="n">65 appliances</td><td>65 / 65, on 4 Orchestrators and 3 Orchestrator releases</td></tr>
+      <tr><td>4 · Closed-loop batches 0–9</td><td>Does each section apply and read back unchanged?</td><td class="n">10 batches, 31 sections</td><td>10 / 10, 0 mismatched, 0 missing values</td></tr>
+      <tr><td>5 · Cohort 1</td><td>Do real designs survive apply? Hubs, EdgeHA, branches</td><td class="n">25 applies</td><td>2,778 values matched, 0 mismatched, 0 missing</td></tr>
+      <tr><td>6 · Cohort 2</td><td>Older and newer ECOS, on a 9.7.1 lab appliance</td><td class="n">15 applies</td><td>1,747 values matched, 0 mismatched, 0 missing</td></tr>
+      <tr><td>7 · Unit tests</td><td>Do the fixed behaviours stay fixed?</td><td class="n">738 tests</td><td>In this repository, at 1.5.1 (340 at 1.3.2); CI green on Python 3.9 and 3.13, Linux, macOS and Windows (WSL), plus the GUI in three browsers</td></tr>
+      <tr><td>8 · Independent audit</td><td>What did the first author miss?</td><td class="n">every script</td><td>32 defects fixed, each with a regression test</td></tr>
+      <tr><td>9 · Full-corpus check</td><td>Does a change alter only the YAML it means to?</td><td class="n">913–987 captures</td><td>Run on every change; YAML changed only where intended (1.3.2: only the interface routes and factory-default NAC)</td></tr>
+      <tr><td>10 · Fuzz</td><td>Can a malformed read make a run fail as a whole?</td><td class="n">3,160 cases, 40 seeds</td><td>Never fails as a whole</td></tr>
+      <tr><td>11 · Guard mutation testing</td><td>Would a test notice if a new guard line broke?</td><td class="n">every new guard</td><td>44 / 44 caught in the 1.3.0 round; every new 1.3.2 check mutation-tested; independent reviews before pushes</td></tr>
+      <tr><td>12 · Live closed loop (1.3.0)</td><td>Do real sites survive convert, apply and compare?</td><td class="n">37 sources, 53 compares</td><td>231,352 differences classified; final run 10 appliances, 9 clean, 0 unexplained</td></tr>
+      <tr><td>13 · Live closed loop (1.3.2)</td><td>Do <code>upload --yaml</code> files apply on both ECOS releases?</td><td class="n">10 appliances, 2 batches</td><td>10 / 10 applied, every step passing (routes on 9.7 too); 0 unexplained differences</td></tr>
+    </tbody>
+  </table></div>
+  <details><summary>Batches 0–9 on the KVM lab</summary><div class="body">
+    <div class="tbl"><table>
+      <thead><tr><th>Batch</th><th>What it proved</th><th>Values matched</th></tr></thead>
+      <tbody>
+        <tr><td>0</td><td>Baseline idempotency: appliance info, template groups, overlays, deployment, IDS/IPS</td><td class="n">46</td></tr>
+        <tr><td>1</td><td>15 sections: dual WAN, DHCP server and relay, static routes, BGP, OSPF, VRRP, peer priority, port forwarding, loopbacks, tags, BFD, NAT pools</td><td class="n">191</td></tr>
+        <tr><td>2</td><td>12 sections: IP SLA, GRE and IPsec tunnels, VTI, branch NAT, NAC, secure web services, allow list</td><td class="n">202</td></tr>
+        <tr><td>3</td><td>Three segments on a hub: per-segment routes, BGP, OSPF, BFD</td><td class="n">154</td></tr>
+        <tr><td>4</td><td>Zero-touch onboarding of two unapproved appliances</td><td class="n">53 each</td></tr>
+        <tr><td>5</td><td>A full EdgeHA pair with cluster profile and HA interface order</td><td class="n">75 each</td></tr>
+        <tr><td>6–7</td><td>Retail and small-office designs from two other Orchestrators, adapted by CSV</td><td class="n">62 · 127</td></tr>
+        <tr><td>8</td><td>Bridge groups</td><td class="n">45</td></tr>
+        <tr><td>9</td><td>ECOS 9.7.1 sections: remote DHCP pools, multicast, VXLAN, flow redirection, link aggregation</td><td class="n">115</td></tr>
+      </tbody>
+    </table></div></div></details>
+  <details><summary>Lab topology</summary><div class="body">
+    <p class="muted">Five virtual EdgeConnect appliances on one KVM host, on ECOS 9.6.2.1 and 9.7.1.0. Each has a trunked NIC carrying management (DHCP), a DHCP internet WAN at 100 Mbps both ways and several LAN VLANs; a second NIC on an isolated MPLS bridge with static addresses; a third on an isolated EdgeHA bridge, also used for bonds and bridge groups. Every test leaves management and the DHCP WAN untouched, and test objects are removed and verified by read-back.</p></div></details>
+</section>
+
+<section id="harness">
+  <div class="eyebrow">Live apply and diff</div>
+  <h2>The loop behind the lab runs</h2>
+  <div class="flow">
+    <div><div><b>render + /validate</b><p>The site's YAML is rendered from the template and its CSV row, then validated on the lab Orchestrator.</p></div></div>
+    <div><div><b>store + apply</b><p>Stored as a preconfig and applied to a lab appliance, or to an unapproved one for zero-touch tests. Every apply step is polled to completion.</p></div></div>
+    <div><div><b>capture again</b><p>The appliance is read back with the same capture code used for real appliances.</p></div></div>
+    <div><div><b>translate again</b><p>The read-back is translated, so both sides are in preconfig terms.</p></div></div>
+    <div><div><b>compare every value</b><p>Leaf by leaf: matched, mismatched, or missing. The report is <code>apply-diff.json</code>.</p></div></div>
+    <div><div><b>triage</b><p>Each difference becomes a converter fix with a test, an ECOS read-back quirk documented in the lessons, or a field proven outside preconfig.</p></div></div>
+  </div>
+  <p class="muted">Across all 290 runs, 49,010 values were compared: 46,841 matched, 616 mismatched and 1,553 missing. Every non-matching value was triaged: the runs include early converter versions, negative tests and the raw round trips that found gaps since fixed. The final batches and cohorts show 0 mismatched and 0 missing.</p>
+  <p class="muted">For 1.3.0 the loop was run again on 37 source appliances (ECOS 9.3.7 to 9.7.2) from the Test Lab and field-reference Orchestrators: 10 batches, applied through the Orchestrator API and compared leaf by leaf in the API endpoints and the CLI running-config. 53 clone-vs-source comparisons gave 231,352 differences, all classified, and management access stayed intact after every apply. A gap-fix batch proved the BFD, 9.7 route and OSPF fixes live. The final run on the release: 10 appliances, 9 clean, all 10 with 0 unexplained differences; the one failure was caused by the lab itself.</p>
+  <p class="muted">For 1.3.2: 10 appliances in 2 batches on ECOS 9.6.2.1 and 9.7.1.0, each restored, uploaded with <code>upload --yaml</code>, applied, re-captured and compared. All 10 applied with every step passing, including the routes step on 9.7, with 0 unexplained differences: 563 were the intended 1.3.2 changes, the rest known or lab-side. Where the YAML had no NAC section, each appliance's own NAC was the same before and after.</p>
+</section>
+
+<section id="rules">
+  <div class="eyebrow">Rules learned</div>
+  <h2>Findings that are now code</h2>
+  <div class="grid2">
+    <div class="card"><h3>YAML 1.2 everywhere</h3><p>YAML 1.1 read <code>1:1</code> as 61, <code>yes</code> as true and crashed on <code>08034</code>. A strict YAML 1.2 parser is used throughout, and strings render through <code>tojson</code>.</p></div>
+    <div class="card"><h3>Release schemas differ</h3><p>A 9.6.4 default template fails on 9.7.1 (<code>nac.server[].address</code> became <code>host</code>); 10.0 adds post-quantum IKE fields that 9.7.1 rejects. Hence <code>prune()</code> against the target release's template.</p></div>
+    <div class="card"><h3>Older ECOS omits fields</h3><p>9.3 and 9.5 appliances omit roles and inbound bandwidth; missing inbound takes the outbound value.</p></div>
+    <div class="card"><h3>Companion constraints</h3><p>Some options require siblings: GCM ciphers need a null auth algorithm, ICMP port forwards need port 0, OSPF text auth needs a key. Recorded in <code>known-constraints.yaml</code>.</p></div>
+    <div class="card"><h3>Static route flags</h3><p>The route state table always says not advertised and has no comment. Flags and comments are read from the configured table; a raw round trip found every cloned route had lost them.</p></div>
+    <div class="card"><h3>Template groups win</h3><p>Two template groups setting the same thing with no priority: whichever Orchestrator applies last wins, so a clone can differ with an identical preconfig.</p></div>
+    <div class="card"><h3>Bonds are not deleted by preconfig</h3><p>An empty link-aggregation list, with or without force delete, leaves the bond. Remove it on the appliance once no interface uses it.</p></div>
+    <div class="card"><h3>Read-back quirks</h3><p>A cloned tunnel's IKEv2 exchange mode can read back differently although the preconfig carries the source value. Documented, not a converter gap.</p></div>
+    <div class="card"><h3>A null segment is not neutral</h3><p>A live apply with <code>segment: null</code> turned BFD on in the Default segment. The toolkit never writes it.</p></div>
+    <div class="card"><h3>ECOS 9.7 interface routes</h3><p>ECOS 9.7 and later reject a route with next hop <code>0.0.0.0</code> or <code>::</code> that names an interface, and the whole routes step fails. The interface has no effect, so since 1.3.2 it is never written, whatever <code>--target-ecos</code> says.</p></div>
+    <div class="card"><h3>Switched-off NAC is not a setting</h3><p>NAC that is off with only the default server <code>0.0.0.1</code> and no key failed with "NAC - server key can not be empty". Found on 16 of 75 captured appliances (ECOS 9.5 to 9.7); it is now left out.</p></div>
+    <div class="card"><h3>A failed read is not an empty list</h3><p>A failed template-association read once could write an empty template-group list, which would detach every group on apply. Failed reads are now ledgered and nothing is written from them.</p></div>
+    <div class="card"><h3>Inline router needs both sides</h3><p>An inline-router deployment without both a LAN and a WAN side fails at apply. It is written with a loud warning so a person sees it first.</p></div>
+  </div>
+</section>
+
+<section id="counting">
+  <div class="eyebrow">How we counted</div>
+  <h2>Every number on the overview, and where it came from</h2>
+  <p class="muted">Counted on 2026-10-23 from the work folders and repositories, not estimated; the 1.3.0 and 1.3.2 rows come from the releases' test reports of 2026-10-28. Figures in the testing report that are not repeated here were not recounted.</p>
+  <div class="tbl"><table>
+    <thead><tr><th>Figure</th><th>Value</th><th>Counted as</th></tr></thead>
+    <tbody>
+      <tr><td>Distinct appliances</td><td class="n">69</td><td>Distinct appliance id per Orchestrator across all capture folders: 56 Test Lab, 5 KVM lab, 4 field reference, 4 Virtual Lab</td></tr>
+      <tr><td>Captures</td><td class="n">890</td><td><code>run.json</code> files with an appliance block</td></tr>
+      <tr><td>API reads</td><td class="n">98,376</td><td>Lines in every <code>requests.jsonl</code>: Test Lab 18,867, field reference 840, lab Orchestrators 78,669; every one a GET</td></tr>
+      <tr><td>Writes to read-only Orchestrators</td><td class="n">0</td><td>Non-GET lines in the 19,707 logged calls to the Test Lab and field-reference Orchestrators</td></tr>
+      <tr><td>ECOS releases · models</td><td class="n">10 · 9</td><td>Distinct <code>softwareVersion</code> and model in captured appliance records, 9.3.1 to 9.7.2</td></tr>
+      <tr><td>Orchestrator releases</td><td class="n">3</td><td>9.6.4, 9.7.1 and 10.0 (two builds) in <code>run.json</code></td></tr>
+      <tr><td>Translate runs</td><td class="n">1,161</td><td><code>ledger.json</code> files</td></tr>
+      <tr><td>Rendered preconfigs</td><td class="n">3,633</td><td><code>rendered/*.yml</code> files</td></tr>
+      <tr><td>/validate verdicts</td><td class="n">3,590</td><td>Result objects with an accepted flag in reports and checks: 3,310 accepted, 280 rejected</td></tr>
+      <tr><td>Live apply-and-diff runs</td><td class="n">290</td><td><code>apply-diff.json</code> reports; 271 completed every apply step</td></tr>
+      <tr><td>Values compared</td><td class="n">49,010</td><td>Sum of matched, mismatched and missing in those reports</td></tr>
+      <tr><td>Lab campaigns</td><td class="n">35</td><td>Folders under <code>test-runs</code></td></tr>
+      <tr><td>Unit tests</td><td class="n">738</td><td>Offline tests in this repository at 1.5.1 (3 skipped); CI on Python 3.9 and 3.13</td></tr>
+      <tr><td>Source appliances cloned live (1.3.0)</td><td class="n">37</td><td>ECOS 9.3.7 to 9.7.2, in 10 batches on the KVM lab</td></tr>
+      <tr><td>Clone-vs-source comparisons</td><td class="n">53</td><td>Leaf-by-leaf compares of API endpoints and CLI running-config</td></tr>
+      <tr><td>Differences classified</td><td class="n">231,352</td><td>All differences from those comparisons; 0 unexplained in the final run</td></tr>
+      <tr><td>Fuzz cases</td><td class="n">3,160</td><td>Mutated captures from 40 seeds</td></tr>
+      <tr><td>Full-corpus comparison (1.3.2)</td><td class="n">987</td><td>Captures translated before and after; only the interface routes and factory-default NAC sections changed</td></tr>
+      <tr><td>Live applies (1.3.2)</td><td class="n">10 / 10</td><td>2 batches on the KVM lab, every step passing; 563 intended changes, 0 unexplained</td></tr>
+      <tr><td>Factory-default NAC found</td><td class="n">16 / 75</td><td>Captured appliances with NAC off and only default objects, ECOS 9.5 to 9.7</td></tr>
+      <tr><td>Guard-line mutants caught</td><td class="n">44 / 44</td><td>Mutation testing on every new guard line, last round</td></tr>
+      <tr><td>Commits · releases · CI runs</td><td class="n">162 · 32 · 96</td><td>GitHub history of the three public repositories on <code>main</code> on 2026-10-23 (43 / 89 / 30 commits); releases 9 / 14 / 9; CI runs of the preconfig and MCP repositories</td></tr>
+      <tr><td>Code</td><td class="n">4,823</td><td><code>wc -l</code> over the 16 scripts at 1.2.3</td></tr>
+    </tbody>
+  </table></div>
+  <p class="muted">Not counted, so not claimed: repeated test runs by other agents before the public repository existed, and manual checks in the Orchestrator UI. They happened; their logs were not kept in a countable form.</p>
+</section>
+
+<section id="limits">
+  <div class="eyebrow">Limits</div>
+  <h2>What is not proven yet</h2>
+  <div class="grid2">
+    <div class="card"><h3>Live apply on one Orchestrator release</h3><p>All live applies ran through the KVM Lab Orchestrator to appliances on ECOS 9.6.2.1 and 9.7.1. No preconfig was ever applied through an Orchestrator on 9.6.4 or 10.0.</p></div>
+    <div class="card"><h3>Hardware-only sections</h3><p>PoE and USB-LTE were validated from the default template, never captured from an appliance using them.</p></div>
+    <div class="card"><h3>Business hours</h3><p>Readable only with a POST, so capture never reads them. They are reported as not readable, to set per site.</p></div>
+    <div class="card"><h3>BGP template neighbour fields</h3><p>Whether the bgp template pushes keepalive, hold time and similar to every neighbour is unverified; they are written per neighbour and flagged.</p></div>
+    <div class="card"><h3>Proven offline only</h3><p>Remote DHCP pool option codes and single-object multicast were proven offline, not yet in a live apply.</p></div>
+    <div class="card"><h3>Fuzz finds 51 quiet cases</h3><p>In 51 synthetic malformed-read cases an item disappears without a new visible ledger line. Next phase.</p></div>
+    <div class="card"><h3>Free-text redaction</h3><p>Credentials in banners and notes are caught in the documented phrasings only; other prose may not be.</p></div>
+  </div>
+</section>
+</main>
+
+<footer><div class="wrap">Preconfig Toolkit 1.5.1 · released 2026-11-06 · line counts from 1.2.3, the 1.3.2 test rows from 2026-10-28, earlier figures counted 2026-10-23 · <a href="index.html">Back to the overview</a> · <a href="https://github.com/Crypto-Gi/edgeconnect-preconfig">Source</a></div></footer>
+
+<script>
+(() => {
+  const root = document.documentElement, btn = document.getElementById('theme');
+  const sys = () => matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  try { const t = localStorage.getItem('pc-theme'); if (t) root.dataset.theme = t; } catch (e) {}
+  btn.addEventListener('click', () => {
+    root.dataset.theme = (root.dataset.theme || sys()) === 'dark' ? 'light' : 'dark';
+    try { localStorage.setItem('pc-theme', root.dataset.theme); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>
