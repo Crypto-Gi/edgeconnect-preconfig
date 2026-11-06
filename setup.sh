@@ -284,7 +284,7 @@ if picked edgeconnect-orchestrator-automation; then
   echo "edgeconnect-auto $("$ROOT/.venv/bin/python" -c 'import edgeconnect_automation as e; print(e.__version__)') installed"
 fi
 if picked edgeconnect-preconfig; then
-  # before 1.3.0 the scripts lived only in the skill folder, which still ships a copy
+  # before 1.3.0 the scripts lived only in the skill folder (a clone left on such an old commit, e.g. with local changes)
   [ -d "$PRECONFIG_SCRIPTS" ] || PRECONFIG_SCRIPTS="$ROOT/edgeconnect-preconfig/skills/building-edgeconnect-preconfig-templates/scripts"
   "$ROOT/.venv/bin/python" -m pip install -q --disable-pip-version-check -r "$ROOT/edgeconnect-preconfig/requirements.txt"
   echo "preconfig scripts $(cat "$PRECONFIG_SCRIPTS/../VERSION" 2>/dev/null || echo "(no VERSION file)"): Jinja2 and PyYAML installed"

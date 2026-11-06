@@ -8,7 +8,7 @@ Issues and pull requests are welcome. Report a security problem privately: the *
 - **The toolkit never applies.** `tests/test_no_apply.py` fails if any script or test calls the apply API or sets `autoApply` true ([decision 0008](docs/decisions/0008-the-toolkit-cannot-apply.md)).
 - **Decisions** that the code must keep live in [docs/decisions/](docs/decisions/); read the ones for the area you change, and add one when you make a rule.
 - **Every `.env` key** the scripts read is documented in [`.env.example`](.env.example); `tests/test_env_example.py` fails otherwise.
-- **Edit `toolkit/`, never the skill's copy.** `toolkit/` (`VERSION`, `scripts/`, `references/`, and `gui/`, which the skill does not copy) is the only source; after changing it, run `python3 tools/build_skill.py` to copy it into `skills/building-edgeconnect-preconfig-templates/` and rebuild `dist/`. `tests/test_layout.py` fails while the copy or `dist/` is out of date ([decision 0012](docs/decisions/0012-toolkit-is-the-source-the-skill-ships-a-copy.md)).
+- **The code is in `toolkit/`; the skill is instructions only.** `toolkit/` (`VERSION`, `scripts/`, `references/`, `gui/`) is the only code. `skills/building-edgeconnect-preconfig-templates/` holds `SKILL.md` only and runs the installed `edgeconnect-preconfig` command; `tests/test_layout.py` fails if a skill folder holds anything else ([decision 0021](docs/decisions/0021-the-skill-holds-instructions-only.md)).
 
 ## Running the tests
 
@@ -62,8 +62,7 @@ edgeconnect-preconfig/
 │   ├── scripts/                              # 17 runtime scripts (cli, capture, cache_check, translate, mappers, decisions, variables, generate, cells, render, check, validate, upload, synth, options, runlog, common)
 │   └── gui/                                  # the local web GUI (edgeconnect-preconfig gui, or python3 -m toolkit.gui): server, tasks, engine, fleet status, approval, static/
 ├── skills/
-│   └── building-edgeconnect-preconfig-templates/   # <-- installable skill: SKILL.md + a copy of toolkit/ (tools/build_skill.py)
-├── tools/build_skill.py                      # copies toolkit/ into the skill and rebuilds dist/; --check reports drift
+│   └── building-edgeconnect-preconfig-templates/   # <-- installable skill: SKILL.md only; it runs the installed toolkit
 ├── tests/                                    # offline unit tests & maintainer lab harnesses
 │   ├── test_*.py                             # one file per script or area (capture, cells, cli, mappers, translate_robust, upload_yaml, ...)
 │   ├── test_gui_*.py                         # the GUI: approval, engine, fleet, server, shell, tasks, tables, pick, compare, make, inventory, design
@@ -71,12 +70,9 @@ edgeconnect-preconfig/
 │   ├── test_no_apply.py                      # fails if any script or test calls the apply API or sets autoApply true
 │   ├── test_validators.py                    # /validate runs only on nicknames listed exactly in EC_VALIDATORS
 │   ├── test_env_example.py                   # every .env key the scripts and the GUI read is documented in .env.example
-│   ├── test_layout.py                        # the skill copy and dist/ match toolkit/; the work folder is found from both
+│   ├── test_layout.py                        # every skill folder holds only SKILL.md; the work folder is found from both layouts
 │   ├── golden/                               # the pinned outputs
 │   ├── fixtures/                             # synthetic captures for compare (compare/)
 │   ├── e2e/                                  # the GUI in a browser (Playwright, axe-core); the CI browser job runs it
 │   └── harnesses/                            # corpus.py, lab_diff.py, probes.py, rank_variables.py, raw_diff.py, scan.py, suite.py
-└── dist/                                     # Pre-built archives for Claude Desktop / Cowork upload
-    ├── building-edgeconnect-preconfig-templates.zip
-    └── building-edgeconnect-preconfig-templates.skill
 ```

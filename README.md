@@ -177,7 +177,7 @@ Uploads are off until you set `<nickname>_gui_preconfig_uploads=on` in `.env` fo
 
 ## Use it with an AI agent
 
-The command line needs no agent; it runs from `toolkit/`. The skill in `skills/building-edgeconnect-preconfig-templates/` (its `SKILL.md` plus a copy of `toolkit/`) follows the open [Agent Skills](https://agentskills.io) format. `setup.sh` installs it for the agents you pick; to install the skill alone:
+The command line needs no agent; it runs from `toolkit/`. The skill in `skills/building-edgeconnect-preconfig-templates/` is its `SKILL.md` only and follows the open [Agent Skills](https://agentskills.io) format; it runs the `edgeconnect-preconfig` command, so it needs the toolkit installed. `setup.sh` installs both for the agents you pick; to add the skill to an install that already has the command:
 
 ```bash
 npx skills add Crypto-Gi/edgeconnect-preconfig
