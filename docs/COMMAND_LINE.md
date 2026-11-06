@@ -62,7 +62,7 @@ A read the API key's roles refuse (HTTP 403) on any other endpoint does **not** 
 
 ## The stage scripts, step by step
 
-The six commands above run these stages for you. To run them yourself (`SKILL_SCRIPTS` is `toolkit/scripts`, or the `scripts/` folder of an installed skill):
+The six commands above run these stages for you. To run them yourself (`SKILL_SCRIPTS` is `toolkit/scripts`):
 
 ### Capture a Reference Appliance (Read-Only `GET`)
 ```bash
