@@ -1017,7 +1017,7 @@ class Build(unittest.TestCase):
 
 
 class GuiCommand(unittest.TestCase):
-    """edgeconnect-preconfig gui: the local web GUI from the command setup.sh installs."""
+    """edgeconnect-preconfig gui: the local web GUI from the command install.sh installs."""
 
     def run_main(self, argv):
         with contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()) as err:

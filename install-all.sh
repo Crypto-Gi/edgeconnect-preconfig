@@ -7,7 +7,7 @@
 #
 #   bash <(curl -fsSL https://raw.githubusercontent.com/mirwasay/edgeconnect-preconfig/main/install-all.sh)
 #
-# install.sh in each repository installs only that repository (this script with --repos fixed); setup.sh forwards here.
+# install.sh in each repository installs only that repository (this script with --repos fixed).
 #
 # Run it again to update: repositories are pulled, skills are reinstalled for the agents you choose,
 # and .env, an edited AGENTS.md and commands it did not write are never overwritten.

@@ -71,7 +71,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/mirwasay/edgeconnect-preconf
 bash <(curl -fsSL https://raw.githubusercontent.com/mirwasay/edgeconnect-preconfig/main/install-all.sh)
 ```
 
-Run either script again to update: a re-run puts every clone on `main`. The old `setup.sh` still works and runs `install-all.sh`.
+Run either script again to update: a re-run puts every clone on `main`.
 
 **2. Fill in `.env`** in the install folder: one nickname per Orchestrator, and the ones `/validate` may run on. Every key and the values it accepts are in [`.env.example`](.env.example).
 

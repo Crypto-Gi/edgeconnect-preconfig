@@ -16,7 +16,7 @@ To install any of the three EdgeConnect repositories, run `install-all.sh`; it a
 bash <(curl -fsSL https://raw.githubusercontent.com/mirwasay/edgeconnect-preconfig/main/install-all.sh)
 ```
 
-`install.sh` is `install-all.sh` with this repository already picked, so it skips the first question below. The same `install-all.sh` is in all three repositories, and the old `setup.sh` still works and runs it. `install-all.sh` asks a few questions, then does everything else:
+`install.sh` is `install-all.sh` with this repository already picked, so it skips the first question below. The same `install-all.sh` is in all three repositories. `install-all.sh` asks a few questions, then does everything else:
 
 1. **Which repositories**: a table of the three, with what each does and the skill it installs; type numbers separated by commas (for example `1,3`) or `all` (the default).
 2. **The MCP server** (only if you pick 3): run it locally (stdio) for your agents, or in Docker over HTTPS, which you install by hand with the [MCP install guide](https://github.com/mirwasay/edgeconnect-mcp/blob/main/docs/install.md), or not at all.

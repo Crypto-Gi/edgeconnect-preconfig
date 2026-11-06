@@ -28,7 +28,7 @@ def validator(nickname: str) -> Any:
                    "(comma-separated nicknames).".format(nickname, ", ".join(sorted(validators())) or "none"))
     client = client_for(nickname)
     if "read_only" not in inspect.signature(client.request).parameters:
-        raise Stop("ApiClient.request has no read_only flag, so /validate cannot be sent as a read; reinstall the toolkit (setup.sh)")
+        raise Stop("ApiClient.request has no read_only flag, so /validate cannot be sent as a read; reinstall the toolkit (install.sh)")
     return client
 
 
