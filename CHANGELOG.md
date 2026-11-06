@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **`install.sh` installs this repository only; `setup.sh` is now `install-all.sh`.** `install.sh` runs `install-all.sh` with this repository picked (`--repos 2`) and passes every other option through; it refuses `--repos`. `install-all.sh` is the old `setup.sh`, renamed, the same in all three repositories; it behaves as before, still recognises the commands and the `AGENTS.md` it wrote under its old name, and asks which repositories to install. `setup.sh` stays as a one-line forwarder to `install-all.sh`, so old links and re-runs keep working. Both work from a clone and through `bash <(curl ...)`.
+
 ## 1.5.0 (2026-11-06)
 
 - **The skill holds `SKILL.md` only** ([decision 0021](docs/decisions/0021-the-skill-holds-instructions-only.md)): it no longer ships a copy of `toolkit/`, and `dist/*.zip`, `dist/*.skill` and `tools/build_skill.py` are gone. The skill runs the `edgeconnect-preconfig` command and reads the toolkit's `references/`, so it needs the toolkit that `setup.sh` installs (or a clone with `requirements.txt` and the command on the PATH); a skill uploaded on its own, such as to Claude Desktop, no longer runs. No code under `toolkit/` changed.

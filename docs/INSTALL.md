@@ -2,15 +2,21 @@
 
 Back to the [README](../README.md).
 
-## One-line install with `setup.sh`
+## One-line install with `install.sh`
 
-macOS and Linux; needs git, Python 3.9 or later with its `venv` module and, for the skills, Node.js 18 or later (without Node.js the skills are skipped with a message; run `setup.sh` again after installing it):
+macOS and Linux; needs git, Python 3.9 or later with its `venv` module and, for the skills, Node.js 18 or later (without Node.js the skills are skipped with a message; run the script again after installing it). `install.sh` installs this repository only, the `edgeconnect-preconfig` command and its skill:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/setup.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/install.sh)
 ```
 
-The same `setup.sh` is in all three repositories. It asks a few questions, then does everything else:
+To install any of the three EdgeConnect repositories, run `install-all.sh`; it asks which ones:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/install-all.sh)
+```
+
+`install.sh` is `install-all.sh` with this repository already picked, so it skips the first question below. The same `install-all.sh` is in all three repositories, and the old `setup.sh` still works and runs it. `install-all.sh` asks a few questions, then does everything else:
 
 1. **Which repositories**: a table of the three, with what each does and the skill it installs; type numbers separated by commas (for example `1,3`) or `all` (the default).
 2. **The MCP server** (only if you pick 3): run it locally (stdio) for your agents, or in Docker over HTTPS, which you install by hand with the [MCP install guide](https://github.com/Crypto-Gi/edgeconnect-mcp/blob/main/docs/install.md), or not at all.
@@ -18,13 +24,13 @@ The same `setup.sh` is in all three repositories. It asks a few questions, then 
 4. **The install folder** (default: `$EDGECONNECT_HOME` when set, else the folder you run it from, or `~/edgeconnect` from your home folder).
 5. **Where the skills and the MCP server go**, one answer for both: only that folder (the default) or your user account (`~`). Agents that keep MCP servers only for the whole user account (Windsurf, Cline, Goose, Antigravity, Claude Desktop) are asked about one by one when you chose the folder: yes adds the server user-wide for that agent, no skips it. With `--yes` they are skipped, and the last screen lists the command to add each one.
 
-Everything lands in the one folder, from `main`: the repositories, for 1 and 2 a Python environment and the `edgeconnect-auto` (1) and `edgeconnect-preconfig` (2) commands in `~/.local/bin`, for a local MCP server its launcher `<folder>/bin/edgeconnect-mcp`, and one shared `.env`. The last screen shows how to fill in `.env` for what you picked: the Orchestrator lines, the API key, a self-signed certificate, `EC_VALIDATORS` for preconfig and MCP writes. It also writes `AGENTS.md` (which tool an agent should use for which task, and what this folder has installed) and a `CLAUDE.md` that points to it, so start your agent there; an `AGENTS.md` that `setup.sh` wrote and you never edited is kept up to date on every run, and one you have edited is never overwritten (the new text goes to `AGENTS.md.new`). Options for answering without prompts: `--repos 1,3` (or `all`), `--mcp stdio|docker|no`, `--agents 1,2,15` (numbers or names such as `claude-code,codex`), `--dir PATH`, `--skills folder|home`, `--yes` (or `-y`); `--help` lists them.
+Everything lands in the one folder, from `main`: the repositories, for 1 and 2 a Python environment and the `edgeconnect-auto` (1) and `edgeconnect-preconfig` (2) commands in `~/.local/bin`, for a local MCP server its launcher `<folder>/bin/edgeconnect-mcp`, and one shared `.env`. The last screen shows how to fill in `.env` for what you picked: the Orchestrator lines, the API key, a self-signed certificate, `EC_VALIDATORS` for preconfig and MCP writes. It also writes `AGENTS.md` (which tool an agent should use for which task, and what this folder has installed) and a `CLAUDE.md` that points to it, so start your agent there; an `AGENTS.md` that the installer wrote and you never edited is kept up to date on every run, and one you have edited is never overwritten (the new text goes to `AGENTS.md.new`). Options for answering without prompts: `--repos 1,3` (or `all`), `--mcp stdio|docker|no`, `--agents 1,2,15` (numbers or names such as `claude-code,codex`), `--dir PATH`, `--skills folder|home`, `--yes` (or `-y`); `--help` lists them.
 
-**Run it again to update**, in place. Each picked repository already in the folder ends on `main`, pulled (fast-forward only) from GitHub: a clone on another branch, such as an old `gui` checkout, is switched to `main` (the branch itself is kept). A clone with uncommitted changes to tracked files, or detached on a commit `main` does not have, is left as it is, with a message, so no edit or commit is lost. A local `main` that has diverged from GitHub's stops the run with `could not update main` and is not reset. The Python environment is kept and the requirements are installed again. `.env` keeps its contents once it exists; each run sets its permissions to 600 (owner only). The commands it wrote are refreshed; a command of the same name that it did not write is left alone. The skills are installed again for the agents you pick, which also updates them.
+**Run either script again to update**, in place. Each picked repository already in the folder ends on `main`, pulled (fast-forward only) from GitHub: a clone on another branch, such as an old `gui` checkout, is switched to `main` (the branch itself is kept). A clone with uncommitted changes to tracked files, or detached on a commit `main` does not have, is left as it is, with a message, so no edit or commit is lost. A local `main` that has diverged from GitHub's stops the run with `could not update main` and is not reset. The Python environment is kept and the requirements are installed again. `.env` keeps its contents once it exists; each run sets its permissions to 600 (owner only). The commands it wrote are refreshed; a command of the same name that it did not write is left alone. The skills are installed again for the agents you pick, which also updates them.
 
-Picking 3 installs the MCP repository's skills (`setup.sh` installs every skill a picked repository has: `edgeconnect-guide` and, since edgeconnect-mcp v0.3.0, `edgeconnect-report`) and, if you choose local, the stdio MCP server for your agents; a Docker server is installed by hand, as the [edgeconnect-mcp README](https://github.com/Crypto-Gi/edgeconnect-mcp#install) covers.
+Picking 3 installs the MCP repository's skills (`install-all.sh` installs every skill a picked repository has: `edgeconnect-guide` and, since edgeconnect-mcp v0.3.0, `edgeconnect-report`) and, if you choose local, the stdio MCP server for your agents; a Docker server is installed by hand, as the [edgeconnect-mcp README](https://github.com/Crypto-Gi/edgeconnect-mcp#install) covers.
 
-## Manual install (no `setup.sh`)
+## Manual install (no `install.sh`)
 
 ### 1. Clone & Install Python Dependencies
 Requires **Python 3.9+** and two packages (`Jinja2` and `PyYAML`; the EdgeConnect Orchestrator REST client is bundled in `toolkit/scripts/common.py` using Python's standard library):
@@ -37,7 +43,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Without `setup.sh` there is no `edgeconnect-preconfig` command; run the same commands as `python3 toolkit/scripts/cli.py COMMAND ...` inside the virtual environment. The tests need the same packages (`python3 -m unittest discover -s tests`).
+Without `install.sh` there is no `edgeconnect-preconfig` command; run the same commands as `python3 toolkit/scripts/cli.py COMMAND ...` inside the virtual environment. The tests need the same packages (`python3 -m unittest discover -s tests`).
 
 ### 2. Configure `.env`
 Copy `.env.example` to `.env` in your working directory, or set `EC_DOTENV=/path/to/.env`. Without `EC_DOTENV` the scripts use the first `.env` they find: the working directory, then the skill folder and each folder above it (so the install folder's shared `.env` is found). Environment variables of the same name override `.env` values.
@@ -67,13 +73,13 @@ Every key, its default and the values it accepts: [`.env.example`](../.env.examp
 
 ## The local web GUI
 
-The GUI is part of 1.4.0 and later: the `edgeconnect-preconfig` command that `setup.sh` installs has the `gui` command. A clone that was switched to the `gui` branch for a 1.4.0 pre-release goes back to `main` the next time `setup.sh` runs.
+The GUI is part of 1.4.0 and later: the `edgeconnect-preconfig` command that `install.sh` installs has the `gui` command. A clone that was switched to the `gui` branch for a 1.4.0 pre-release goes back to `main` the next time `install.sh` or `install-all.sh` runs.
 
 ```bash
 edgeconnect-preconfig gui            # or: edgeconnect-preconfig gui --port 8765 --no-browser
 ```
 
-Without `setup.sh`, clone the repository and install the same two packages:
+Without `install.sh`, clone the repository and install the same two packages:
 
 ```bash
 git clone https://github.com/Crypto-Gi/edgeconnect-preconfig.git

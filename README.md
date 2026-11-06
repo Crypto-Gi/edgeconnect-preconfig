@@ -23,7 +23,7 @@ Verified on real hardware: 65 appliances (ECOS 9.3.7 to 9.7.2) captured and vali
 <p align="center"><sub>A real run on a lab Orchestrator; names and addresses replaced. Upload is shown without <code>--approve</code>, so nothing was sent.</sub></p>
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/setup.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/install.sh)
 ```
 
 Needs an Orchestrator API key. [Quick start](#quick-start) · [Local web GUI](#local-web-gui)
@@ -59,11 +59,19 @@ Rows that fail are reported and skipped; the rest carry on. A row whose name or 
 
 You need an Orchestrator API key: every command reads from or validates on an Orchestrator.
 
-**1. Install** (macOS and Linux; git, Python 3.9+, and Node.js 18+ for the agent skills). The script asks a few questions; [docs/INSTALL.md](docs/INSTALL.md) explains each one and the manual install. Run it again to update: a re-run puts every clone on `main`.
+**1. Install** (macOS and Linux; git, Python 3.9+, and Node.js 18+ for the agent skills). `install.sh` installs this repository only: the `edgeconnect-preconfig` command and its agent skill. It asks a few questions; [docs/INSTALL.md](docs/INSTALL.md) explains each one and the manual install.
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/setup.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/install.sh)
 ```
+
+**Install all three** [EdgeConnect repositories](#the-edgeconnect-toolkit) instead: `install-all.sh` asks which ones to install.
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/install-all.sh)
+```
+
+Run either script again to update: a re-run puts every clone on `main`. The old `setup.sh` still works and runs `install-all.sh`.
 
 **2. Fill in `.env`** in the install folder: one nickname per Orchestrator, and the ones `/validate` may run on. Every key and the values it accepts are in [`.env.example`](.env.example).
 
@@ -151,14 +159,14 @@ Every option, the messages a command can stop with and what to do, the stage scr
 
 ## Local web GUI
 
-The same commands in a browser, on this computer only. It is new in 1.4.0, and the `edgeconnect-preconfig` command that `setup.sh` installs has it:
+The same commands in a browser, on this computer only. It is new in 1.4.0, and the `edgeconnect-preconfig` command that `install.sh` installs has it:
 
 ```bash
 edgeconnect-preconfig gui                          # opens your browser; Ctrl+C stops it
 edgeconnect-preconfig gui --port 8765 --no-browser # a fixed port; prints the sign-in link instead
 ```
 
-Without `setup.sh`, from a clone with `requirements.txt` installed, `python3 -m toolkit.gui` (same options) starts it from the repository folder. An installed agent skill has no GUI: `edgeconnect-preconfig gui` there says so.
+Without `install.sh`, from a clone with `requirements.txt` installed, `python3 -m toolkit.gui` (same options) starts it from the repository folder. An installed agent skill has no GUI: `edgeconnect-preconfig gui` there says so.
 
 It listens on 127.0.0.1 only, on any free port unless `--port` names one, and prints a sign-in link that works once. It reads the same `.env` as the command line (`EC_DOTENV` names another) and writes to `preconfig-output/` and `reports/` in the current folder (`EDGECONNECT_REPORT_DIR` names another log folder), where everything stays after it stops.
 
@@ -177,7 +185,7 @@ Uploads are off until you set `<nickname>_gui_preconfig_uploads=on` in `.env` fo
 
 ## Use it with an AI agent
 
-The command line needs no agent; it runs from `toolkit/`. The skill in `skills/building-edgeconnect-preconfig-templates/` is its `SKILL.md` only and follows the open [Agent Skills](https://agentskills.io) format; it runs the `edgeconnect-preconfig` command, so it needs the toolkit installed. `setup.sh` installs both for the agents you pick; to add the skill to an install that already has the command:
+The command line needs no agent; it runs from `toolkit/`. The skill in `skills/building-edgeconnect-preconfig-templates/` is its `SKILL.md` only and follows the open [Agent Skills](https://agentskills.io) format; it runs the `edgeconnect-preconfig` command, so it needs the toolkit installed. `install.sh` installs both for the agents you pick; to add the skill to an install that already has the command:
 
 ```bash
 npx skills add Crypto-Gi/edgeconnect-preconfig
@@ -194,7 +202,7 @@ Then ask in plain words, for example *"Read appliance `2.NE` from Orchestrator `
 
 ## The EdgeConnect toolkit
 
-Three repositories, one `setup.sh`:
+Three repositories. Each has an `install.sh` that installs it alone, and the same `install-all.sh` that installs any of them:
 
 | Repository | What it does | Agent skill |
 |---|---|---|

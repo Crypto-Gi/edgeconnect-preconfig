@@ -1,4 +1,4 @@
-"""setup.sh's re-run update step (update_clone): a clean clone ends on main, pulled from origin/main; no edit or commit is lost."""
+"""install-all.sh's re-run update step (update_clone): a clean clone ends on main, pulled from origin/main; no edit or commit is lost."""
 import os
 import shutil
 import subprocess
@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-SETUP = Path(__file__).resolve().parents[1] / "setup.sh"
+SETUP = Path(__file__).resolve().parents[1] / "install-all.sh"
 GIT = shutil.which("git")
 
 
@@ -35,7 +35,7 @@ class UpdateClone(unittest.TestCase):
         self.work = work
 
     def update(self):
-        """Run setup.sh's update_clone on root/repo; (exit code, output)."""
+        """Run install-all.sh's update_clone on root/repo; (exit code, output)."""
         body = subprocess.run(["sed", "-n", "/^update_clone()/,/^}/p", str(SETUP)], capture_output=True, text=True, check=True).stdout
         self.assertIn("update_clone()", body)
         script = 'set -euo pipefail\n' + 'die() { printf "error: %s\\n" "$*" >&2; exit 1; }\nROOT="$1"\n' + body + '\nupdate_clone repo\n'
