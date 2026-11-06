@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.1 (2026-11-06)
 
 - **`install.sh` installs this repository only; `setup.sh` is now `install-all.sh`.** `install.sh` runs `install-all.sh` with this repository picked (`--repos 2`) and passes every other option through; it refuses `--repos`. `install-all.sh` is the old `setup.sh`, renamed, the same in all three repositories; it behaves as before, still recognises the commands and the `AGENTS.md` it wrote under its old name, and asks which repositories to install. `setup.sh` stays as a one-line forwarder to `install-all.sh`, so old links and re-runs keep working. Both work from a clone and through `bash <(curl ...)`.
 
