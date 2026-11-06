@@ -6,7 +6,7 @@ This skill follows the open [Agent Skills specification](https://agentskills.io)
 
 ```bash
 # One-command install via npx skills (Claude Code, Codex, Cursor, Windsurf, OpenCode, etc.)
-npx skills add Crypto-Gi/edgeconnect-preconfig
+npx skills add mirwasay/edgeconnect-preconfig
 ```
 
 | Platform | Global Skill Path | Project-Level Skill Path | How to Invoke |

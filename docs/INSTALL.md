@@ -7,19 +7,19 @@ Back to the [README](../README.md).
 macOS and Linux; needs git, Python 3.9 or later with its `venv` module and, for the skills, Node.js 18 or later (without Node.js the skills are skipped with a message; run the script again after installing it). `install.sh` installs this repository only, the `edgeconnect-preconfig` command and its skill:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/mirwasay/edgeconnect-preconfig/main/install.sh)
 ```
 
 To install any of the three EdgeConnect repositories, run `install-all.sh`; it asks which ones:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/install-all.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/mirwasay/edgeconnect-preconfig/main/install-all.sh)
 ```
 
 `install.sh` is `install-all.sh` with this repository already picked, so it skips the first question below. The same `install-all.sh` is in all three repositories, and the old `setup.sh` still works and runs it. `install-all.sh` asks a few questions, then does everything else:
 
 1. **Which repositories**: a table of the three, with what each does and the skill it installs; type numbers separated by commas (for example `1,3`) or `all` (the default).
-2. **The MCP server** (only if you pick 3): run it locally (stdio) for your agents, or in Docker over HTTPS, which you install by hand with the [MCP install guide](https://github.com/Crypto-Gi/edgeconnect-mcp/blob/main/docs/install.md), or not at all.
+2. **The MCP server** (only if you pick 3): run it locally (stdio) for your agents, or in Docker over HTTPS, which you install by hand with the [MCP install guide](https://github.com/mirwasay/edgeconnect-mcp/blob/main/docs/install.md), or not at all.
 3. **Which agents**, once, from a table of 20 (Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, OpenCode, Kilo Code, Kiro CLI, Zed, Windsurf, Cline, Goose, Antigravity, Devin, Roo Code, Continue, Amp, Claude Desktop, and any agent that reads `.agents/skills`; the default is 1, Claude Code). Every picked skill is installed for them, also when it was already installed, and the local MCP server is added to them: through [`add-mcp`](https://www.npmjs.com/package/add-mcp) (without auto-approving tool calls), through `devin mcp add` for Devin, or as a printed config to paste for agents neither covers. Before adding the server it asks to continue, because an existing server named `edgeconnect` in those agents is replaced; with `--yes` it adds the server only when you also pass `--mcp stdio`. It prints each agent's MCP settings file as it goes.
 4. **The install folder** (default: `$EDGECONNECT_HOME` when set, else the folder you run it from, or `~/edgeconnect` from your home folder).
 5. **Where the skills and the MCP server go**, one answer for both: only that folder (the default) or your user account (`~`). Agents that keep MCP servers only for the whole user account (Windsurf, Cline, Goose, Antigravity, Claude Desktop) are asked about one by one when you chose the folder: yes adds the server user-wide for that agent, no skips it. With `--yes` they are skipped, and the last screen lists the command to add each one.
@@ -28,7 +28,7 @@ Everything lands in the one folder, from `main`: the repositories, for 1 and 2 a
 
 **Run either script again to update**, in place. Each picked repository already in the folder ends on `main`, pulled (fast-forward only) from GitHub: a clone on another branch, such as an old `gui` checkout, is switched to `main` (the branch itself is kept). A clone with uncommitted changes to tracked files, or detached on a commit `main` does not have, is left as it is, with a message, so no edit or commit is lost. A local `main` that has diverged from GitHub's stops the run with `could not update main` and is not reset. The Python environment is kept and the requirements are installed again. `.env` keeps its contents once it exists; each run sets its permissions to 600 (owner only). The commands it wrote are refreshed; a command of the same name that it did not write is left alone. The skills are installed again for the agents you pick, which also updates them.
 
-Picking 3 installs the MCP repository's skills (`install-all.sh` installs every skill a picked repository has: `edgeconnect-guide` and, since edgeconnect-mcp v0.3.0, `edgeconnect-report`) and, if you choose local, the stdio MCP server for your agents; a Docker server is installed by hand, as the [edgeconnect-mcp README](https://github.com/Crypto-Gi/edgeconnect-mcp#install) covers.
+Picking 3 installs the MCP repository's skills (`install-all.sh` installs every skill a picked repository has: `edgeconnect-guide` and, since edgeconnect-mcp v0.3.0, `edgeconnect-report`) and, if you choose local, the stdio MCP server for your agents; a Docker server is installed by hand, as the [edgeconnect-mcp README](https://github.com/mirwasay/edgeconnect-mcp#install) covers.
 
 ## Manual install (no `install.sh`)
 
@@ -36,7 +36,7 @@ Picking 3 installs the MCP repository's skills (`install-all.sh` installs every 
 Requires **Python 3.9+** and two packages (`Jinja2` and `PyYAML`; the EdgeConnect Orchestrator REST client is bundled in `toolkit/scripts/common.py` using Python's standard library):
 
 ```bash
-git clone https://github.com/Crypto-Gi/edgeconnect-preconfig.git
+git clone https://github.com/mirwasay/edgeconnect-preconfig.git
 cd edgeconnect-preconfig
 python3 -m venv .venv
 source .venv/bin/activate
@@ -82,7 +82,7 @@ edgeconnect-preconfig gui            # or: edgeconnect-preconfig gui --port 8765
 Without `install.sh`, clone the repository and install the same two packages:
 
 ```bash
-git clone https://github.com/Crypto-Gi/edgeconnect-preconfig.git
+git clone https://github.com/mirwasay/edgeconnect-preconfig.git
 cd edgeconnect-preconfig
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt

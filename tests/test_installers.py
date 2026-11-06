@@ -67,7 +67,7 @@ class Installers(unittest.TestCase):
     def test_install_sh_downloaded_fetches_install_all_from_its_repository(self):
         done, urls = self.downloaded("install.sh", "--yes")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(urls, ["https://raw.githubusercontent.com/Crypto-Gi/{}/main/install-all.sh".format(var("REPO"))])
+        self.assertEqual(urls, ["https://raw.githubusercontent.com/mirwasay/{}/main/install-all.sh".format(var("REPO"))])
         self.assertEqual(self.args(), ["--repos", var("NUMBER"), "--yes"])
 
     def test_setup_sh_forwards_to_install_all_unchanged(self):
@@ -78,7 +78,7 @@ class Installers(unittest.TestCase):
         self.assertEqual(self.args(), ["--repos", "1,3", "--yes"])
         done, urls = self.downloaded("setup.sh", "--yes")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(urls, ["https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/install-all.sh"])
+        self.assertEqual(urls, ["https://raw.githubusercontent.com/mirwasay/edgeconnect-preconfig/main/install-all.sh"])
 
     def test_install_all_sh_still_marks_the_commands_it_wrote_under_its_old_name(self):
         self.assertIn('MARK="# edgeconnect setup.sh"', (ROOT / "install-all.sh").read_text())

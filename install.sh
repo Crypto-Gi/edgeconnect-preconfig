@@ -2,7 +2,7 @@
 # Install or update only this repository, edgeconnect-preconfig, with its agent skill: install-all.sh with --repos fixed.
 # Every other option of install-all.sh passes through (--yes, --agents, --dir, --skills, --mcp).
 #
-#   bash <(curl -fsSL https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/install.sh)
+#   bash <(curl -fsSL https://raw.githubusercontent.com/mirwasay/edgeconnect-preconfig/main/install.sh)
 #
 # Run it again to update. To install several repositories, run install-all.sh instead.
 set -euo pipefail
@@ -19,5 +19,5 @@ if [ -f "$here/install-all.sh" ]; then
 fi
 script="$(mktemp)"
 trap 'rm -f "$script"' EXIT
-curl -fsSL "https://raw.githubusercontent.com/Crypto-Gi/$REPO/main/install-all.sh" -o "$script" || { echo "error: could not download install-all.sh; check your network access to github.com" >&2; exit 1; }
+curl -fsSL "https://raw.githubusercontent.com/mirwasay/$REPO/main/install-all.sh" -o "$script" || { echo "error: could not download install-all.sh; check your network access to github.com" >&2; exit 1; }
 bash "$script" --repos "$NUMBER" "$@"

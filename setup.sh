@@ -9,5 +9,5 @@ if [ -f "$here/install-all.sh" ]; then
 fi
 script="$(mktemp)"
 trap 'rm -f "$script"' EXIT
-curl -fsSL "https://raw.githubusercontent.com/Crypto-Gi/edgeconnect-preconfig/main/install-all.sh" -o "$script" || { echo "error: could not download install-all.sh; check your network access to github.com" >&2; exit 1; }
+curl -fsSL "https://raw.githubusercontent.com/mirwasay/edgeconnect-preconfig/main/install-all.sh" -o "$script" || { echo "error: could not download install-all.sh; check your network access to github.com" >&2; exit 1; }
 bash "$script" "$@"
