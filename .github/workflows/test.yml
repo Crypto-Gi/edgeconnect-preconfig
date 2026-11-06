@@ -25,7 +25,7 @@ jobs:
         env:
           EC_DOTENV: /nonexistent/.env  # no Orchestrator: the tests are offline
   wsl:
-    # Windows users run the toolkit inside WSL (setup.sh is bash). Native Windows Python is not supported:
+    # Windows users run the toolkit inside WSL (install.sh is bash). Native Windows Python is not supported:
     # file modes, path separators and the bash installer assume a POSIX system.
     runs-on: windows-latest
     timeout-minutes: 30

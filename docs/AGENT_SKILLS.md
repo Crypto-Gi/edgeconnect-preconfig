@@ -1,8 +1,8 @@
 # Installing the skill in AI coding agents
 
-Back to the [README](../README.md). `setup.sh` does this for you ([INSTALL.md](INSTALL.md)); this page is for adding the skill to an install that already has the toolkit.
+Back to the [README](../README.md). `install.sh` does this for you ([INSTALL.md](INSTALL.md)); this page is for adding the skill to an install that already has the toolkit.
 
-This skill follows the open [Agent Skills specification](https://agentskills.io). It is `SKILL.md` only: it runs the `edgeconnect-preconfig` command and reads the toolkit's `references/`, so it needs the toolkit installed, either by `setup.sh` or from a clone with `requirements.txt` installed and the command on your PATH ([INSTALL.md](INSTALL.md)). Add the skill to such an install:
+This skill follows the open [Agent Skills specification](https://agentskills.io). It is `SKILL.md` only: it runs the `edgeconnect-preconfig` command and reads the toolkit's `references/`, so it needs the toolkit installed, either by `install.sh` or from a clone with `requirements.txt` installed and the command on your PATH ([INSTALL.md](INSTALL.md)). Add the skill to such an install:
 
 ```bash
 # One-command install via npx skills (Claude Code, Codex, Cursor, Windsurf, OpenCode, etc.)

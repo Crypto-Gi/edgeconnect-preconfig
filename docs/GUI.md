@@ -6,14 +6,14 @@ The GUI does what the command line does, in a browser on this computer. Every bu
 
 ## Start it
 
-With the `edgeconnect-preconfig` command `setup.sh` installs, from any folder (the clone must be on `gui`):
+With the `edgeconnect-preconfig` command `install.sh` installs, from any folder:
 
 ```bash
 edgeconnect-preconfig gui                          # opens your browser
 edgeconnect-preconfig gui --port 8765 --no-browser # a fixed port; only prints the link
 ```
 
-Without `setup.sh`, in the repository's Python environment (the one with `requirements.txt` installed): `python3 -m toolkit.gui` from the repository folder, or `python3 /path/to/edgeconnect-preconfig/toolkit/gui` from any folder, with the same options. In an installed agent skill (a copy of `toolkit/` without `gui/`), `edgeconnect-preconfig gui` stops with `error: the GUI is not in this copy of the toolkit ...` (exit 2).
+Without `install.sh`, in the repository's Python environment (the one with `requirements.txt` installed): `python3 -m toolkit.gui` from the repository folder, or `python3 /path/to/edgeconnect-preconfig/toolkit/gui` from any folder, with the same options. In an installed agent skill (a copy of `toolkit/` without `gui/`), `edgeconnect-preconfig gui` stops with `error: the GUI is not in this copy of the toolkit ...` (exit 2).
 
 - `--port P` listens on that port (default: any free port); `--no-browser` prints the link without opening a browser. There is no option for the address: it is always 127.0.0.1. A GUI session writes no run-log line of its own; each command it runs writes one, as in the terminal.
 - At start it prints the folders it uses, as absolute paths: the `.env`, `preconfig-output/` in the folder you start it from, the work folder (captures) and the run log folder (`off` when `EDGECONNECT_REPORT_DIR` is empty). The `.env` is found as the command line finds it; set `EC_DOTENV=/path/to/.env` to name another. `PRECONFIG_WORK` and `EDGECONNECT_REPORT_DIR` work as for the command line; set them before starting it.
