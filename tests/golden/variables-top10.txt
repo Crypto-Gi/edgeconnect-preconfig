@@ -22,5 +22,5 @@ b75712e030d6edc3  <tmp>/out/h1/site-g10/checks.json
 661e2288c3a9e474  <tmp>/out/h1/site-g10/reference.yaml
 457b990271caa566  <tmp>/out/h1/site-g10/rendered/h1_preconfig.yml
 80a3fcc15ec915b7  <tmp>/out/h1/site-g10/sites.csv
-23a539033c1682f9  <tmp>/out/h1/site-g10/summary.md
+f268551662b25eaf  <tmp>/out/h1/site-g10/summary.md
 68af435437066959  <tmp>/out/h1/site-g10/variables.csv

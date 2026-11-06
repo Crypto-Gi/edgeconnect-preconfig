@@ -1,4 +1,4 @@
-"""install.sh (this repository only), setup.sh (forwarder) and install-all.sh: offline checks with a stub install-all.sh.
+"""install.sh (this repository only) and install-all.sh: offline checks with a stub install-all.sh.
 The same file is in all three repositories."""
 import os
 import re
@@ -70,15 +70,8 @@ class Installers(unittest.TestCase):
         self.assertEqual(urls, ["https://raw.githubusercontent.com/mirwasay/{}/main/install-all.sh".format(var("REPO"))])
         self.assertEqual(self.args(), ["--repos", var("NUMBER"), "--yes"])
 
-    def test_setup_sh_forwards_to_install_all_unchanged(self):
-        folder = self.clone("setup.sh")
-        done = subprocess.run(["bash", str(folder / "setup.sh"), "--repos", "1,3", "--yes"], env=self.env, capture_output=True, text=True)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn("setup.sh is now install-all.sh", done.stdout)
-        self.assertEqual(self.args(), ["--repos", "1,3", "--yes"])
-        done, urls = self.downloaded("setup.sh", "--yes")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(urls, ["https://raw.githubusercontent.com/mirwasay/edgeconnect-preconfig/main/install-all.sh"])
+    def test_setup_sh_is_gone(self):
+        self.assertFalse((ROOT / "setup.sh").exists())  # removed; install.sh and install-all.sh replace it
 
     def test_install_all_sh_still_marks_the_commands_it_wrote_under_its_old_name(self):
         self.assertIn('MARK="# edgeconnect setup.sh"', (ROOT / "install-all.sh").read_text())

@@ -47,7 +47,6 @@ edgeconnect-preconfig/
 ├── requirements.txt                          # Jinja2>=3.1.0, PyYAML>=6.0
 ├── install.sh                                # Installs this repository and its skill (install-all.sh with --repos 2)
 ├── install-all.sh                            # One-step install of any of the three repositories and skills (docs/INSTALL.md); same file in all three
-├── setup.sh                                  # Old name: forwards to install-all.sh
 ├── .env.example                              # Sanitized Orchestrator profile template
 ├── docs/
 │   ├── INSTALL.md                            # install.sh / install-all.sh walkthrough, manual install, .env

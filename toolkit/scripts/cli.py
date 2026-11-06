@@ -59,7 +59,7 @@ class Fail(Exception):
 
 
 def table(header: List[str], rows: List[List[Any]]) -> str:
-    """A bordered table, the setup.sh style."""
+    """A bordered table, the install-all.sh style."""
     widths = [max(len(str(c)) for c in col) for col in zip(header, *rows)]
     line = "+" + "+".join("-" * (w + 2) for w in widths) + "+"
 

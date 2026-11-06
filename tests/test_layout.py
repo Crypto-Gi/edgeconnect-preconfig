@@ -12,7 +12,7 @@ COMMON = ROOT / "toolkit" / "scripts" / "common.py"
 
 class SkillHoldsInstructionsOnly(unittest.TestCase):
     def test_every_skill_folder_holds_only_skill_md(self):
-        # docs/decisions/0021: the code is in toolkit/, installed by setup.sh; a skill is instructions only
+        # docs/decisions/0021: the code is in toolkit/, installed by install.sh; a skill is instructions only
         for skill in sorted((ROOT / "skills").iterdir()):
             if skill.is_dir():
                 files = sorted(str(f.relative_to(skill)) for f in skill.rglob("*") if f.is_file() and "__pycache__" not in f.parts)

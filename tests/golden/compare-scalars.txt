@@ -37,5 +37,5 @@ b8615b391d02397d  <tmp>/out/branch-a/site-scalars/ledger.json
 a26f0bf5a2ecf00a  <tmp>/out/branch-a/site-scalars/scalars.csv
 b06a50c7d1eea678  <tmp>/out/branch-a/site-scalars/scalars.jinja2
 91c983f073ffb67b  <tmp>/out/branch-a/site-scalars/sites.csv
-e0d59cce82ea3822  <tmp>/out/branch-a/site-scalars/summary.md
+6a39b177d1c8d94e  <tmp>/out/branch-a/site-scalars/summary.md
 bea02efc9ba3485a  <tmp>/out/branch-a/site-scalars/variables.csv
