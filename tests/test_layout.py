@@ -10,11 +10,13 @@ ROOT = Path(__file__).resolve().parents[1]
 COMMON = ROOT / "toolkit" / "scripts" / "common.py"
 
 
-class SkillCopy(unittest.TestCase):
-    def test_the_skill_ships_an_exact_copy_of_the_toolkit_and_dist_matches(self):
-        sys.path.insert(0, str(ROOT / "tools"))
-        import build_skill  # noqa: E402  guard-ok: tools/ is put on the path just above
-        self.assertEqual(build_skill.check(), [], "run: python3 tools/build_skill.py")
+class SkillHoldsInstructionsOnly(unittest.TestCase):
+    def test_every_skill_folder_holds_only_skill_md(self):
+        # docs/decisions/0021: the code is in toolkit/, installed by setup.sh; a skill is instructions only
+        for skill in sorted((ROOT / "skills").iterdir()):
+            if skill.is_dir():
+                files = sorted(str(f.relative_to(skill)) for f in skill.rglob("*") if f.is_file() and "__pycache__" not in f.parts)
+                self.assertEqual(files, ["SKILL.md"], skill.name)
 
 
 class WorkFolder(unittest.TestCase):
