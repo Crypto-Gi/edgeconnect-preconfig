@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 (2026-11-06)
 
 - **The skill holds `SKILL.md` only** ([decision 0021](docs/decisions/0021-the-skill-holds-instructions-only.md)): it no longer ships a copy of `toolkit/`, and `dist/*.zip`, `dist/*.skill` and `tools/build_skill.py` are gone. The skill runs the `edgeconnect-preconfig` command and reads the toolkit's `references/`, so it needs the toolkit that `setup.sh` installs (or a clone with `requirements.txt` and the command on the PATH); a skill uploaded on its own, such as to Claude Desktop, no longer runs. No code under `toolkit/` changed.
 - **`setup.sh` re-run puts every clone on `main`** (the same file in all three repositories): a clean clone on another branch, such as `gui`, is switched to `main` (the branch is kept) and pulled fast-forward from GitHub. A clone with uncommitted changes, or detached on a commit `main` does not have, is left alone with a message; a diverged `main` stops the run and is not reset. Both GUIs are on `main` now, so 1.4.0's keep-the-branch rule is no longer needed.
